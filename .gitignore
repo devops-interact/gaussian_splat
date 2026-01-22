@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# Storage
+backend/storage/uploads/*
+backend/storage/frames/*
+backend/storage/models/*
+backend/storage/logs/*
+!backend/storage/uploads/.gitkeep
+!backend/storage/frames/.gitkeep
+!backend/storage/models/.gitkeep
+!backend/storage/logs/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Gaussian Splatting (cloned separately in Docker)
+gaussian-splatting/
