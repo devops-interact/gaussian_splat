@@ -1,1 +1,1 @@
-# gaussian_splatting_room_reconstruction_prd_mvp
+# gaussian_splat
