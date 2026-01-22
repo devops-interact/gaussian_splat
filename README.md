@@ -2,6 +2,8 @@
 
 A browser-based web application that reconstructs 3D models of indoor rooms from single video captures using Gaussian Splatting.
 
+**Repository**: https://github.com/devops-interact/gaussian_splat.git
+
 ## Overview
 
 This MVP validates the hypothesis that a usable 3D reconstruction of an indoor room can be generated from a single video using Gaussian Splatting techniques. The application runs entirely locally with no authentication requirements.
