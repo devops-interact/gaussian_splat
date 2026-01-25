@@ -40,10 +40,14 @@ RUN git submodule update --init --recursive \
       submodules/simple-knn \
       submodules/fused-ssim
 
+# Verify torch is available before building submodules
+RUN python3.10 -c "import torch; print(f'PyTorch {torch.__version__} available, CUDA: {torch.cuda.is_available()}')"
+
 # Build/Install CUDA extensions
-RUN python3.10 -m pip install submodules/diff-gaussian-rasterization \
-    && python3.10 -m pip install submodules/simple-knn \
-    && python3.10 -m pip install submodules/fused-ssim
+# Use --no-build-isolation to ensure torch is available during build
+RUN python3.10 -m pip install --no-build-isolation submodules/diff-gaussian-rasterization \
+    && python3.10 -m pip install --no-build-isolation submodules/simple-knn \
+    && python3.10 -m pip install --no-build-isolation submodules/fused-ssim
 
 # Back to app
 WORKDIR /app
