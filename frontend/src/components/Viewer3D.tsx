@@ -9,7 +9,7 @@ interface Viewer3DProps {
 
 function PLYLoader({ url }: { url: string }) {
   const meshRef = useRef<THREE.Points | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  const [, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
