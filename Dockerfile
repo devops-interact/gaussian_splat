@@ -21,10 +21,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential cmake ninja-build pkg-config \
     ffmpeg colmap \
     libgl1 libglib2.0-0 \
-    # Qt offscreen platform dependencies
+    # Qt offscreen platform dependencies for headless COLMAP
     libxkbcommon0 libxcb-xinerama0 libxcb-cursor0 \
     libqt5gui5 libqt5widgets5 libqt5core5a \
-    qt5-qpa-plugins \
     && rm -rf /var/lib/apt/lists/*
 
 # VERIFY COLMAP IS INSTALLED - basic check first
