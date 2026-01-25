@@ -14,7 +14,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 # System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.10 python3.10-venv python3-pip \
+    python3.10 python3.10-dev python3.10-venv python3-pip \
     git ca-certificates curl \
     build-essential cmake ninja-build pkg-config \
     ffmpeg colmap \
