@@ -2,8 +2,6 @@
 
 A browser-based web application that reconstructs 3D models of indoor rooms from single video captures using Gaussian Splatting.
 
-**Repository**: https://github.com/devops-interact/gaussian_splat.git
-
 ## Overview
 
 This MVP validates the hypothesis that a usable 3D reconstruction of an indoor room can be generated from a single video using Gaussian Splatting techniques. The application runs entirely locally with no authentication requirements.
@@ -156,106 +154,13 @@ gaussian-room-reconstruction/
 - The first run may take longer as dependencies are initialized
 - Ensure sufficient disk space for video files and generated models
 
-### Gaussian Splatting Integration
+### MVP Implementation Notes
 
-**Using Official Library**: The application now uses the official [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting) implementation from INRIA.
+**Gaussian Splatting Training**: The current implementation includes a placeholder for Gaussian Splatting training that creates a simple point cloud for demonstration. For production use, you should integrate an actual Gaussian Splatting implementation such as:
+- [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting) (official implementation)
+- Or a Python-compatible wrapper
 
-**Setup Instructions**:
-
-1. Clone the Gaussian Splatting repository:
-```bash
-cd ..  # Go to parent directory of this project
-git clone https://github.com/graphdeco-inria/gaussian-splatting.git
-cd gaussian-splatting
-git submodule update --init --recursive
-```
-
-2. Install the submodules (requires CUDA):
-```bash
-pip install submodules/diff-gaussian-rasterization
-pip install submodules/simple-knn
-```
-
-3. Install additional dependencies (if needed):
-```bash
-pip install torch torchvision
-```
-
-The application will automatically detect and use the Gaussian Splatting repository if it's located:
-- As a sibling directory: `../gaussian-splatting/`
-- Or in the project root: `./gaussian-splatting/`
-
-If the repository is not found, the application will fall back to a placeholder implementation for testing purposes.
-
-## Docker Deployment for Runpod.io
-
-### Building the Docker Image
-
-The Docker image is configured for **linux/amd64** to run on Runpod's RTX 4090 GPUs:
-
-```bash
-# Build the image
-./build-docker.sh
-
-# Or manually:
-docker buildx build --platform linux/amd64 -t gaussian-room-reconstruction:latest --load .
-```
-
-The Dockerfile includes:
-- NVIDIA CUDA 12.1 base image
-- PyTorch with CUDA 12.1 support
-- Official Gaussian Splatting repository with CUDA extensions compiled
-- COLMAP and FFmpeg
-- All Python dependencies
-
-### Pushing to Registry
-
-Before deploying to Runpod, push the image to a container registry:
-
-```bash
-# Set your registry credentials
-export DOCKER_REGISTRY=docker.io  # or ghcr.io, registry.runpod.io
-export DOCKER_USERNAME=your-username
-export IMAGE_TAG=latest
-
-# Push to registry
-./push-to-runpod.sh
-
-# Or manually:
-docker tag gaussian-room-reconstruction:latest YOUR_REGISTRY/YOUR_USERNAME/gaussian-room-reconstruction:latest
-docker push YOUR_REGISTRY/YOUR_USERNAME/gaussian-room-reconstruction:latest
-```
-
-### Deploying to Runpod.io
-
-1. **Create a Runpod Pod**:
-   - Go to [Runpod.io](https://www.runpod.io/)
-   - Create a new Pod
-   - Select GPU Type: **RTX_4090**
-   - Container Image: `YOUR_REGISTRY/YOUR_USERNAME/gaussian-room-reconstruction:latest`
-   - Container Disk: **50GB** (minimum, recommend 100GB for multiple jobs)
-   - Port: **8000** (Public)
-
-2. **Environment Variables**:
-   - `CUDA_VISIBLE_DEVICES=0`
-   - `PYTHONUNBUFFERED=1`
-   - `GAUSSIAN_SPLATTING_REPO=/opt/gaussian-splatting` (already set in image)
-
-3. **Access the API**:
-   - Once deployed, access at: `https://your-pod-id-8000.proxy.runpod.net`
-   - Health check: `https://your-pod-id-8000.proxy.runpod.net/health`
-
-### Local Testing with Docker
-
-```bash
-# Build and run locally (requires NVIDIA Docker runtime)
-docker-compose up --build
-
-# Or manually:
-docker run --gpus all -p 8000:8000 \
-  -v $(pwd)/backend/storage:/app/storage \
-  gaussian-room-reconstruction:latest
-```
+The pipeline structure is complete and ready for integration with a real Gaussian Splatting implementation. The placeholder ensures the end-to-end flow works for MVP validation.
 
 ## Troubleshooting
 
