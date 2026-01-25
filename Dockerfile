@@ -14,19 +14,24 @@ ENV DEBIAN_FRONTEND=noninteractive \
     QT_QPA_PLATFORM=offscreen
 
 # System deps - COLMAP is installed here via apt
+# Qt offscreen dependencies are CRITICAL for headless COLMAP
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.10 python3.10-dev python3.10-venv python3-pip \
     git ca-certificates curl \
     build-essential cmake ninja-build pkg-config \
     ffmpeg colmap \
     libgl1 libglib2.0-0 \
+    # Qt offscreen platform dependencies
+    libxkbcommon0 libxcb-xinerama0 libxcb-cursor0 \
+    libqt5gui5 libqt5widgets5 libqt5core5a \
+    qt5-qpa-plugins \
     && rm -rf /var/lib/apt/lists/*
 
-# VERIFY COLMAP IS INSTALLED - This will FAIL the build if COLMAP is missing
+# VERIFY COLMAP IS INSTALLED - basic check first
 RUN echo "=== VERIFYING COLMAP INSTALLATION ===" && \
     which colmap && \
-    colmap --help | head -5 && \
-    echo "=== COLMAP VERIFIED OK ==="
+    colmap help | head -5 && \
+    echo "=== COLMAP INSTALLED OK ==="
 
 # Python tooling
 RUN python3.10 -m pip install --upgrade pip setuptools wheel
@@ -80,20 +85,30 @@ ENV GAUSSIAN_SPLATTING_REPO=/opt/gaussian-splatting
 # Storage
 RUN mkdir -p /app/storage/{uploads,frames,models,logs}
 
-# FINAL VERIFICATION - All dependencies
-# Test COLMAP with QT_QPA_PLATFORM=offscreen to ensure headless mode works
+# FINAL VERIFICATION - All dependencies + COLMAP headless test
+# This creates a test image and runs COLMAP feature extraction to verify Qt offscreen works
 RUN echo "=== FINAL VERIFICATION ===" && \
-    echo "Testing COLMAP headless mode..." && \
-    QT_QPA_PLATFORM=offscreen colmap --help | head -3 && \
-    echo "COLMAP headless mode: OK" && \
+    echo "1. Python packages..." && \
     python3.10 -c "import torch; print(f'PyTorch: {torch.__version__}')" && \
     python3.10 -c "import cv2; print(f'OpenCV: {cv2.__version__}')" && \
     python3.10 -c "import numpy; print(f'NumPy: {numpy.__version__}')" && \
     python3.10 -c "import fastapi; print(f'FastAPI: {fastapi.__version__}')" && \
+    python3.10 -c "from PIL import Image; print('Pillow: OK')" && \
+    echo "2. Gaussian Splatting CUDA extensions..." && \
     python3.10 -c "import diff_gaussian_rasterization; print('diff_gaussian_rasterization: OK')" && \
     python3.10 -c "import simple_knn; print('simple_knn: OK')" && \
+    echo "3. Gaussian Splatting scripts..." && \
     ls -la /opt/gaussian-splatting/train.py && \
     ls -la /opt/gaussian-splatting/convert.py && \
+    echo "4. COLMAP headless feature extraction test..." && \
+    mkdir -p /tmp/colmap_test/images && \
+    python3.10 -c "from PIL import Image; img = Image.new('RGB', (640, 480), color='gray'); img.save('/tmp/colmap_test/images/test.jpg')" && \
+    QT_QPA_PLATFORM=offscreen colmap feature_extractor \
+        --database_path /tmp/colmap_test/db.db \
+        --image_path /tmp/colmap_test/images \
+        --SiftExtraction.use_gpu 0 && \
+    rm -rf /tmp/colmap_test && \
+    echo "=== COLMAP HEADLESS MODE: OK ===" && \
     echo "=== ALL VERIFICATIONS PASSED ==="
 
 EXPOSE 8000

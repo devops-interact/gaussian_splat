@@ -21,15 +21,27 @@ async def export_to_ply(
     Returns:
         Path to exported PLY file
     """
-    # Look for existing PLY file in model directory
+    output_ply = model_dir.parent / f"{job_id}.ply"
+    
+    # First check root directory
     ply_files = list(model_dir.glob("*.ply"))
     
+    # If not found, search recursively (Gaussian Splatting outputs to point_cloud/iteration_XXXX/)
+    if not ply_files:
+        ply_files = list(model_dir.rglob("point_cloud.ply"))
+    
+    # Still nothing? Try any PLY file recursively
+    if not ply_files:
+        ply_files = list(model_dir.rglob("*.ply"))
+    
     if ply_files:
-        # Use the first PLY file found
-        source_ply = ply_files[0]
-        output_ply = model_dir.parent / f"{job_id}.ply"
+        # Use the most recent / last iteration's PLY file
+        source_ply = sorted(ply_files)[-1]
+        logger.info(f"Found PLY file: {source_ply}")
         shutil.copy2(source_ply, output_ply)
         logger.info(f"Exported PLY to {output_ply}")
         return output_ply
     else:
+        logger.error(f"No PLY file found in {model_dir}")
+        logger.error(f"Directory contents: {list(model_dir.rglob('*'))}")
         raise FileNotFoundError(f"No PLY file found in {model_dir}")

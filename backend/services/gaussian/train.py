@@ -109,13 +109,18 @@ async def train_gaussian_splatting(
         
         if convert_script.exists():
             # The convert.py script expects -s (source) parameter pointing to scene directory
+            # --skip_matching since we already have COLMAP output
             cmd_convert = [
-                "python3", str(convert_script),
-                "-s", str(scene_dir)
+                "python3.10", str(convert_script),
+                "-s", str(scene_dir),
+                "--skip_matching"  # We already have COLMAP sparse reconstruction
             ]
             
             logger.info(f"Running conversion: {' '.join(cmd_convert)}")
-            await run_command(cmd_convert)
+            try:
+                await run_command(cmd_convert)
+            except Exception as e:
+                logger.warning(f"Conversion script failed (may not be needed): {e}")
         else:
             logger.warning("convert.py not found, using direct COLMAP format")
         
@@ -127,11 +132,10 @@ async def train_gaussian_splatting(
             # Prepare training command
             # Note: Default iterations is 30k, but we'll use the provided iterations
             cmd_train = [
-                "python3", str(train_script),
+                "python3.10", str(train_script),
                 "-s", str(scene_dir),
                 "-m", str(output_dir),
                 "--iterations", str(iterations),
-                "--eval"  # Evaluate during training
             ]
             
             logger.info(f"Running training: {' '.join(cmd_train)}")
