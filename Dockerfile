@@ -5,7 +5,12 @@ FROM --platform=linux/amd64 nvidia/cuda:12.1.1-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    CUDA_HOME=/usr/local/cuda \
+    PATH=/usr/local/cuda/bin:${PATH} \
+    LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH} \
+    TORCH_CUDA_ARCH_LIST="8.9" \
+    FORCE_CUDA="1"
 
 # System deps
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -40,14 +45,16 @@ RUN git submodule update --init --recursive \
       submodules/simple-knn \
       submodules/fused-ssim
 
-# Verify torch is available before building submodules
-RUN python3.10 -c "import torch; print(f'PyTorch {torch.__version__} available, CUDA: {torch.cuda.is_available()}')"
+# Verify torch and CUDA are available before building submodules
+RUN python3.10 -c "import torch; print(f'PyTorch {torch.__version__} available, CUDA: {torch.cuda.is_available()}'); print(f'CUDA_HOME: {torch.utils.cmake_prefix_path}')" && \
+    nvcc --version
 
 # Build/Install CUDA extensions
 # Use --no-build-isolation to ensure torch is available during build
-RUN python3.10 -m pip install --no-build-isolation submodules/diff-gaussian-rasterization \
-    && python3.10 -m pip install --no-build-isolation submodules/simple-knn \
-    && python3.10 -m pip install --no-build-isolation submodules/fused-ssim
+# Set TORCH_CUDA_ARCH_LIST for RTX 4090 (compute capability 8.9)
+RUN TORCH_CUDA_ARCH_LIST="8.9" python3.10 -m pip install --no-build-isolation submodules/diff-gaussian-rasterization \
+    && TORCH_CUDA_ARCH_LIST="8.9" python3.10 -m pip install --no-build-isolation submodules/simple-knn \
+    && TORCH_CUDA_ARCH_LIST="8.9" python3.10 -m pip install --no-build-isolation submodules/fused-ssim
 
 # Back to app
 WORKDIR /app
