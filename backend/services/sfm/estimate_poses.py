@@ -38,7 +38,11 @@ async def estimate_camera_poses(
         ]
         
         logger.info("Running COLMAP feature extraction...")
-        await run_command(cmd_feature)
+        logger.info(f"Command: {' '.join(cmd_feature)}")
+        stdout, stderr = await run_command(cmd_feature)
+        logger.info(f"Feature extraction stdout: {stdout[:500]}")
+        if stderr:
+            logger.warning(f"Feature extraction stderr: {stderr[:500]}")
         
         # Step 2: Feature matching
         cmd_match = [
@@ -72,9 +76,11 @@ async def estimate_camera_poses(
         logger.info(f"Camera poses estimated successfully. Models: {len(sparse_models)}")
         return True
         
-    except FileNotFoundError:
-        logger.error("COLMAP not found. Please install COLMAP and ensure it's in your PATH.")
+    except FileNotFoundError as e:
+        logger.error(f"COLMAP not found: {e}. Please install COLMAP and ensure it's in your PATH.")
         return False
     except Exception as e:
-        logger.error(f"COLMAP pose estimation failed: {e}")
+        logger.error(f"COLMAP pose estimation failed: {e}", exc_info=True)
+        import traceback
+        logger.error(f"Full traceback: {traceback.format_exc()}")
         return False
