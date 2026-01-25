@@ -12,7 +12,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     TORCH_CUDA_ARCH_LIST="8.9" \
     FORCE_CUDA="1"
 
-# System deps
+# System deps - COLMAP is installed here via apt
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.10 python3.10-dev python3.10-venv python3-pip \
     git ca-certificates curl \
@@ -20,6 +20,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg colmap \
     libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
+
+# VERIFY COLMAP IS INSTALLED - This will FAIL the build if COLMAP is missing
+RUN echo "=== VERIFYING COLMAP INSTALLATION ===" && \
+    which colmap && \
+    colmap --help | head -5 && \
+    echo "=== COLMAP VERIFIED OK ==="
 
 # Python tooling
 RUN python3.10 -m pip install --upgrade pip setuptools wheel
@@ -56,6 +62,13 @@ RUN TORCH_CUDA_ARCH_LIST="8.9" python3.10 -m pip install --no-build-isolation su
     && TORCH_CUDA_ARCH_LIST="8.9" python3.10 -m pip install --no-build-isolation submodules/simple-knn \
     && TORCH_CUDA_ARCH_LIST="8.9" python3.10 -m pip install --no-build-isolation submodules/fused-ssim
 
+# VERIFY ALL GAUSSIAN SPLATTING DEPENDENCIES ARE INSTALLED
+RUN echo "=== VERIFYING GAUSSIAN SPLATTING DEPENDENCIES ===" && \
+    python3.10 -c "import diff_gaussian_rasterization; print('diff_gaussian_rasterization OK')" && \
+    python3.10 -c "import simple_knn; print('simple_knn OK')" && \
+    python3.10 -c "import fused_ssim; print('fused_ssim OK')" && \
+    echo "=== GAUSSIAN SPLATTING DEPENDENCIES VERIFIED OK ==="
+
 # Back to app
 WORKDIR /app
 COPY backend/ /app/
@@ -65,6 +78,19 @@ ENV GAUSSIAN_SPLATTING_REPO=/opt/gaussian-splatting
 
 # Storage
 RUN mkdir -p /app/storage/{uploads,frames,models,logs}
+
+# FINAL VERIFICATION - All dependencies
+RUN echo "=== FINAL VERIFICATION ===" && \
+    colmap --help | head -3 && \
+    python3.10 -c "import torch; print(f'PyTorch: {torch.__version__}')" && \
+    python3.10 -c "import cv2; print(f'OpenCV: {cv2.__version__}')" && \
+    python3.10 -c "import numpy; print(f'NumPy: {numpy.__version__}')" && \
+    python3.10 -c "import fastapi; print(f'FastAPI: {fastapi.__version__}')" && \
+    python3.10 -c "import diff_gaussian_rasterization; print('diff_gaussian_rasterization: OK')" && \
+    python3.10 -c "import simple_knn; print('simple_knn: OK')" && \
+    ls -la /opt/gaussian-splatting/train.py && \
+    ls -la /opt/gaussian-splatting/convert.py && \
+    echo "=== ALL VERIFICATIONS PASSED ==="
 
 EXPOSE 8000
 
