@@ -10,7 +10,8 @@ ENV DEBIAN_FRONTEND=noninteractive \
     PATH=/usr/local/cuda/bin:${PATH} \
     LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH} \
     TORCH_CUDA_ARCH_LIST="8.9" \
-    FORCE_CUDA="1"
+    FORCE_CUDA="1" \
+    QT_QPA_PLATFORM=offscreen
 
 # System deps - COLMAP is installed here via apt
 RUN apt-get update && apt-get install -y --no-install-recommends \
