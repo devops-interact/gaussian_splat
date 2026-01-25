@@ -4,16 +4,24 @@ Utility functions for running shell commands
 import asyncio
 import logging
 import subprocess
+import os
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-from typing import Optional, List
+from typing import Optional, List, Dict
+
+# Environment variables to pass to all subprocesses (for headless COLMAP)
+SUBPROCESS_ENV = {
+    **os.environ,
+    "QT_QPA_PLATFORM": "offscreen",  # Required for COLMAP in headless mode
+}
 
 async def run_command(
     cmd: List[str],
     cwd: Optional[Path] = None,
-    timeout: Optional[int] = None
+    timeout: Optional[int] = None,
+    env: Optional[Dict[str, str]] = None
 ) -> tuple:
     """
     Run a shell command asynchronously
@@ -22,6 +30,7 @@ async def run_command(
         cmd: Command and arguments as list
         cwd: Working directory
         timeout: Timeout in seconds
+        env: Environment variables (defaults to SUBPROCESS_ENV with QT_QPA_PLATFORM=offscreen)
     
     Returns:
         Tuple of (stdout, stderr)
@@ -31,12 +40,16 @@ async def run_command(
     """
     logger.debug(f"Running command: {' '.join(cmd)}")
     
+    # Use provided env or default to SUBPROCESS_ENV
+    command_env = env if env is not None else SUBPROCESS_ENV
+    
     try:
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=str(cwd) if cwd else None
+            cwd=str(cwd) if cwd else None,
+            env=command_env
         )
         
         stdout, stderr = await asyncio.wait_for(

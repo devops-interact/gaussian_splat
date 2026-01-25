@@ -32,6 +32,7 @@ async def extract_frames(
     # FFmpeg command to extract frames
     cmd = [
         "ffmpeg",
+        "-y",  # Overwrite without asking
         "-i", str(video_path),
         "-vf", f"fps={fps}",
         "-q:v", "2",  # High quality JPEG

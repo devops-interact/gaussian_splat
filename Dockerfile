@@ -81,8 +81,11 @@ ENV GAUSSIAN_SPLATTING_REPO=/opt/gaussian-splatting
 RUN mkdir -p /app/storage/{uploads,frames,models,logs}
 
 # FINAL VERIFICATION - All dependencies
+# Test COLMAP with QT_QPA_PLATFORM=offscreen to ensure headless mode works
 RUN echo "=== FINAL VERIFICATION ===" && \
-    colmap --help | head -3 && \
+    echo "Testing COLMAP headless mode..." && \
+    QT_QPA_PLATFORM=offscreen colmap --help | head -3 && \
+    echo "COLMAP headless mode: OK" && \
     python3.10 -c "import torch; print(f'PyTorch: {torch.__version__}')" && \
     python3.10 -c "import cv2; print(f'OpenCV: {cv2.__version__}')" && \
     python3.10 -c "import numpy; print(f'NumPy: {numpy.__version__}')" && \
