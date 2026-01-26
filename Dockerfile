@@ -75,13 +75,13 @@ ARG LONGSPLAT_REPO=https://github.com/NVlabs/LongSplat.git
 RUN git clone --recursive ${LONGSPLAT_REPO} /opt/LongSplat
 WORKDIR /opt/LongSplat
 
-# Install LongSplat submodules - use gaussian-splatting CUDA extensions
-# LongSplat has its own versions but we'll use what's already built
-RUN cd submodules && \
-    rm -rf simple-knn diff-gaussian-rasterization && \
-    ln -s /opt/gaussian-splatting/submodules/simple-knn simple-knn && \
-    ln -s /opt/gaussian-splatting/submodules/diff-gaussian-rasterization diff-gaussian-rasterization && \
-    TORCH_CUDA_ARCH_LIST="8.9" python3.10 -m pip install --no-build-isolation fused-ssim
+# Install LongSplat submodules - USE LONGSPLAT'S OWN VERSIONS (not gaussian-splatting)
+# Each repository has its own tested versions - no cross-linking!
+WORKDIR /opt/LongSplat/submodules
+RUN TORCH_CUDA_ARCH_LIST="8.9" python3.10 -m pip install --no-build-isolation ./simple-knn
+RUN TORCH_CUDA_ARCH_LIST="8.9" python3.10 -m pip install --no-build-isolation ./diff-gaussian-rasterization
+RUN TORCH_CUDA_ARCH_LIST="8.9" python3.10 -m pip install --no-build-isolation ./fused-ssim
+WORKDIR /opt/LongSplat
 
 # Install only essential LongSplat dependencies (skip CUDA packages that need torch at build time)
 RUN python3.10 -m pip install \
