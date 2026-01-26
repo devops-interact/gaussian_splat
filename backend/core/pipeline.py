@@ -9,8 +9,7 @@ from core.config import get_settings
 from core.models import Job, JobStatus
 from jobs.job_manager import get_job_manager
 from services.video.extract_frames import extract_frames
-from services.sfm.estimate_poses import estimate_camera_poses
-from services.gaussian.train import train_gaussian_splatting
+from services.longsplat.train import train_longsplat
 from services.export.to_ply import export_to_ply
 from services.export.to_obj import export_to_obj
 
@@ -36,51 +35,38 @@ async def process_job(job: Job) -> Job:
         logger.info(f"Extracting frames from {video_path}")
         frames_dir = await extract_frames(video_path, frames_dir, settings.FRAME_EXTRACTION_FPS)
         
-        job.status = JobStatus.ESTIMATING_POSES
+        job.status = JobStatus.TRAINING
         job.progress = 0.3
         await job_manager.update_job(job)
         
-        # Step 2: Estimate camera poses
-        logger.info(f"Estimating camera poses for job {job.job_id}")
-        colmap_output_dir = settings.FRAMES_DIR / job.job_id / "colmap"
-        poses_success = await estimate_camera_poses(frames_dir, colmap_output_dir)
+        # Step 2: Train LongSplat (handles pose estimation + reconstruction in one step!)
+        logger.info(f"Training LongSplat model for job {job.job_id}")
+        longsplat_output_dir = settings.MODELS_DIR / job.job_id
+        longsplat_output_dir.mkdir(parents=True, exist_ok=True)
         
-        if not poses_success:
-            raise Exception("Failed to estimate camera poses. Ensure COLMAP is installed and video has sufficient features.")
-        
-        job.status = JobStatus.TRAINING
-        job.progress = 0.5
-        await job_manager.update_job(job)
-        
-        # Step 3: Train Gaussian Splatting
-        logger.info(f"Training Gaussian Splatting model for job {job.job_id}")
-        gaussian_output_dir = settings.MODELS_DIR / job.job_id
-        gaussian_output_dir.mkdir(parents=True, exist_ok=True)
-        
-        training_success = await train_gaussian_splatting(
+        training_success = await train_longsplat(
             frames_dir, 
-            colmap_output_dir, 
-            gaussian_output_dir,
-            iterations=settings.GAUSSIAN_ITERATIONS
+            longsplat_output_dir,
+            iterations=settings.LONGSPLAT_ITERATIONS
         )
         
         if not training_success:
-            raise Exception("Gaussian Splatting training failed. Check logs for details.")
+            raise Exception("LongSplat training failed. Check logs for details.")
         
         job.status = JobStatus.EXPORTING
         job.progress = 0.9
         await job_manager.update_job(job)
         
-        # Step 4: Export to PLY
+        # Step 3: Export to PLY (LongSplat already generates PLY, just copy it)
         logger.info(f"Exporting model to PLY for job {job.job_id}")
-        ply_path = await export_to_ply(gaussian_output_dir, job.job_id)
+        ply_path = await export_to_ply(longsplat_output_dir, job.job_id)
         
         if not ply_path:
             raise Exception("Failed to export PLY file")
         
-        # Step 5: Optionally export to OBJ
+        # Step 4: Optionally export to OBJ (experimental)
         try:
-            obj_path = await export_to_obj(ply_path, gaussian_output_dir / f"{job.job_id}.obj")
+            obj_path = await export_to_obj(ply_path, longsplat_output_dir / f"{job.job_id}.obj")
             logger.info(f"Exported OBJ to {obj_path}")
         except Exception as e:
             logger.warning(f"OBJ export failed (optional): {e}")

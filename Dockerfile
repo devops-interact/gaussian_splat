@@ -13,24 +13,14 @@ ENV DEBIAN_FRONTEND=noninteractive \
     FORCE_CUDA="1" \
     QT_QPA_PLATFORM=offscreen
 
-# System deps - COLMAP is installed here via apt
-# Qt offscreen dependencies are CRITICAL for headless COLMAP
+# System deps - LongSplat doesn't need COLMAP (uses MASt3R internally)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.10 python3.10-dev python3.10-venv python3-pip \
     git ca-certificates curl \
     build-essential cmake ninja-build pkg-config \
-    ffmpeg colmap \
+    ffmpeg \
     libgl1 libglib2.0-0 \
-    # Qt offscreen platform dependencies for headless COLMAP
-    libxkbcommon0 libxcb-xinerama0 libxcb-cursor0 \
-    libqt5gui5 libqt5widgets5 libqt5core5a \
     && rm -rf /var/lib/apt/lists/*
-
-# VERIFY COLMAP IS INSTALLED - basic check first
-RUN echo "=== VERIFYING COLMAP INSTALLATION ===" && \
-    which colmap && \
-    colmap help | head -5 && \
-    echo "=== COLMAP INSTALLED OK ==="
 
 # Python tooling
 RUN python3.10 -m pip install --upgrade pip setuptools wheel
@@ -39,6 +29,12 @@ RUN python3.10 -m pip install --upgrade pip setuptools wheel
 RUN python3.10 -m pip install \
     torch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0 \
     --index-url https://download.pytorch.org/whl/cu121
+
+# Install PyTorch extensions for LongSplat (torch_scatter, torch_cluster)
+# These need to be installed AFTER PyTorch with matching CUDA version
+RUN python3.10 -m pip install \
+    torch-scatter torch-cluster \
+    -f https://data.pyg.org/whl/torch-2.2.0+cu121.html
 
 # App deps
 WORKDIR /app
@@ -74,45 +70,106 @@ RUN echo "=== VERIFYING GAUSSIAN SPLATTING DEPENDENCIES ===" && \
     python3.10 -c "import fused_ssim; print('fused_ssim OK')" && \
     echo "=== GAUSSIAN SPLATTING DEPENDENCIES VERIFIED OK ==="
 
+# Clone LongSplat for unposed 3D reconstruction from casual long videos
+ARG LONGSPLAT_REPO=https://github.com/NVlabs/LongSplat.git
+RUN git clone --recursive ${LONGSPLAT_REPO} /opt/LongSplat
+WORKDIR /opt/LongSplat
+
+# Install LongSplat submodules - use gaussian-splatting CUDA extensions
+# LongSplat has its own versions but we'll use what's already built
+RUN cd submodules && \
+    rm -rf simple-knn diff-gaussian-rasterization && \
+    ln -s /opt/gaussian-splatting/submodules/simple-knn simple-knn && \
+    ln -s /opt/gaussian-splatting/submodules/diff-gaussian-rasterization diff-gaussian-rasterization && \
+    TORCH_CUDA_ARCH_LIST="8.9" python3.10 -m pip install --no-build-isolation fused-ssim
+
+# Install only essential LongSplat dependencies (skip CUDA packages that need torch at build time)
+RUN python3.10 -m pip install \
+    roma \
+    einops \
+    trimesh \
+    opencv-python \
+    h5py \
+    croco \
+    matplotlib \
+    scipy \
+    plyfile \
+    huggingface_hub \
+    jaxtyping
+
+# Compile RoPE CUDA kernels for MASt3R (optional but recommended for speed)
+# MASt3R is used internally by LongSplat for pose estimation
+RUN cd submodules/mast3r/dust3r/croco/models/curope/ && \
+    python3.10 setup.py build_ext --inplace 2>/dev/null || echo "RoPE CUDA kernels skipped (optional, will fallback to CPU)"
+
+# VERIFY LONGSPLAT DEPENDENCIES
+RUN echo "=== VERIFYING LONGSPLAT DEPENDENCIES ===" && \
+    python3.10 -c "import torch; print(f'PyTorch: OK')" && \
+    python3.10 -c "import torchvision; print(f'Torchvision: OK')" && \
+    python3.10 -c "import torch_scatter; print(f'torch_scatter: OK')" && \
+    python3.10 -c "import torch_cluster; print(f'torch_cluster: OK')" && \
+    python3.10 -c "import jaxtyping; print(f'jaxtyping: OK')" && \
+    python3.10 -c "import roma; print(f'roma: OK')" && \
+    python3.10 -c "import einops; print(f'einops: OK')" && \
+    ls -la /opt/LongSplat/train.py && \
+    ls -la /opt/LongSplat/convert_3dgs.py && \
+    echo "=== LONGSPLAT INSTALLATION VERIFIED OK ==="
+
 # Back to app
 WORKDIR /app
 COPY backend/ /app/
 
-# Tell backend where gaussian-splatting lives
+# Tell backend where repositories live
 ENV GAUSSIAN_SPLATTING_REPO=/opt/gaussian-splatting
+ENV LONGSPLAT_REPO=/opt/LongSplat
 
 # Storage
 RUN mkdir -p /app/storage/{uploads,frames,models,logs}
 
-# FINAL VERIFICATION - All dependencies + COLMAP headless test
-# This creates a test image and runs COLMAP feature extraction to verify Qt offscreen works
-RUN echo "=== FINAL VERIFICATION ===" && \
-    echo "1. Python packages..." && \
-    python3.10 -c "import torch; print(f'PyTorch: {torch.__version__}')" && \
-    python3.10 -c "import cv2; print(f'OpenCV: {cv2.__version__}')" && \
-    python3.10 -c "import numpy; print(f'NumPy: {numpy.__version__}')" && \
-    python3.10 -c "import fastapi; print(f'FastAPI: {fastapi.__version__}')" && \
-    python3.10 -c "from PIL import Image; print('Pillow: OK')" && \
+# COMPREHENSIVE FINAL VERIFICATION - All dependencies
+RUN echo "=== COMPREHENSIVE DEPENDENCY VERIFICATION ===" && \
+    echo "1. Core Python packages..." && \
+    python3.10 -c "import torch; print(f'✓ PyTorch: {torch.__version__}')" && \
+    python3.10 -c "import torchvision; print(f'✓ Torchvision: {torchvision.__version__}')" && \
+    python3.10 -c "import cv2; print(f'✓ OpenCV: {cv2.__version__}')" && \
+    python3.10 -c "import numpy; print(f'✓ NumPy: {numpy.__version__}')" && \
+    python3.10 -c "import fastapi; print(f'✓ FastAPI: {fastapi.__version__}')" && \
+    python3.10 -c "from PIL import Image; print('✓ Pillow: OK')" && \
     echo "2. Gaussian Splatting CUDA extensions..." && \
-    python3.10 -c "import diff_gaussian_rasterization; print('diff_gaussian_rasterization: OK')" && \
-    python3.10 -c "import simple_knn; print('simple_knn: OK')" && \
-    echo "3. Gaussian Splatting scripts..." && \
-    ls -la /opt/gaussian-splatting/train.py && \
-    ls -la /opt/gaussian-splatting/convert.py && \
-    echo "4. COLMAP headless feature extraction test..." && \
-    mkdir -p /tmp/colmap_test/images && \
-    python3.10 -c "from PIL import Image; img = Image.new('RGB', (640, 480), color='gray'); img.save('/tmp/colmap_test/images/test.jpg')" && \
-    QT_QPA_PLATFORM=offscreen colmap feature_extractor \
-        --database_path /tmp/colmap_test/db.db \
-        --image_path /tmp/colmap_test/images \
-        --SiftExtraction.use_gpu 0 && \
-    rm -rf /tmp/colmap_test && \
-    echo "=== COLMAP HEADLESS MODE: OK ===" && \
-    echo "=== ALL VERIFICATIONS PASSED ==="
+    python3.10 -c "import diff_gaussian_rasterization; print('✓ diff_gaussian_rasterization: OK')" && \
+    python3.10 -c "import simple_knn; print('✓ simple_knn: OK')" && \
+    python3.10 -c "import fused_ssim; print('✓ fused_ssim: OK')" && \
+    echo "3. PyTorch Geometric extensions..." && \
+    python3.10 -c "import torch_scatter; print('✓ torch_scatter: OK')" && \
+    python3.10 -c "import torch_cluster; print('✓ torch_cluster: OK')" && \
+    echo "4. LongSplat Python dependencies..." && \
+    python3.10 -c "import jaxtyping; print('✓ jaxtyping: OK')" && \
+    python3.10 -c "import roma; print('✓ roma: OK')" && \
+    python3.10 -c "import einops; print('✓ einops: OK')" && \
+    python3.10 -c "import trimesh; print('✓ trimesh: OK')" && \
+    python3.10 -c "import h5py; print('✓ h5py: OK')" && \
+    python3.10 -c "import matplotlib; print('✓ matplotlib: OK')" && \
+    python3.10 -c "import scipy; print('✓ scipy: OK')" && \
+    python3.10 -c "import plyfile; print('✓ plyfile: OK')" && \
+    python3.10 -c "from huggingface_hub import HfApi; print('✓ huggingface_hub: OK')" && \
+    echo "5. Backend API dependencies..." && \
+    python3.10 -c "import aiofiles; print('✓ aiofiles: OK')" && \
+    python3.10 -c "import uvicorn; print('✓ uvicorn: OK')" && \
+    echo "6. LongSplat scripts and structure..." && \
+    ls -la /opt/LongSplat/train.py && \
+    ls -la /opt/LongSplat/convert_3dgs.py && \
+    ls -la /opt/LongSplat/submodules/mast3r/ && \
+    echo "7. CUDA availability..." && \
+    python3.10 -c "import torch; print(f'✓ CUDA available: {torch.cuda.is_available()}'); print(f'✓ CUDA version: {torch.version.cuda}'); print(f'✓ Device count: {torch.cuda.device_count()}')" && \
+    echo "=== ✅ ALL DEPENDENCIES VERIFIED ===" && \
+    echo "=== ✅ SYSTEM READY FOR DEPLOYMENT ==="
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
   CMD curl -fsS http://localhost:8000/health || exit 1
+
+# Set PYTHONPATH to include both LongSplat and gaussian-splatting
+ENV PYTHONPATH=/opt/LongSplat:/opt/gaussian-splatting:${PYTHONPATH}
 
 CMD ["python3.10", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

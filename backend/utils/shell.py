@@ -11,10 +11,10 @@ logger = logging.getLogger(__name__)
 
 from typing import Optional, List, Dict
 
-# Environment variables to pass to all subprocesses (for headless COLMAP)
+# Environment variables to pass to all subprocesses
 SUBPROCESS_ENV = {
     **os.environ,
-    "QT_QPA_PLATFORM": "offscreen",  # Required for COLMAP in headless mode
+    "QT_QPA_PLATFORM": "offscreen",  # Headless rendering mode
 }
 
 async def run_command(
@@ -62,7 +62,10 @@ async def run_command(
         
         if process.returncode != 0:
             logger.error(f"Command failed with return code {process.returncode}")
-            logger.error(f"stderr: {stderr_str}")
+            logger.error(f"Command: {' '.join(str(c) for c in cmd)}")
+            logger.error(f"Working directory: {cwd}")
+            logger.error(f"STDOUT:\n{stdout_str}")
+            logger.error(f"STDERR:\n{stderr_str}")
             raise subprocess.CalledProcessError(
                 process.returncode,
                 cmd,

@@ -10,8 +10,7 @@ from pydantic import BaseModel
 class JobStatus(str, Enum):
     UPLOADED = "uploaded"
     EXTRACTING_FRAMES = "extracting_frames"
-    ESTIMATING_POSES = "estimating_poses"
-    TRAINING = "training"
+    TRAINING = "training"  # LongSplat handles pose estimation + training together
     EXPORTING = "exporting"
     COMPLETED = "completed"
     ERROR = "error"

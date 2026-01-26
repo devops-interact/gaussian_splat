@@ -17,8 +17,8 @@ class Settings(BaseSettings):
     
     # Processing settings
     FRAME_EXTRACTION_FPS: float = 2.0  # Extract 2 frames per second
-    COLMAP_QUALITY: str = "medium"  # low, medium, high
-    GAUSSIAN_ITERATIONS: int = 30000  # Training iterations
+    LONGSPLAT_ITERATIONS: int = 30000  # LongSplat training iterations
+    LONGSPLAT_RESOLUTION: int = 1  # Resolution scale (1, 2, 4, or 8)
     
     # API settings
     MAX_UPLOAD_SIZE: int = 500 * 1024 * 1024  # 500MB

@@ -1,17 +1,30 @@
+# FastAPI Backend
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 pydantic==2.5.0
 pydantic-settings==2.1.0
+
+# Async & Utils
 aiofiles==23.2.1
 python-dotenv==1.0.0
+
+# Core Dependencies
 numpy==1.24.3
 opencv-python==4.8.1.78
 pillow==10.1.0
+tqdm==4.66.1
+joblib==1.3.2
+
+# 3D Processing
 plyfile==0.7.4
 trimesh==3.23.5
+scipy==1.10.1
 
-# Note: For full Gaussian Splatting support, also install:
-# - Clone https://github.com/graphdeco-inria/gaussian-splatting.git
-# - Install submodules: pip install submodules/diff-gaussian-rasterization submodules/simple-knn
-# - PyTorch with CUDA support (if using GPU)
+# Note: LongSplat dependencies installed in Dockerfile:
+# - PyTorch 2.2.0 with CUDA 12.1
+# - torchvision, torchaudio
+# - torch-scatter, torch-cluster (PyTorch Geometric extensions)
+# - roma, einops, h5py, jaxtyping, huggingface_hub
+# - LongSplat repo with all submodules
+# - diff-gaussian-rasterization, simple-knn, fused-ssim
