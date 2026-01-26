@@ -36,6 +36,12 @@ RUN python3.10 -m pip install \
     torch-scatter torch-cluster \
     -f https://data.pyg.org/whl/torch-2.2.0+cu121.html
 
+# Install PyTorch3D (required by LongSplat for camera handling)
+# Use pre-built wheel for PyTorch 2.2.0 + CUDA 12.1 + Python 3.10
+RUN python3.10 -m pip install \
+    pytorch3d \
+    -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu121_pyt220/download.html
+
 # App deps
 WORKDIR /app
 COPY backend/requirements.txt /app/requirements.txt
@@ -108,6 +114,7 @@ RUN echo "=== VERIFYING LONGSPLAT DEPENDENCIES ===" && \
     python3.10 -c "import torchvision; print(f'Torchvision: OK')" && \
     python3.10 -c "import torch_scatter; print(f'torch_scatter: OK')" && \
     python3.10 -c "import torch_cluster; print(f'torch_cluster: OK')" && \
+    python3.10 -c "import pytorch3d; print(f'pytorch3d: OK')" && \
     python3.10 -c "import jaxtyping; print(f'jaxtyping: OK')" && \
     python3.10 -c "import roma; print(f'roma: OK')" && \
     python3.10 -c "import einops; print(f'einops: OK')" && \
@@ -142,6 +149,7 @@ RUN echo "=== COMPREHENSIVE DEPENDENCY VERIFICATION ===" && \
     echo "3. PyTorch Geometric extensions..." && \
     python3.10 -c "import torch_scatter; print('✓ torch_scatter: OK')" && \
     python3.10 -c "import torch_cluster; print('✓ torch_cluster: OK')" && \
+    python3.10 -c "import pytorch3d; print('✓ pytorch3d: OK')" && \
     echo "4. LongSplat Python dependencies..." && \
     python3.10 -c "import jaxtyping; print('✓ jaxtyping: OK')" && \
     python3.10 -c "import roma; print('✓ roma: OK')" && \
