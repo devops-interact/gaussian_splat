@@ -10,8 +10,7 @@ interface JobStatusProps {
 const STATUS_LABELS: Record<JobStatusEnum, string> = {
   [JobStatusEnum.UPLOADED]: 'Video uploaded',
   [JobStatusEnum.EXTRACTING_FRAMES]: 'Extracting frames',
-  [JobStatusEnum.ESTIMATING_POSES]: 'Estimating camera poses',
-  [JobStatusEnum.TRAINING]: 'Training Gaussian Splatting model',
+  [JobStatusEnum.TRAINING]: 'Training LongSplat (pose estimation + 3D reconstruction)',
   [JobStatusEnum.EXPORTING]: 'Exporting model',
   [JobStatusEnum.COMPLETED]: 'Completed',
   [JobStatusEnum.ERROR]: 'Error',

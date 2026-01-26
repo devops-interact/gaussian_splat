@@ -189,9 +189,9 @@ vercel --prod
 | `GET` | `/health` | Health check |
 | `POST` | `/api/jobs/upload` | Upload video (multipart/form-data) |
 | `GET` | `/api/jobs/{job_id}/status` | Job status & progress |
-| `GET` | `/api/jobs` | List all jobs |
-| `GET` | `/static/models/{job_id}.ply` | Download PLY model |
-| `GET` | `/static/models/{job_id}.obj` | Download OBJ (if available) |
+| `GET` | `/api/jobs/{job_id}/model` | Download PLY model |
+| `GET` | `/api/jobs/{job_id}/preview` | Get preview URL |
+| `GET` | `/static/models/{job_id}.ply` | Direct PLY file access |
 
 ### Job Status Response
 
@@ -209,7 +209,7 @@ vercel --prod
 ```
 
 **Status Values:**
-- `pending` → `extracting_frames` → `training` → `exporting` → `completed`
+- `uploaded` → `extracting_frames` → `training` → `exporting` → `completed`
 - `error` (if failure occurs)
 
 ---
