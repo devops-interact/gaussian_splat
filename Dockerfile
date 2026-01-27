@@ -25,22 +25,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Python tooling
 RUN python3.10 -m pip install --upgrade pip setuptools wheel
 
-# PyTorch CUDA (cu121)
+# PyTorch CUDA (cu121) - Use 2.1.0 for pytorch3d wheel compatibility
 RUN python3.10 -m pip install \
-    torch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0 \
+    torch==2.1.0 torchvision==0.16.0 torchaudio==2.1.0 \
     --index-url https://download.pytorch.org/whl/cu121
 
 # Install PyTorch extensions for LongSplat (torch_scatter, torch_cluster)
 # These need to be installed AFTER PyTorch with matching CUDA version
 RUN python3.10 -m pip install \
     torch-scatter torch-cluster \
-    -f https://data.pyg.org/whl/torch-2.2.0+cu121.html
+    -f https://data.pyg.org/whl/torch-2.1.0+cu121.html
 
 # Install PyTorch3D (required by LongSplat for camera handling)
-# Build from source with --no-build-isolation so it can find torch
-# Also install fvcore and iopath which are pytorch3d dependencies
+# Use pre-built wheel for PyTorch 2.1.0 + CUDA 12.1 (avoids memory-intensive compilation)
 RUN python3.10 -m pip install fvcore iopath && \
-    python3.10 -m pip install --no-build-isolation "git+https://github.com/facebookresearch/pytorch3d.git@stable"
+    python3.10 -m pip install pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu121_pyt210/download.html
 
 # App deps
 WORKDIR /app
