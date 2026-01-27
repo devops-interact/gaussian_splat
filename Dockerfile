@@ -37,10 +37,8 @@ RUN python3.10 -m pip install \
     -f https://data.pyg.org/whl/torch-2.2.0+cu121.html
 
 # Install PyTorch3D (required by LongSplat for camera handling)
-# Use pre-built wheel for PyTorch 2.2.0 + CUDA 12.1 + Python 3.10
-RUN python3.10 -m pip install \
-    pytorch3d \
-    -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py310_cu121_pyt220/download.html
+# Build from source - takes longer but works with any PyTorch/CUDA combo
+RUN python3.10 -m pip install "git+https://github.com/facebookresearch/pytorch3d.git@stable"
 
 # App deps
 WORKDIR /app
