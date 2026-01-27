@@ -37,8 +37,10 @@ RUN python3.10 -m pip install \
     -f https://data.pyg.org/whl/torch-2.2.0+cu121.html
 
 # Install PyTorch3D (required by LongSplat for camera handling)
-# Build from source - takes longer but works with any PyTorch/CUDA combo
-RUN python3.10 -m pip install "git+https://github.com/facebookresearch/pytorch3d.git@stable"
+# Build from source with --no-build-isolation so it can find torch
+# Also install fvcore and iopath which are pytorch3d dependencies
+RUN python3.10 -m pip install fvcore iopath && \
+    python3.10 -m pip install --no-build-isolation "git+https://github.com/facebookresearch/pytorch3d.git@stable"
 
 # App deps
 WORKDIR /app
