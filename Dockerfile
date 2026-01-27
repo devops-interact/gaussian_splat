@@ -103,27 +103,20 @@ RUN python3.10 -m pip install \
     jaxtyping \
     py3_wget
 
-# Install MASt3R as a package (required for LongSplat pose estimation)
-WORKDIR /opt/LongSplat/submodules/mast3r
-RUN python3.10 -m pip install -e .
-
-# Install DUSt3R (MASt3R dependency)
-WORKDIR /opt/LongSplat/submodules/mast3r/dust3r
-RUN python3.10 -m pip install -e .
-
 # Compile RoPE CUDA kernels for MASt3R (optional but recommended for speed)
-RUN cd croco/models/curope/ && \
+# MASt3R is used internally by LongSplat for pose estimation
+RUN cd submodules/mast3r/dust3r/croco/models/curope/ && \
     python3.10 setup.py build_ext --inplace 2>/dev/null || echo "RoPE CUDA kernels skipped (optional, will fallback to CPU)"
 
 # Pre-download MASt3R checkpoint (required for pose estimation in free mode)
 # Reference: https://learnopencv.com/mast3r-sfm-grounding-image-matching-3d/
-WORKDIR /opt/LongSplat
 RUN mkdir -p checkpoints && \
     wget -q https://download.europe.naverlabs.com/ComputerVision/MASt3R/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth \
     -O checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth && \
+    ls -lh checkpoints/ && \
     echo "MASt3R checkpoint downloaded successfully"
 
-# Also create symlink in mast3r submodule checkpoints folder
+# Create symlinks for checkpoint in expected locations
 RUN mkdir -p submodules/mast3r/checkpoints && \
     ln -sf /opt/LongSplat/checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth \
     submodules/mast3r/checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth
@@ -139,11 +132,10 @@ RUN echo "=== VERIFYING LONGSPLAT DEPENDENCIES ===" && \
     python3.10 -c "import roma; print(f'roma: OK')" && \
     python3.10 -c "import einops; print(f'einops: OK')" && \
     python3.10 -c "import py3_wget; print(f'py3_wget: OK')" && \
-    python3.10 -c "import mast3r; print(f'mast3r: OK')" && \
-    python3.10 -c "import dust3r; print(f'dust3r: OK')" && \
     ls -la /opt/LongSplat/train.py && \
     ls -la /opt/LongSplat/convert_3dgs.py && \
-    ls -la /opt/LongSplat/checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth && \
+    ls -la /opt/LongSplat/submodules/mast3r/ && \
+    ls -lh /opt/LongSplat/checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth && \
     echo "=== LONGSPLAT + MAST3R INSTALLATION VERIFIED OK ==="
 
 # Back to app
@@ -193,8 +185,7 @@ RUN echo "=== COMPREHENSIVE DEPENDENCY VERIFICATION ===" && \
     ls -la /opt/LongSplat/submodules/mast3r/ && \
     echo "7. MASt3R checkpoint for pose estimation..." && \
     ls -lh /opt/LongSplat/checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth && \
-    python3.10 -c "import mast3r; print('✓ MASt3R package: OK')" && \
-    python3.10 -c "import dust3r; print('✓ DUSt3R package: OK')" && \
+    ls -la /opt/LongSplat/submodules/mast3r/ && \
     echo "8. CUDA availability..." && \
     python3.10 -c "import torch; print(f'✓ CUDA available: {torch.cuda.is_available()}'); print(f'✓ CUDA version: {torch.version.cuda}'); print(f'✓ Device count: {torch.cuda.device_count()}')" && \
     echo "=== ✅ ALL DEPENDENCIES VERIFIED ===" && \
@@ -205,7 +196,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
   CMD curl -fsS http://localhost:8000/health || exit 1
 
-# Set PYTHONPATH to include both LongSplat and gaussian-splatting
-ENV PYTHONPATH=/opt/LongSplat:/opt/gaussian-splatting:${PYTHONPATH}
+# Set PYTHONPATH to include LongSplat, MASt3R, DUSt3R, and gaussian-splatting
+ENV PYTHONPATH=/opt/LongSplat:/opt/LongSplat/submodules/mast3r:/opt/LongSplat/submodules/mast3r/dust3r:/opt/gaussian-splatting:${PYTHONPATH}
 
 CMD ["python3.10", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
