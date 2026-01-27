@@ -111,8 +111,8 @@ RUN cd submodules/mast3r/dust3r/croco/models/curope/ && \
 # Pre-download MASt3R checkpoint (required for pose estimation in free mode)
 # Reference: https://learnopencv.com/mast3r-sfm-grounding-image-matching-3d/
 RUN mkdir -p checkpoints && \
-    wget -q https://download.europe.naverlabs.com/ComputerVision/MASt3R/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth \
-    -O checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth && \
+    curl -fsSL -o checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth \
+    https://download.europe.naverlabs.com/ComputerVision/MASt3R/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth && \
     ls -lh checkpoints/ && \
     echo "MASt3R checkpoint downloaded successfully"
 
