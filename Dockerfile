@@ -100,7 +100,8 @@ RUN python3.10 -m pip install \
     scipy \
     plyfile \
     huggingface_hub \
-    jaxtyping
+    jaxtyping \
+    py3_wget
 
 # Compile RoPE CUDA kernels for MASt3R (optional but recommended for speed)
 # MASt3R is used internally by LongSplat for pose estimation
@@ -117,6 +118,7 @@ RUN echo "=== VERIFYING LONGSPLAT DEPENDENCIES ===" && \
     python3.10 -c "import jaxtyping; print(f'jaxtyping: OK')" && \
     python3.10 -c "import roma; print(f'roma: OK')" && \
     python3.10 -c "import einops; print(f'einops: OK')" && \
+    python3.10 -c "import py3_wget; print(f'py3_wget: OK')" && \
     ls -la /opt/LongSplat/train.py && \
     ls -la /opt/LongSplat/convert_3dgs.py && \
     echo "=== LONGSPLAT INSTALLATION VERIFIED OK ==="
