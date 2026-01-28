@@ -88,7 +88,7 @@ async def train_longsplat(
             "-m", str(output_dir),
             "--iterations", str(iterations),
             "--resolution", str(resolution),
-            "--mode", "free",  # Use MASt3R for pose estimation (no COLMAP needed)
+            "--mode", "custom",  # Custom mode works without COLMAP, uses MASt3R for pose estimation
             "--eval"  # Enable evaluation
         ]
         
