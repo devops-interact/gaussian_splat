@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     
     # Processing settings
     FRAME_EXTRACTION_FPS: float = 2.0  # Extract 2 frames per second
-    LONGSPLAT_ITERATIONS: int = 30000  # LongSplat training iterations
+    LONGSPLAT_ITERATIONS: int = 7000  # LongSplat training iterations (reduced for faster processing)
     LONGSPLAT_RESOLUTION: int = 1  # Resolution scale (1, 2, 4, or 8)
     
     # API settings
