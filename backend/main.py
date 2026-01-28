@@ -4,12 +4,15 @@ FastAPI entrypoint for Gaussian Splatting Room Reconstruction MVP
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 import os
 import logging
 from pathlib import Path
+from typing import List
 
 from api.jobs import router as jobs_router
-from core.config import get_settings
+from core.config import get_settings, QUALITY_PRESETS, QualityPreset
+from core.models import PresetInfo
 from core.logging_config import setup_logging
 
 # Setup logging
@@ -40,13 +43,47 @@ models_path.mkdir(parents=True, exist_ok=True)
 
 app.mount("/static/models", StaticFiles(directory=str(models_path)), name="models")
 
+
 @app.get("/")
 async def root():
-    return {"message": "Gaussian Splatting Room Reconstruction API", "version": "0.1.0"}
+    return {"message": "Gaussian Splatting Room Reconstruction API", "version": "0.2.0"}
+
 
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
+
+@app.get("/api/presets", response_model=List[PresetInfo], tags=["presets"])
+async def get_presets():
+    """Get available quality presets"""
+    return [
+        PresetInfo(
+            id=preset.value,
+            name=config.name,
+            description=config.description,
+            estimated_minutes=config.estimated_minutes
+        )
+        for preset, config in QUALITY_PRESETS.items()
+    ]
+
+
+@app.get("/api/presets/{preset_id}", response_model=PresetInfo, tags=["presets"])
+async def get_preset(preset_id: str):
+    """Get details for a specific preset"""
+    try:
+        preset = QualityPreset(preset_id)
+        config = QUALITY_PRESETS[preset]
+        return PresetInfo(
+            id=preset.value,
+            name=config.name,
+            description=config.description,
+            estimated_minutes=config.estimated_minutes
+        )
+    except ValueError:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"Preset '{preset_id}' not found")
+
 
 if __name__ == "__main__":
     import uvicorn

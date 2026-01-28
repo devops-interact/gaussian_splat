@@ -6,8 +6,8 @@ import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict
-from core.models import Job, JobStatus
-from core.config import get_settings
+from core.models import Job, JobStatus, VideoValidation
+from core.config import get_settings, QualityPreset
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -30,6 +30,18 @@ class JobManager:
                         job_data['status'] = JobStatus(job_data['status'])
                         job_data['created_at'] = datetime.fromisoformat(job_data['created_at'])
                         job_data['updated_at'] = datetime.fromisoformat(job_data['updated_at'])
+                        
+                        # Handle quality_preset
+                        if 'quality_preset' in job_data and job_data['quality_preset']:
+                            try:
+                                job_data['quality_preset'] = QualityPreset(job_data['quality_preset'])
+                            except ValueError:
+                                job_data['quality_preset'] = QualityPreset.BALANCED
+                        
+                        # Handle validation
+                        if 'validation' in job_data and job_data['validation']:
+                            job_data['validation'] = VideoValidation(**job_data['validation'])
+                        
                         self.jobs[job_id] = Job(**job_data)
             except Exception as e:
                 logger.warning(f"Failed to load jobs: {e}")
