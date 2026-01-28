@@ -3,6 +3,7 @@ Train LongSplat model for unposed 3D reconstruction from video frames
 https://github.com/NVlabs/LongSplat
 """
 import asyncio
+import hashlib
 import logging
 import os
 import shutil
@@ -82,6 +83,11 @@ async def train_longsplat(
             logger.error(f"LongSplat train.py not found at {train_script}")
             return False
         
+        # Generate unique port based on output directory hash to avoid conflicts
+        # Use port range 6010-65000 (6009 is default)
+        port_hash = int(hashlib.md5(str(output_dir).encode()).hexdigest()[:8], 16)
+        unique_port = 6010 + (port_hash % 59000)  # Range: 6010-65009
+        
         cmd = [
             "/usr/bin/python3.10", str(train_script),
             "-s", str(scene_dir),
@@ -89,6 +95,7 @@ async def train_longsplat(
             "--iterations", str(iterations),
             "--resolution", str(resolution),
             "--mode", "custom",  # Custom mode works without COLMAP, uses MASt3R for pose estimation
+            "--port", str(unique_port),  # Use unique port to avoid "Address already in use" errors
             "--eval"  # Enable evaluation
         ]
         
