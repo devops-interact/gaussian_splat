@@ -66,15 +66,27 @@ async def train_longsplat(
             logger.error("Failed to setup LongSplat repository")
             return False
         
-        # Prepare the scene directory structure
-        scene_dir = frames_dir.parent / "longsplat_scene"
+        # Prepare the scene directory structure - USE UNIQUE DIRECTORY PER JOB
+        # Extract job_id from output_dir (e.g., /app/storage/models/job_id -> job_id)
+        job_id = output_dir.name
+        scene_dir = frames_dir.parent / f"longsplat_scene_{job_id}"
         images_dir = scene_dir / "images"
+        
+        # Clean up any existing scene directory for this job (ensure fresh start)
+        if scene_dir.exists():
+            logger.info(f"Cleaning up existing scene directory: {scene_dir}")
+            shutil.rmtree(scene_dir)
+        
         images_dir.mkdir(parents=True, exist_ok=True)
         
         # Copy frames to images directory
         logger.info(f"Copying frames to {images_dir}")
+        frame_count = 0
         for frame_path in sorted(frames_dir.glob("*.png")) + sorted(frames_dir.glob("*.jpg")):
             shutil.copy2(frame_path, images_dir / frame_path.name)
+            frame_count += 1
+        
+        logger.info(f"Copied {frame_count} frames to scene directory")
         
         # Training command
         train_script = LONGSPLAT_REPO / "train.py"
@@ -100,6 +112,7 @@ async def train_longsplat(
         ]
         
         logger.info(f"Running LongSplat training: {' '.join(cmd)}")
+        logger.info(f"Using unique port {unique_port} for network GUI (avoids conflicts)")
         logger.info(f"Working directory: {LONGSPLAT_REPO}")
         logger.info(f"Scene directory contents: {list(scene_dir.iterdir())}")
         logger.info(f"Images directory contents: {list(images_dir.iterdir())[:5]}...")  # First 5 files
@@ -151,13 +164,36 @@ async def train_longsplat(
         shutil.copy2(point_cloud, final_ply)
         
         logger.info(f"LongSplat training completed successfully. Model saved to {final_ply}")
+        
+        # Clean up scene directory to free disk space
+        try:
+            if scene_dir.exists():
+                shutil.rmtree(scene_dir)
+                logger.info(f"Cleaned up scene directory: {scene_dir}")
+        except Exception as cleanup_error:
+            logger.warning(f"Failed to clean up scene directory: {cleanup_error}")
+        
         return True
         
     except asyncio.TimeoutError:
         logger.error(f"LongSplat training timed out after {timeout_seconds} seconds")
+        # Still try to clean up on timeout
+        try:
+            scene_dir = frames_dir.parent / f"longsplat_scene_{output_dir.name}"
+            if scene_dir.exists():
+                shutil.rmtree(scene_dir)
+        except:
+            pass
         return False
     except Exception as e:
         logger.error(f"LongSplat training failed: {e}", exc_info=True)
+        # Still try to clean up on error
+        try:
+            scene_dir = frames_dir.parent / f"longsplat_scene_{output_dir.name}"
+            if scene_dir.exists():
+                shutil.rmtree(scene_dir)
+        except:
+            pass
         return False
 
 
