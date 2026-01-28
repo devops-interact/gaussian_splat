@@ -108,7 +108,9 @@ async def train_longsplat(
             "--resolution", str(resolution),
             "--mode", "custom",  # Custom mode works without COLMAP, uses MASt3R for pose estimation
             "--port", str(unique_port),  # Use unique port to avoid "Address already in use" errors
-            "--eval"  # Enable evaluation
+            "--quiet",  # Reduce logging overhead for speed
+            "--init_frame_num", "2",  # Fewer initial frames for faster startup
+            "--window_size", "3",  # Smaller window for faster local optimization
         ]
         
         logger.info(f"Running LongSplat training: {' '.join(cmd)}")
