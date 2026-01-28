@@ -78,6 +78,10 @@ export default function VideoUpload({ onUploadSuccess, disabled }: VideoUploadPr
       
       onUploadSuccess(result.job_id);
     } catch (err: any) {
+      console.error('Upload error:', err);
+      console.error('Response:', err.response);
+      console.error('Request:', err.request);
+      
       // Handle validation errors
       const detail = err.response?.data?.detail;
       if (typeof detail === 'object' && detail.errors) {
@@ -85,8 +89,14 @@ export default function VideoUpload({ onUploadSuccess, disabled }: VideoUploadPr
         if (detail.warnings) {
           setWarnings(detail.warnings);
         }
+      } else if (err.code === 'ERR_NETWORK') {
+        setError('Network error: Cannot connect to server. Check if the backend is running.');
+      } else if (err.response?.status === 413) {
+        setError('File too large. Maximum size is 500MB.');
+      } else if (err.response?.status >= 500) {
+        setError(`Server error (${err.response?.status}): ${detail || 'Please check backend logs.'}`);
       } else {
-        setError(detail || 'Upload failed. Please try again.');
+        setError(detail || err.message || 'Upload failed. Please try again.');
       }
     } finally {
       setUploading(false);
@@ -116,10 +126,10 @@ export default function VideoUpload({ onUploadSuccess, disabled }: VideoUploadPr
               disabled={disabled || uploading}
               style={{
                 padding: '0.75rem 1rem',
-                border: selectedPreset === preset.id ? '2px solid #646cff' : '2px solid #444',
+                border: selectedPreset === preset.id ? '2px solid #66b3ff' : '2px solid #444',
                 borderRadius: '8px',
-                background: selectedPreset === preset.id ? 'rgba(100, 108, 255, 0.1)' : 'transparent',
-                color: selectedPreset === preset.id ? '#646cff' : '#fff',
+                background: selectedPreset === preset.id ? 'rgba(102, 179, 255, 0.1)' : 'transparent',
+                color: selectedPreset === preset.id ? '#66b3ff' : '#fff',
                 cursor: disabled || uploading ? 'not-allowed' : 'pointer',
                 opacity: disabled || uploading ? 0.5 : 1,
                 transition: 'all 0.2s',
