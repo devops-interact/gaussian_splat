@@ -112,7 +112,7 @@ if [ ${PIPESTATUS[0]} -eq 0 ]; then
     echo -e "  │ Container Image    │ ${FULL_IMAGE}              │"
     echo -e "  │ GPU Type           │ RTX 4090 (24GB VRAM)                         │"
     echo -e "  │ Container Disk     │ 20 GB                                        │"
-    echo -e "  │ Volume Disk        │ 50 GB                                        │"
+    echo -e "  │ Volume Disk        │ 150 GB (frames + 3D models)                  │"
     echo -e "  │ Volume Mount Path  │ /app/storage                                 │"
     echo -e "  │ Expose HTTP Ports  │ 8000                                         │"
     echo -e "  │ Expose TCP Ports   │ 22                                           │"
