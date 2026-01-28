@@ -100,6 +100,10 @@ async def train_longsplat(
         port_hash = int(hashlib.md5(str(output_dir).encode()).hexdigest()[:8], 16)
         unique_port = 6010 + (port_hash % 59000)  # Range: 6010-65009
         
+        # Calculate optimal init_frame_num based on total frames (use ~20% of frames, min 10)
+        total_frames = frame_count
+        init_frames = max(10, min(total_frames // 5, 30))  # 10-30 frames for initialization
+        
         cmd = [
             "/usr/bin/python3.10", str(train_script),
             "-s", str(scene_dir),
@@ -109,9 +113,13 @@ async def train_longsplat(
             "--mode", "custom",  # Custom mode works without COLMAP, uses MASt3R for pose estimation
             "--port", str(unique_port),  # Use unique port to avoid "Address already in use" errors
             "--quiet",  # Reduce logging overhead for speed
-            "--init_frame_num", "2",  # Fewer initial frames for faster startup
-            "--window_size", "3",  # Smaller window for faster local optimization
+            "--init_frame_num", str(init_frames),  # More frames = denser initial point cloud
+            "--window_size", "5",  # Default window for good coverage
+            "--post_iter", str(iterations),  # Use our iterations for post-refinement (main phase)
+            "--init_iteraion", "1000",  # Faster initial optimization (typo is in LongSplat code)
         ]
+        
+        logger.info(f"Using {init_frames} initial frames (out of {total_frames} total)")
         
         logger.info(f"Running LongSplat training: {' '.join(cmd)}")
         logger.info(f"Using unique port {unique_port} for network GUI (avoids conflicts)")

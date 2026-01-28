@@ -15,10 +15,10 @@ class Settings(BaseSettings):
     MODELS_DIR: Path = STORAGE_DIR / "models"
     LOGS_DIR: Path = STORAGE_DIR / "logs"
     
-    # Processing settings - OPTIMIZED FOR SPEED
-    FRAME_EXTRACTION_FPS: float = 1.0  # Extract 1 frame per second (halves frame count)
-    LONGSPLAT_ITERATIONS: int = 3000  # Fast training (3000 iterations ~3-5 min)
-    LONGSPLAT_RESOLUTION: int = 2  # Half resolution (2x faster rendering)
+    # Processing settings - BALANCED QUALITY/SPEED
+    FRAME_EXTRACTION_FPS: float = 2.0  # 2 frames per second for good coverage
+    LONGSPLAT_ITERATIONS: int = 5000  # Post-refinement iterations (main training phase)
+    LONGSPLAT_RESOLUTION: int = 1  # Full resolution for quality
     
     # API settings
     MAX_UPLOAD_SIZE: int = 500 * 1024 * 1024  # 500MB
