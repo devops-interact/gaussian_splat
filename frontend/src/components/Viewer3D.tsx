@@ -10,15 +10,16 @@ interface Viewer3DProps {
 // Spherical Harmonics constant for converting to RGB
 const SH_C0 = 0.28209479177387814;
 
-function PointCloud({ url, pointSize }: { url: string; pointSize: number }) {
+// Default point size for dense point clouds
+const DEFAULT_POINT_SIZE = 0.005;
+
+function PointCloud({ url }: { url: string }) {
   const meshRef = useRef<THREE.Points | null>(null);
-  const [, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!url) return;
 
-    setLoading(true);
     setError(null);
 
     // Fetch as binary
@@ -34,13 +35,28 @@ function PointCloud({ url, pointSize }: { url: string; pointSize: number }) {
             const geometry = new THREE.BufferGeometry();
             geometry.setAttribute('position', new THREE.Float32BufferAttribute(result.positions, 3));
             geometry.setAttribute('color', new THREE.Float32BufferAttribute(result.colors, 3));
+            
+            // Compute bounding box to get center
+            geometry.computeBoundingBox();
+            const boundingBox = geometry.boundingBox;
+            
+            if (boundingBox) {
+              // Calculate center
+              const center = new THREE.Vector3();
+              boundingBox.getCenter(center);
+              
+              // Translate geometry so center is at origin (0,0,0)
+              geometry.translate(-center.x, -center.y, -center.z);
+              
+              // Move model up so bottom is at Y=0
+              const minY = boundingBox.min.y - center.y;
+              geometry.translate(0, -minY, 0);
+            }
+            
             geometry.computeBoundingSphere();
 
-            // Auto-center the model
-            geometry.center();
-
             const material = new THREE.PointsMaterial({
-              size: pointSize,
+              size: DEFAULT_POINT_SIZE,
               vertexColors: true,
               sizeAttenuation: true,
             });
@@ -53,19 +69,16 @@ function PointCloud({ url, pointSize }: { url: string; pointSize: number }) {
             meshRef.current.geometry = geometry;
             meshRef.current.material = material;
           }
-          setLoading(false);
         } catch (err: any) {
           console.error('PLY parse error:', err);
           setError(err.message || 'Failed to parse PLY');
-          setLoading(false);
         }
       })
       .catch(err => {
         console.error('Fetch error:', err);
         setError('Failed to load model: ' + err.message);
-        setLoading(false);
       });
-  }, [url, pointSize]);
+  }, [url]);
 
   if (error) {
     return (
@@ -79,10 +92,12 @@ function PointCloud({ url, pointSize }: { url: string; pointSize: number }) {
   }
 
   return (
-    <points ref={meshRef}>
-      <bufferGeometry />
-      <pointsMaterial size={pointSize} vertexColors sizeAttenuation />
-    </points>
+    <>
+      <points ref={meshRef}>
+        <bufferGeometry />
+        <pointsMaterial size={DEFAULT_POINT_SIZE} vertexColors sizeAttenuation />
+      </points>
+    </>
   );
 }
 
@@ -123,7 +138,7 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
   let vertexCount = 0;
   let isBinary = false;
   let isLittleEndian = true;
-  const properties: string[] = [];
+  const properties: { name: string; type: string }[] = [];
 
   for (const line of headerLines) {
     if (line.startsWith('format binary_little_endian')) {
@@ -138,7 +153,8 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
       vertexCount = parseInt(line.split(/\s+/)[2]);
     } else if (line.startsWith('property')) {
       const parts = line.split(/\s+/);
-      properties.push(parts[parts.length - 1]);
+      // property <type> <name>
+      properties.push({ type: parts[1], name: parts[2] });
     }
   }
 
@@ -146,57 +162,99 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
     throw new Error('No vertices in PLY file');
   }
 
-  console.log(`PLY: ${vertexCount} vertices, binary=${isBinary}, properties:`, properties.slice(0, 10));
+  const propNames = properties.map(p => p.name);
+  console.log(`PLY: ${vertexCount} vertices, binary=${isBinary}, properties:`, propNames.slice(0, 15));
 
   const positions: number[] = [];
   const colors: number[] = [];
+
+  // Find property indices
+  const xIdx = propNames.indexOf('x');
+  const yIdx = propNames.indexOf('y');
+  const zIdx = propNames.indexOf('z');
+  const f_dc_0_idx = propNames.indexOf('f_dc_0');
+  const f_dc_1_idx = propNames.indexOf('f_dc_1');
+  const f_dc_2_idx = propNames.indexOf('f_dc_2');
+  const redIdx = propNames.indexOf('red');
+  const greenIdx = propNames.indexOf('green');
+  const blueIdx = propNames.indexOf('blue');
+  const opacityIdx = propNames.indexOf('opacity');
 
   if (isBinary) {
     // Binary PLY parsing for Gaussian Splatting format
     const dataView = new DataView(buffer, headerEnd);
     
-    // Find property indices
-    const xIdx = properties.indexOf('x');
-    const yIdx = properties.indexOf('y');
-    const zIdx = properties.indexOf('z');
-    const f_dc_0_idx = properties.indexOf('f_dc_0');
-    const f_dc_1_idx = properties.indexOf('f_dc_1');
-    const f_dc_2_idx = properties.indexOf('f_dc_2');
-    const redIdx = properties.indexOf('red');
-    const greenIdx = properties.indexOf('green');
-    const blueIdx = properties.indexOf('blue');
+    // Calculate byte offset for each property (assuming all floats for GS format)
+    const propOffsets: number[] = [];
+    let currentOffset = 0;
+    for (const prop of properties) {
+      propOffsets.push(currentOffset);
+      // GS format uses floats for everything
+      if (prop.type === 'float' || prop.type === 'float32') {
+        currentOffset += 4;
+      } else if (prop.type === 'double' || prop.type === 'float64') {
+        currentOffset += 8;
+      } else if (prop.type === 'uchar' || prop.type === 'uint8') {
+        currentOffset += 1;
+      } else if (prop.type === 'int' || prop.type === 'int32') {
+        currentOffset += 4;
+      } else {
+        currentOffset += 4; // Default to float
+      }
+    }
+    const bytesPerVertex = currentOffset;
     
-    // Calculate bytes per vertex (all floats in GS format)
-    const bytesPerVertex = properties.length * 4;
+    console.log(`Bytes per vertex: ${bytesPerVertex}, property offsets:`, propOffsets.slice(0, 10));
     
     for (let i = 0; i < vertexCount; i++) {
-      const offset = i * bytesPerVertex;
+      const vertexOffset = i * bytesPerVertex;
       
       // Position
-      const x = dataView.getFloat32(offset + xIdx * 4, isLittleEndian);
-      const y = dataView.getFloat32(offset + yIdx * 4, isLittleEndian);
-      const z = dataView.getFloat32(offset + zIdx * 4, isLittleEndian);
+      const x = dataView.getFloat32(vertexOffset + propOffsets[xIdx], isLittleEndian);
+      const y = dataView.getFloat32(vertexOffset + propOffsets[yIdx], isLittleEndian);
+      const z = dataView.getFloat32(vertexOffset + propOffsets[zIdx], isLittleEndian);
+      
+      // Skip invalid positions
+      if (!isFinite(x) || !isFinite(y) || !isFinite(z)) continue;
+      
+      // Check opacity if available (skip very transparent points)
+      if (opacityIdx !== -1) {
+        const opacity = dataView.getFloat32(vertexOffset + propOffsets[opacityIdx], isLittleEndian);
+        // Sigmoid activation for opacity
+        const alpha = 1 / (1 + Math.exp(-opacity));
+        if (alpha < 0.1) continue; // Skip nearly invisible points
+      }
+      
       positions.push(x, y, z);
       
       // Color from spherical harmonics (f_dc_0, f_dc_1, f_dc_2)
       if (f_dc_0_idx !== -1) {
-        const f_dc_0 = dataView.getFloat32(offset + f_dc_0_idx * 4, isLittleEndian);
-        const f_dc_1 = dataView.getFloat32(offset + f_dc_1_idx * 4, isLittleEndian);
-        const f_dc_2 = dataView.getFloat32(offset + f_dc_2_idx * 4, isLittleEndian);
+        const f_dc_0 = dataView.getFloat32(vertexOffset + propOffsets[f_dc_0_idx], isLittleEndian);
+        const f_dc_1 = dataView.getFloat32(vertexOffset + propOffsets[f_dc_1_idx], isLittleEndian);
+        const f_dc_2 = dataView.getFloat32(vertexOffset + propOffsets[f_dc_2_idx], isLittleEndian);
         
-        // Convert SH to RGB: color = SH_C0 * f_dc + 0.5
+        // Convert SH DC to RGB: color = SH_C0 * f_dc + 0.5
         const r = Math.max(0, Math.min(1, SH_C0 * f_dc_0 + 0.5));
         const g = Math.max(0, Math.min(1, SH_C0 * f_dc_1 + 0.5));
         const b = Math.max(0, Math.min(1, SH_C0 * f_dc_2 + 0.5));
         colors.push(r, g, b);
       } else if (redIdx !== -1) {
-        // Standard RGB colors (0-255)
-        const r = dataView.getUint8(offset + redIdx) / 255;
-        const g = dataView.getUint8(offset + greenIdx) / 255;
-        const b = dataView.getUint8(offset + blueIdx) / 255;
-        colors.push(r, g, b);
+        // Standard RGB colors
+        const propType = properties[redIdx].type;
+        if (propType === 'uchar' || propType === 'uint8') {
+          const r = dataView.getUint8(vertexOffset + propOffsets[redIdx]) / 255;
+          const g = dataView.getUint8(vertexOffset + propOffsets[greenIdx]) / 255;
+          const b = dataView.getUint8(vertexOffset + propOffsets[blueIdx]) / 255;
+          colors.push(r, g, b);
+        } else {
+          const r = dataView.getFloat32(vertexOffset + propOffsets[redIdx], isLittleEndian);
+          const g = dataView.getFloat32(vertexOffset + propOffsets[greenIdx], isLittleEndian);
+          const b = dataView.getFloat32(vertexOffset + propOffsets[blueIdx], isLittleEndian);
+          colors.push(Math.max(0, Math.min(1, r)), Math.max(0, Math.min(1, g)), Math.max(0, Math.min(1, b)));
+        }
       } else {
-        colors.push(0.5, 0.5, 0.5);
+        // Default gray
+        colors.push(0.6, 0.6, 0.6);
       }
     }
   } else {
@@ -204,18 +262,16 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
     const dataText = decoder.decode(bytes.slice(headerEnd));
     const dataLines = dataText.split('\n').filter(l => l.trim());
     
-    const xIdx = properties.indexOf('x');
-    const yIdx = properties.indexOf('y');
-    const zIdx = properties.indexOf('z');
-    const f_dc_0_idx = properties.indexOf('f_dc_0');
-    const f_dc_1_idx = properties.indexOf('f_dc_1');
-    const f_dc_2_idx = properties.indexOf('f_dc_2');
-    const redIdx = properties.indexOf('red');
-    
     for (let i = 0; i < Math.min(vertexCount, dataLines.length); i++) {
       const parts = dataLines[i].trim().split(/\s+/).map(parseFloat);
       
-      positions.push(parts[xIdx], parts[yIdx], parts[zIdx]);
+      const x = parts[xIdx];
+      const y = parts[yIdx];
+      const z = parts[zIdx];
+      
+      if (!isFinite(x) || !isFinite(y) || !isFinite(z)) continue;
+      
+      positions.push(x, y, z);
       
       if (f_dc_0_idx !== -1) {
         const r = Math.max(0, Math.min(1, SH_C0 * parts[f_dc_0_idx] + 0.5));
@@ -223,20 +279,18 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
         const b = Math.max(0, Math.min(1, SH_C0 * parts[f_dc_2_idx] + 0.5));
         colors.push(r, g, b);
       } else if (redIdx !== -1) {
-        colors.push(parts[redIdx] / 255, parts[redIdx + 1] / 255, parts[redIdx + 2] / 255);
+        colors.push(parts[redIdx] / 255, parts[greenIdx] / 255, parts[blueIdx] / 255);
       } else {
-        colors.push(0.5, 0.5, 0.5);
+        colors.push(0.6, 0.6, 0.6);
       }
     }
   }
 
-  console.log(`Parsed ${positions.length / 3} points`);
-  return { positions, colors, vertexCount };
+  console.log(`Parsed ${positions.length / 3} visible points (filtered from ${vertexCount})`);
+  return { positions, colors, vertexCount: positions.length / 3 };
 }
 
 export default function Viewer3D({ modelUrl }: Viewer3DProps) {
-  const [pointSize, setPointSize] = useState(0.02);
-
   if (!modelUrl) {
     return (
       <div className="viewer-section">
@@ -256,34 +310,19 @@ export default function Viewer3D({ modelUrl }: Viewer3DProps) {
   return (
     <div className="viewer-section">
       <h2>3D Preview</h2>
-      <div style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-        <label style={{ fontSize: '0.85rem', color: '#888' }}>
-          Point Size: 
-          <input
-            type="range"
-            min="0.001"
-            max="0.1"
-            step="0.001"
-            value={pointSize}
-            onChange={(e) => setPointSize(parseFloat(e.target.value))}
-            style={{ marginLeft: '0.5rem', width: '100px' }}
-          />
-          {pointSize.toFixed(3)}
-        </label>
-      </div>
       <div className="viewer-container">
-        <Canvas camera={{ position: [2, 2, 2], fov: 60 }}>
-          <ambientLight intensity={0.8} />
-          <pointLight position={[10, 10, 10]} intensity={0.5} />
-          <PointCloud url={fullUrl} pointSize={pointSize} />
+        <Canvas camera={{ position: [3, 3, 3], fov: 50 }}>
+          <ambientLight intensity={1.0} />
+          <PointCloud url={fullUrl} />
           <OrbitControls 
             enableDamping 
             dampingFactor={0.05} 
             rotateSpeed={0.5}
             zoomSpeed={0.8}
+            target={[0, 0, 0]}
           />
-          <gridHelper args={[10, 10, '#444444', '#333333']} />
-          <axesHelper args={[2]} />
+          <gridHelper args={[10, 10, '#444444', '#333333']} position={[0, 0, 0]} />
+          <axesHelper args={[1]} />
         </Canvas>
       </div>
     </div>

@@ -1,384 +1,293 @@
-# 🏠 Gaussian Splatting Room Reconstruction with LongSplat
+# Gaussian Splatting Room Reconstruction
 
-A production-ready web application that converts casual video footage of rooms into interactive 3D models using **LongSplat** - NVIDIA's state-of-the-art technology for unposed 3D reconstruction from long videos.
-
-[![LongSplat](https://img.shields.io/badge/LongSplat-ICCV%202025-blue)](https://linjohnss.github.io/longsplat/)
-[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker)](https://hub.docker.com/)
-[![CUDA](https://img.shields.io/badge/CUDA-12.1-76B900?logo=nvidia)](https://developer.nvidia.com/cuda-toolkit)
+A production web application that converts video footage of rooms into interactive 3D point cloud models using **LongSplat** - NVIDIA's state-of-the-art technology for unposed 3D Gaussian Splatting reconstruction.
 
 ---
 
-## 🌟 Features
+## Architecture Overview
 
-- **📹 No Pose Estimation Needed!** - LongSplat uses MASt3R internally (COLMAP-free!)
-- **🎥 Casual Video Support** - Just record a video walking around your room
-- **🤖 Fully Automated Pipeline** - Upload → Process → View 3D Model
-- **📊 Real-time Progress** - Live status updates with detailed logging
-- **🎮 Interactive 3D Viewer** - Rotate, zoom, and explore your reconstructed space
-- **💾 Multiple Formats** - Export as PLY (primary) and OBJ (optional)
-- **🐳 Production Ready** - Full Docker containerization for GPU cloud deployment
-- **⚡ GPU Optimized** - Built for NVIDIA RTX 4090 with CUDA 12.1
-
----
-
-## 🛠️ Tech Stack
-
-### Frontend
-- **React 18** + **TypeScript** - Modern UI framework
-- **Vite** - Lightning-fast build tool
-- **Three.js** - WebGL 3D visualization
-
-### Backend
-- **Python 3.10** - Core runtime
-- **FastAPI** - High-performance async API
-- **PyTorch 2.2.0** - Deep learning (CUDA 12.1)
-- **LongSplat** - NVIDIA's unposed 3D reconstruction
-  - **MASt3R** - Automatic pose estimation
-  - **Gaussian Splatting** - Neural 3D representation
-- **FFmpeg** - Video processing
-
-### Infrastructure
-- **Docker** - Containerization
-- **RunPod** - GPU cloud (RTX 4090)
-- **Vercel** - Frontend hosting
-
----
-
-## 📋 Prerequisites
-
-### For Docker Deployment (Recommended ✅)
-- **Docker Desktop** with BuildX
-- **RunPod Account** (or similar GPU cloud)
-- **NVIDIA RTX 3090/4090** (24GB VRAM recommended)
-
-### For Local Development (Advanced)
-- **Python 3.10+**
-- **Node.js 18+**
-- **FFmpeg**
-- **NVIDIA GPU** (24GB+ VRAM)
-- **CUDA 12.1** drivers
-
-> ⚠️ **Note:** LongSplat requires significant GPU resources. Cloud deployment recommended.
-
----
-
-## 🚀 Quick Start
-
-### 1️⃣ Clone Repository
-
-```bash
-git clone https://github.com/yourusername/gaussian-room-reconstruction.git
-cd gaussian-room-reconstruction
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              FRONTEND (Vercel)                               │
+│  ┌─────────────┐  ┌──────────────┐  ┌─────────────┐  ┌──────────────────┐  │
+│  │ VideoUpload │  │  JobStatus   │  │  Viewer3D   │  │  Quality Presets │  │
+│  │ - Presets   │  │  - Progress  │  │  - PLY Load │  │  - Fast/Balanced │  │
+│  │ - Validate  │  │  - Errors    │  │  - SH→RGB   │  │  - Quality       │  │
+│  └──────┬──────┘  └──────┬───────┘  └──────┬──────┘  └────────┬─────────┘  │
+│         │                │                 │                   │            │
+│         └────────────────┴─────────────────┴───────────────────┘            │
+│                                    │                                         │
+│                            VITE_API_BASE_URL                                 │
+└────────────────────────────────────┼─────────────────────────────────────────┘
+                                     │ HTTPS
+┌────────────────────────────────────┼─────────────────────────────────────────┐
+│                          BACKEND (RunPod GPU)                                │
+│                                    │                                         │
+│  ┌─────────────────────────────────▼─────────────────────────────────────┐  │
+│  │                         FastAPI Server (:8000)                         │  │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────────────┐   │  │
+│  │  │ /api/jobs/*  │  │ /api/presets │  │ /static/models/*.ply      │   │  │
+│  │  │ Upload/Status│  │ Quality Info │  │ Generated 3D Models        │   │  │
+│  │  └──────┬───────┘  └──────────────┘  └────────────────────────────┘   │  │
+│  └─────────┼─────────────────────────────────────────────────────────────┘  │
+│            │                                                                 │
+│  ┌─────────▼─────────────────────────────────────────────────────────────┐  │
+│  │                        Processing Pipeline                             │  │
+│  │                                                                        │  │
+│  │  ┌──────────────┐   ┌───────────────────────┐   ┌──────────────────┐  │  │
+│  │  │ 1. Validate  │   │ 2. Extract Frames     │   │ 3. LongSplat     │  │  │
+│  │  │ - Duration   │──▶│ - FFmpeg @ preset FPS │──▶│ - MASt3R Poses   │  │  │
+│  │  │ - Resolution │   │ - JPG output          │   │ - 3DGS Training  │  │  │
+│  │  │ - Format     │   └───────────────────────┘   │ - Point Cloud    │  │  │
+│  │  └──────────────┘                               └────────┬─────────┘  │  │
+│  │                                                          │            │  │
+│  │  ┌──────────────┐   ┌───────────────────────┐           │            │  │
+│  │  │ 5. Complete  │   │ 4. Export & Compress  │◀──────────┘            │  │
+│  │  │ - model.ply  │◀──│ - PLY (31MB→25MB)     │                        │  │
+│  │  │ - model.gz   │   │ - Gzip compression    │                        │  │
+│  │  └──────────────┘   └───────────────────────┘                        │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│  ┌───────────────────────────────────────────────────────────────────────┐  │
+│  │                         LongSplat Stack                                │  │
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌──────────────┐  │  │
+│  │  │   MASt3R    │  │   DUSt3R    │  │   CRoCo     │  │ 3DGS Kernels │  │  │
+│  │  │ Pose Est.   │  │ Dense 3D    │  │ Cross-Attn  │  │ CUDA Render  │  │  │
+│  │  └─────────────┘  └─────────────┘  └─────────────┘  └──────────────┘  │  │
+│  └───────────────────────────────────────────────────────────────────────┘  │
+│                                                                              │
+│  Storage: /app/storage (RunPod Volume 150GB)                                 │
+│  ├── uploads/    (videos)                                                    │
+│  ├── frames/     (extracted JPGs)                                            │
+│  ├── models/     (PLY outputs)                                               │
+│  └── logs/       (app.log)                                                   │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 2️⃣ Build & Push Docker Image
+---
+
+## Recent Progress (January 2026)
+
+### Working Features
+- **Video Upload** with quality preset selection (Fast/Balanced/Quality)
+- **Video Validation** - checks duration, resolution, format before processing
+- **Frame Extraction** using FFmpeg at configurable FPS
+- **LongSplat Training** with MASt3R for automatic pose estimation (no COLMAP needed!)
+- **PLY Export** with gzip compression (17% size reduction)
+- **3D Viewer** parsing binary Gaussian Splatting PLY with spherical harmonics color
+
+### Quality Presets
+
+| Preset | FPS | Iterations | Est. Time | Use Case |
+|--------|-----|------------|-----------|----------|
+| **Fast** | 1.0 | 2,000 | 3-5 min | Quick preview, testing |
+| **Balanced** | 2.0 | 5,000 | 8-12 min | Most videos |
+| **Quality** | 3.0 | 12,000 | 20-30 min | Final production |
+
+### Key Technical Details
+
+**PLY Format (Gaussian Splatting):**
+- Binary little-endian format
+- ~62 properties per vertex including:
+  - Position (x, y, z)
+  - Normals (nx, ny, nz)
+  - Spherical Harmonics DC (f_dc_0, f_dc_1, f_dc_2) → RGB color
+  - 45 additional SH coefficients (f_rest_0 to f_rest_44)
+  - Opacity (sigmoid-activated)
+  - Scale (scale_0, scale_1, scale_2)
+  - Rotation quaternion (rot_0-3)
+
+**Color Conversion:**
+```
+RGB = SH_C0 × f_dc + 0.5
+where SH_C0 = 0.28209479177387814
+```
+
+---
+
+## Quick Start
+
+### 1. Build & Push Docker Image
 
 ```bash
+# Prune and rebuild
+docker system prune -af && docker builder prune -af
 ./build-and-push.sh
 ```
 
-This automated script will:
-- ✅ Build for `linux/amd64` (RunPod platform)
-- ✅ Install all dependencies (PyTorch, LongSplat, CUDA extensions)
-- ✅ Verify all packages at build time
-- ✅ Push to Docker Hub (interactive prompt)
-- ✅ Save logs to `/tmp/docker-build.log`
-
-### 3️⃣ Deploy to RunPod
-
-Create a new GPU pod with these exact settings:
+### 2. Deploy to RunPod
 
 | Setting | Value |
 |---------|-------|
-| **Container Image** | `interactdevops/gaussian-room-reconstruction:latest` |
-| **GPU Type** | RTX 4090 (24GB VRAM) |
-| **Container Disk** | 20 GB (temporary) |
-| **Volume Disk** | 50 GB (persistent) |
-| **Volume Mount Path** | `/app/storage` |
-| **Expose HTTP Ports** | `8000` |
-| **Expose TCP Ports** | `22` (SSH, optional) |
-| **Environment Variables** | *(none required - pre-configured)* |
+| Container Image | `interactdevops/gaussian-room-reconstruction:latest` |
+| GPU Type | RTX 4090 (24GB VRAM) |
+| Container Disk | 20 GB |
+| Volume Disk | 150 GB |
+| Volume Mount Path | `/app/storage` |
+| Expose HTTP Ports | `8000` |
 
-### 4️⃣ Access Your App
+### 3. Configure Frontend (Vercel)
 
-Wait 2-3 minutes for pod initialization, then:
+Set environment variable:
+```
+VITE_API_BASE_URL=https://your-pod-id-8000.proxy.runpod.net
+```
+
+Vercel Project Settings:
+- Root Directory: `frontend`
+- Build Command: `npm run build`
+- Output Directory: `dist`
+- Install Command: `npm install`
+
+### 4. Test
 
 ```bash
-# Health check
-curl https://your-pod-id-8000.proxy.runpod.net/health
+# Backend health check
+curl https://your-pod-8000.proxy.runpod.net/health
+# Expected: {"status": "healthy"}
 
-# Expected response:
-{"status": "healthy"}
-```
-
-**Your backend is ready!** 🎉
-
-### 5️⃣ Deploy Frontend (Optional)
-
-```bash
-cd frontend
-
-# Update API URL in src/api/jobs.ts to your RunPod URL
-# Then deploy to Vercel:
-npm run build
-vercel --prod
+# Get presets
+curl https://your-pod-8000.proxy.runpod.net/api/presets
 ```
 
 ---
 
-## 📱 How to Use
+## Tech Stack
 
-### Recording Your Video
+### Frontend
+- **React 18** + TypeScript
+- **Vite** build tool
+- **Three.js** + @react-three/fiber for 3D visualization
+- Custom binary PLY parser with SH→RGB color conversion
 
-**Best Practices:**
-- 📏 **Duration:** 30-120 seconds
-- 📹 **Quality:** 1080p or higher
-- 🚶 **Movement:** Slow, steady walk around the room
-- 💡 **Lighting:** Well-lit, consistent
-- 🎯 **Coverage:** Capture all angles
-- ❌ **Avoid:** Fast motion, blur, occlusions
+### Backend
+- **Python 3.10** + FastAPI
+- **PyTorch 2.1.0** (CUDA 12.1)
+- **LongSplat** (NVIDIA) - unposed 3D Gaussian Splatting
+  - **MASt3R** - automatic pose estimation
+  - **DUSt3R** - dense 3D reconstruction
+  - **CRoCo** - cross-attention features
+- **FFmpeg** - video frame extraction
+- Custom CUDA kernels for Gaussian rasterization
 
-### Processing Pipeline
-
-```
-1. Upload Video (MP4, MOV, AVI)
-        ↓
-2. Frame Extraction (FFmpeg @ 2 FPS)
-   ⏱️ 10-30 seconds
-        ↓
-3. LongSplat Training
-   ├─ MASt3R: Auto Pose Estimation
-   └─ Gaussian Splatting: 3D Scene
-   ⏱️ 10-60 minutes
-        ↓
-4. Export Models
-   ├─ PLY (primary format)
-   └─ OBJ (optional)
-   ⏱️ 5-10 seconds
-        ↓
-5. 3D Visualization
-   🎮 Interactive viewer
-```
+### Infrastructure
+- **Docker** (multi-stage build, ~15GB image)
+- **RunPod** GPU cloud (RTX 4090)
+- **Vercel** frontend hosting
+- **Docker Hub** container registry
 
 ---
 
-## ⚡ Performance
-
-### Training Time (RTX 4090)
-
-| Video Length | Training Time | Frame Count |
-|--------------|---------------|-------------|
-| 30 seconds | ~10-15 min | ~60 frames |
-| 60 seconds | ~20-30 min | ~120 frames |
-| 120 seconds | ~40-60 min | ~240 frames |
-
-### Resource Usage
-
-- **GPU Memory:** 12-20 GB during training
-- **Container RAM:** 2-4 GB
-- **Storage:** ~500 MB per job
-
----
-
-## 🔌 API Reference
-
-### Endpoints
+## API Reference
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/health` | Health check |
-| `POST` | `/api/jobs/upload` | Upload video (multipart/form-data) |
-| `GET` | `/api/jobs/{job_id}/status` | Job status & progress |
-| `GET` | `/api/jobs/{job_id}/model` | Download PLY model |
-| `GET` | `/api/jobs/{job_id}/preview` | Get preview URL |
-| `GET` | `/static/models/{job_id}.ply` | Direct PLY file access |
+| `GET` | `/api/presets` | List quality presets |
+| `POST` | `/api/jobs/upload` | Upload video (multipart + quality_preset) |
+| `GET` | `/api/jobs/{id}/status` | Job status, progress, validation info |
+| `GET` | `/api/jobs/{id}/model` | Download PLY |
+| `GET` | `/api/jobs/{id}/model?compressed=true` | Download compressed PLY.gz |
 
 ### Job Status Response
-
 ```json
 {
-  "job_id": "uuid-here",
+  "job_id": "uuid",
   "status": "training",
   "progress": 0.65,
-  "video_filename": "room_video.mp4",
-  "model_url": "/static/models/uuid-here.ply",
-  "created_at": "2026-01-26T12:00:00Z",
-  "updated_at": "2026-01-26T12:15:00Z",
-  "error_message": null
+  "quality_preset": "balanced",
+  "estimated_minutes": 10,
+  "validation": {
+    "duration": 45.2,
+    "resolution": "1920x1080",
+    "fps": 30.0,
+    "warnings": []
+  },
+  "model_url": "/static/models/uuid.ply",
+  "model_url_compressed": "/static/models/uuid.ply.gz"
 }
 ```
 
-**Status Values:**
-- `uploaded` → `extracting_frames` → `training` → `exporting` → `completed`
-- `error` (if failure occurs)
+**Status Flow:**
+`uploaded` → `validating` → `extracting_frames` → `training` → `exporting` → `compressing` → `completed`
 
 ---
 
-## 🔧 Troubleshooting
+## Video Recording Best Practices
 
-### Build Issues
-
-**❌ `ModuleNotFoundError: No module named 'scipy'`**  
-✅ **Fixed** in latest version - rebuild with `./build-and-push.sh`
-
-**❌ CUDA compilation errors**  
-✅ Ensure building for `linux/amd64` platform (automated in script)
-
-**❌ Build timeout**  
-🔄 Retry - Docker Hub downloads can be slow
-
-### Runtime Issues
-
-**❌ Training fails immediately**
-
-Check logs:
-```bash
-# In RunPod terminal
-tail -100 /app/storage/logs/app.log
-```
-
-Verify:
-1. GPU available: `nvidia-smi`
-2. CUDA accessible: `python3.10 -c "import torch; print(torch.cuda.is_available())"`
-3. Frames extracted: `ls /app/storage/frames/{job_id}/`
-
-**❌ "No PLY file generated"**
-
-1. Check output directory: `/app/storage/models/{job_id}/`
-2. Verify video quality (1080p+, 30+ seconds)
-3. Review LongSplat logs for MASt3R errors
-4. Try shorter video or better lighting
-
-**❌ Out of memory**
-
-- ✅ Use shorter videos (30-60 seconds)
-- ✅ Reduce video resolution before upload
-- ✅ Ensure RTX 4090 pod (not lower-tier GPU)
+- **Duration:** 20-60 seconds optimal
+- **Resolution:** 1080p minimum
+- **Movement:** Slow, steady walk around room
+- **Lighting:** Well-lit, consistent
+- **Coverage:** Multiple angles, overlap between frames
+- **Avoid:** Fast motion, blur, reflective surfaces
 
 ---
 
-## 📁 Project Structure
+## Troubleshooting
+
+### Empty 3D Preview
+- PLY file generated but viewer shows nothing
+- **Fixed:** Updated viewer to parse binary GS PLY with SH color conversion
+
+### "Address already in use" Error
+- Multiple jobs competing for same network port
+- **Fixed:** Each job uses unique port based on job ID hash
+
+### Long Training Times
+- 78 frames × 5000 iterations ≈ 60 minutes
+- **Solution:** Use "Fast" preset or shorter video
+
+### COLMAP Errors (Legacy)
+- Old pipeline used COLMAP for pose estimation
+- **Fixed:** Replaced with LongSplat's internal MASt3R
+
+---
+
+## Project Structure
 
 ```
 gaussian-room-reconstruction/
 ├── backend/
-│   ├── api/              # API endpoints
-│   ├── core/             # Config, models, pipeline
-│   ├── jobs/             # Job management
+│   ├── api/jobs.py           # Upload, status, download endpoints
+│   ├── core/
+│   │   ├── config.py         # Quality presets, settings
+│   │   ├── models.py         # Pydantic models
+│   │   └── pipeline.py       # Processing orchestration
 │   ├── services/
-│   │   ├── longsplat/    # ⭐ LongSplat training
-│   │   ├── video/        # FFmpeg frame extraction
-│   │   └── export/       # PLY/OBJ export
-│   ├── storage/          # Runtime data (gitignored)
-│   ├── utils/            # Helpers
-│   ├── main.py           # FastAPI app
-│   └── requirements.txt  # Python deps
+│   │   ├── longsplat/train.py   # LongSplat training wrapper
+│   │   ├── video/
+│   │   │   ├── extract_frames.py
+│   │   │   └── validate.py      # Video validation
+│   │   └── export/
+│   │       ├── to_ply.py
+│   │       └── compress.py      # Gzip compression
+│   └── main.py               # FastAPI app
 ├── frontend/
 │   ├── src/
-│   │   ├── api/          # Backend API client
-│   │   ├── components/   # React UI components
-│   │   ├── pages/        # Page layouts
-│   │   └── types/        # TypeScript types
-│   ├── package.json
-│   └── vite.config.ts
-├── Dockerfile            # 🐳 Production container
-├── build-and-push.sh     # 🚀 Automated build script
-├── ARCHITECTURE_AUDIT.md # 📋 System audit docs
+│   │   ├── components/
+│   │   │   ├── VideoUpload.tsx   # Preset selector, validation
+│   │   │   ├── JobStatus.tsx     # Progress, download buttons
+│   │   │   └── Viewer3D.tsx      # Binary PLY parser, 3D render
+│   │   └── api/jobs.ts           # API client
+│   └── package.json
+├── Dockerfile                # Multi-stage GPU build
+├── build-and-push.sh         # Automated build script
 └── README.md
 ```
 
 ---
 
-## 💻 Local Development (Advanced)
+## Resources
 
-> ⚠️ **Requires:** NVIDIA GPU with 24GB+ VRAM
-
-### Backend
-
-```bash
-cd backend
-python3.10 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# Clone LongSplat
-cd ..
-git clone --recursive https://github.com/NVlabs/LongSplat.git
-export LONGSPLAT_REPO=$(pwd)/LongSplat
-
-# Start server
-cd backend
-uvicorn main:app --reload --port 8000
-```
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-# Runs on http://localhost:5173
-```
+- [LongSplat Paper](https://linjohnss.github.io/longsplat/)
+- [LongSplat GitHub](https://github.com/NVlabs/LongSplat)
+- [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting)
+- [MASt3R](https://github.com/naver/mast3r)
+- [RunPod Documentation](https://docs.runpod.io/)
 
 ---
 
-## 🔗 Resources
+## License
 
-- **LongSplat Paper:** https://linjohnss.github.io/longsplat/
-- **LongSplat GitHub:** https://github.com/NVlabs/LongSplat
-- **Gaussian Splatting:** https://github.com/graphdeco-inria/gaussian-splatting
-- **RunPod Docs:** https://docs.runpod.io/
-- **Architecture Audit:** See `ARCHITECTURE_AUDIT.md`
-
----
-
-## 🤝 Contributing
-
-Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Test with Docker builds
-4. Submit a pull request
-
----
-
-## 📄 License
-
-MIT License - See LICENSE file
-
----
-
-## 🎯 Quick Reference Card
-
-### Build & Deploy
-```bash
-./build-and-push.sh
-```
-
-### RunPod Settings
-```
-Image: interactdevops/gaussian-room-reconstruction:latest
-GPU: RTX 4090
-Container: 20 GB | Volume: 50 GB @ /app/storage
-Ports: 8000 (HTTP), 22 (SSH)
-```
-
-### Health Check
-```bash
-curl https://your-pod-8000.proxy.runpod.net/health
-```
-
-### Logs
-```bash
-tail -f /app/storage/logs/app.log
-```
-
----
-
-<div align="center">
-
-**Ready to reconstruct in 3D! 🚀**
-
-[Report Bug](https://github.com/yourusername/gaussian-room-reconstruction/issues) · [Request Feature](https://github.com/yourusername/gaussian-room-reconstruction/issues)
-
-</div>
+MIT License - Research use. LongSplat components under NVIDIA license.
