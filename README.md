@@ -120,11 +120,13 @@ docker system prune -af && docker builder prune -af
 | Setting | Value |
 |---------|-------|
 | Container Image | `interactdevops/gaussian-room-reconstruction:latest` |
-| GPU Type | RTX 4090 (24GB VRAM) |
+| **GPU Type** | **A40 (48GB VRAM) ⭐ Required** |
 | Container Disk | 20 GB |
 | Volume Disk | 150 GB |
 | Volume Mount Path | `/app/storage` |
 | Expose HTTP Ports | `8000` |
+
+> **Note:** This image is compiled specifically for NVIDIA A40 (sm_86). Other GPUs will not work.
 
 ### 3. Configure Frontend (Vercel)
 
@@ -172,7 +174,7 @@ curl https://your-pod-8000.proxy.runpod.net/api/presets
 
 ### Infrastructure
 - **Docker** (multi-stage build, ~15GB image)
-- **RunPod** GPU cloud (RTX 4090)
+- **RunPod** GPU cloud (**A40 required**, 48GB VRAM, sm_86)
 - **Vercel** frontend hosting
 - **Docker Hub** container registry
 

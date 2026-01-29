@@ -91,18 +91,17 @@ A web application that converts video footage of rooms into interactive 3D point
 | Component | Technology |
 |-----------|------------|
 | Frontend Hosting | Vercel |
-| Backend/GPU | RunPod (A40/RTX 4090/A100/H100) |
+| Backend/GPU | **RunPod (A40 required)** |
 | Container | Docker (~15GB image) |
 | Registry | Docker Hub |
 | Storage | RunPod Volume (150GB) |
 
-### Supported GPUs
-| GPU | VRAM | Architecture | Compute Capability | Recommended For |
-|-----|------|--------------|-------------------|-----------------|
-| A100 | 40/80 GB | Ampere | sm_80 | Large jobs, production |
-| **A40** | **48 GB** | Ampere | sm_86 | **Best value, recommended** |
-| RTX 4090 | 24 GB | Ada Lovelace | sm_89 | Fast, smaller jobs |
-| H100 | 80 GB | Hopper | sm_90 | Overkill for most |
+### Required GPU
+| GPU | VRAM | Architecture | Compute Capability |
+|-----|------|--------------|-------------------|
+| **A40** | **48 GB** | Ampere | sm_86 |
+
+> **Note:** This build is compiled specifically for NVIDIA A40 (sm_86). Other GPUs are not supported.
 
 ---
 
