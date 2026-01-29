@@ -12,7 +12,7 @@ const SH_C0 = 0.28209479177387814;
 
 function PointCloud({ url, pointSize }: { url: string; pointSize: number }) {
   const meshRef = useRef<THREE.Points | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
