@@ -9,7 +9,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     CUDA_HOME=/usr/local/cuda \
     PATH=/usr/local/cuda/bin:${PATH} \
     LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH} \
-    TORCH_CUDA_ARCH_LIST="8.9" \
+    TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0" \
     FORCE_CUDA="1" \
     QT_QPA_PLATFORM=offscreen
 
@@ -63,10 +63,10 @@ RUN python3.10 -c "import torch; print(f'PyTorch {torch.__version__} available, 
 
 # Build/Install CUDA extensions
 # Use --no-build-isolation to ensure torch is available during build
-# Set TORCH_CUDA_ARCH_LIST for RTX 4090 (compute capability 8.9)
-RUN TORCH_CUDA_ARCH_LIST="8.9" python3.10 -m pip install --no-build-isolation submodules/diff-gaussian-rasterization \
-    && TORCH_CUDA_ARCH_LIST="8.9" python3.10 -m pip install --no-build-isolation submodules/simple-knn \
-    && TORCH_CUDA_ARCH_LIST="8.9" python3.10 -m pip install --no-build-isolation submodules/fused-ssim
+# Set TORCH_CUDA_ARCH_LIST for multiple GPU architectures (A100, A40, RTX 4090, H100)
+RUN TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0" python3.10 -m pip install --no-build-isolation submodules/diff-gaussian-rasterization \
+    && TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0" python3.10 -m pip install --no-build-isolation submodules/simple-knn \
+    && TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0" python3.10 -m pip install --no-build-isolation submodules/fused-ssim
 
 # VERIFY ALL GAUSSIAN SPLATTING DEPENDENCIES ARE INSTALLED
 RUN echo "=== VERIFYING GAUSSIAN SPLATTING DEPENDENCIES ===" && \
@@ -82,10 +82,11 @@ WORKDIR /opt/LongSplat
 
 # Install LongSplat submodules - USE LONGSPLAT'S OWN VERSIONS (not gaussian-splatting)
 # Each repository has its own tested versions - no cross-linking!
+# Build for multiple GPU architectures: A100 (8.0), A40/RTX 3090 (8.6), RTX 4090 (8.9), H100 (9.0)
 WORKDIR /opt/LongSplat/submodules
-RUN TORCH_CUDA_ARCH_LIST="8.9" python3.10 -m pip install --no-build-isolation ./simple-knn
-RUN TORCH_CUDA_ARCH_LIST="8.9" python3.10 -m pip install --no-build-isolation ./diff-gaussian-rasterization
-RUN TORCH_CUDA_ARCH_LIST="8.9" python3.10 -m pip install --no-build-isolation ./fused-ssim
+RUN TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0" python3.10 -m pip install --no-build-isolation ./simple-knn
+RUN TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0" python3.10 -m pip install --no-build-isolation ./diff-gaussian-rasterization
+RUN TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0" python3.10 -m pip install --no-build-isolation ./fused-ssim
 WORKDIR /opt/LongSplat
 
 # Install only essential LongSplat dependencies (skip CUDA packages that need torch at build time)
@@ -105,8 +106,9 @@ RUN python3.10 -m pip install \
 
 # Compile RoPE CUDA kernels for MASt3R (optional but recommended for speed)
 # MASt3R is used internally by LongSplat for pose estimation
+# Build for multiple GPU architectures
 RUN cd submodules/mast3r/dust3r/croco/models/curope/ && \
-    python3.10 setup.py build_ext --inplace 2>/dev/null || echo "RoPE CUDA kernels skipped (optional, will fallback to CPU)"
+    TORCH_CUDA_ARCH_LIST="8.0;8.6;8.9;9.0" python3.10 setup.py build_ext --inplace 2>/dev/null || echo "RoPE CUDA kernels skipped (optional, will fallback to CPU)"
 
 # Pre-download MASt3R checkpoint (required for pose estimation in free mode)
 # Reference: https://learnopencv.com/mast3r-sfm-grounding-image-matching-3d/
@@ -188,8 +190,9 @@ RUN echo "=== COMPREHENSIVE DEPENDENCY VERIFICATION ===" && \
     ls -la /opt/LongSplat/submodules/mast3r/ && \
     echo "8. CUDA availability..." && \
     python3.10 -c "import torch; print(f'✓ CUDA available: {torch.cuda.is_available()}'); print(f'✓ CUDA version: {torch.version.cuda}'); print(f'✓ Device count: {torch.cuda.device_count()}')" && \
+    echo "9. Supported GPU architectures: 8.0 (A100), 8.6 (A40/RTX 3090), 8.9 (RTX 4090), 9.0 (H100)" && \
     echo "=== ✅ ALL DEPENDENCIES VERIFIED ===" && \
-    echo "=== ✅ SYSTEM READY FOR DEPLOYMENT ==="
+    echo "=== ✅ MULTI-GPU BUILD READY FOR DEPLOYMENT ==="
 
 EXPOSE 8000
 
