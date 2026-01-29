@@ -7,6 +7,7 @@ import hashlib
 import logging
 import os
 import shutil
+import subprocess
 from pathlib import Path
 from utils.shell import run_command
 
@@ -40,6 +41,34 @@ def _resolve_longsplat_repo() -> Path:
 
 LONGSPLAT_REPO = _resolve_longsplat_repo()
 
+def _verify_gpu_compatibility() -> tuple[bool, str]:
+    """
+    Verify that the current GPU is compatible with the built CUDA extensions.
+    This image is built for A40 (sm_86).
+    """
+    try:
+        import torch
+        if not torch.cuda.is_available():
+            return False, "CUDA not available"
+        
+        device_name = torch.cuda.get_device_name(0)
+        capability = torch.cuda.get_device_capability(0)
+        
+        # This image is built for sm_86 (A40, RTX 3090)
+        expected_major, expected_minor = 8, 6
+        
+        if capability[0] != expected_major or capability[1] != expected_minor:
+            return False, (
+                f"GPU mismatch: Found {device_name} (sm_{capability[0]}{capability[1]}), "
+                f"but this image was built for A40 (sm_{expected_major}{expected_minor}). "
+                f"Use an A40 pod or rebuild the image for your GPU."
+            )
+        
+        return True, f"GPU OK: {device_name} (sm_{capability[0]}{capability[1]})"
+    except Exception as e:
+        return False, f"GPU check failed: {e}"
+
+
 async def train_longsplat(
     frames_dir: Path,
     output_dir: Path,
@@ -60,6 +89,13 @@ async def train_longsplat(
     """
     try:
         logger.info(f"Starting LongSplat training from {frames_dir}")
+        
+        # Verify GPU compatibility before starting expensive training
+        gpu_ok, gpu_msg = _verify_gpu_compatibility()
+        logger.info(f"GPU check: {gpu_msg}")
+        if not gpu_ok:
+            logger.error(gpu_msg)
+            raise RuntimeError(gpu_msg)
         
         # Ensure LongSplat repository is set up
         if not await _setup_longsplat_repo():
@@ -149,6 +185,17 @@ async def train_longsplat(
             logger.info(f"Training stdout (last 50 lines): {stdout.split(chr(10))[-50:]}")
             if stderr:
                 logger.warning(f"Training stderr: {stderr[-2000:]}")  # Last 2000 chars
+        except subprocess.CalledProcessError as cmd_error:
+            stderr = (cmd_error.args[3] if len(cmd_error.args) > 3 else "") or str(cmd_error)
+            if "no kernel image is available for execution on the device" in stderr:
+                logger.error(
+                    "GPU mismatch: This image was built for NVIDIA A40 (sm_86). "
+                    "Use a RunPod pod with GPU type A40, or rebuild the image for your GPU."
+                )
+            logger.error(f"Training command failed: {cmd_error}")
+            logger.error(f"Check if PYTHONPATH is set correctly in container")
+            logger.error(f"Command that failed: {' '.join(cmd)}")
+            raise
         except Exception as cmd_error:
             logger.error(f"Training command failed: {cmd_error}")
             logger.error(f"Check if PYTHONPATH is set correctly in container")

@@ -92,8 +92,10 @@ echo -e "${BLUE}This will build and push directly to Docker Hub (bypasses local 
 echo ""
 
 # Build for linux/amd64 and push directly to Docker Hub
+# --no-cache: force rebuild of CUDA extensions for A40 (sm_86); avoids stale 8.9 kernels from cache
 # Using --push avoids the "sending tarball" timeout issues
 docker buildx build \
+    --no-cache \
     --platform linux/amd64 \
     -t ${FULL_IMAGE} \
     --push \

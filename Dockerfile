@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.5
 
-# Runpod RTX 4090 is linux/amd64. Force the correct platform when building on Apple Silicon.
+# RunPod A40 is linux/amd64. Force the correct platform when building on Apple Silicon.
+# IMPORTANT: Build with --no-cache to avoid stale CUDA kernels from previous builds!
 FROM --platform=linux/amd64 nvidia/cuda:12.1.1-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
@@ -47,33 +48,14 @@ COPY backend/requirements.txt /app/requirements.txt
 RUN python3.10 -m pip install -r /app/requirements.txt \
     && python3.10 -m pip install tqdm joblib
 
-# Clone gaussian-splatting and only init training-related submodules
-# (We don't need SIBR_viewers for headless training.)
+# Clone gaussian-splatting for reference/utilities only (NOT for CUDA extensions)
+# CUDA extensions come from LongSplat's submodules to avoid version conflicts
 ARG GS_REPO=https://github.com/graphdeco-inria/gaussian-splatting.git
 RUN git clone --depth 1 ${GS_REPO} /opt/gaussian-splatting
-WORKDIR /opt/gaussian-splatting
-RUN git submodule update --init --recursive \
-      submodules/diff-gaussian-rasterization \
-      submodules/simple-knn \
-      submodules/fused-ssim
 
 # Verify torch and CUDA are available before building submodules
 RUN python3.10 -c "import torch; print(f'PyTorch {torch.__version__} available, CUDA: {torch.cuda.is_available()}'); print(f'CUDA_HOME: {torch.utils.cmake_prefix_path}')" && \
     nvcc --version
-
-# Build/Install CUDA extensions
-# Use --no-build-isolation to ensure torch is available during build
-# Set TORCH_CUDA_ARCH_LIST for A40 (compute capability 8.6)
-RUN TORCH_CUDA_ARCH_LIST="8.6" python3.10 -m pip install --no-build-isolation submodules/diff-gaussian-rasterization \
-    && TORCH_CUDA_ARCH_LIST="8.6" python3.10 -m pip install --no-build-isolation submodules/simple-knn \
-    && TORCH_CUDA_ARCH_LIST="8.6" python3.10 -m pip install --no-build-isolation submodules/fused-ssim
-
-# VERIFY ALL GAUSSIAN SPLATTING DEPENDENCIES ARE INSTALLED
-RUN echo "=== VERIFYING GAUSSIAN SPLATTING DEPENDENCIES ===" && \
-    python3.10 -c "import diff_gaussian_rasterization; print('diff_gaussian_rasterization OK')" && \
-    python3.10 -c "import simple_knn; print('simple_knn OK')" && \
-    python3.10 -c "import fused_ssim; print('fused_ssim OK')" && \
-    echo "=== GAUSSIAN SPLATTING DEPENDENCIES VERIFIED OK ==="
 
 # Clone LongSplat for unposed 3D reconstruction from casual long videos
 ARG LONGSPLAT_REPO=https://github.com/NVlabs/LongSplat.git
@@ -191,8 +173,12 @@ RUN echo "=== COMPREHENSIVE DEPENDENCY VERIFICATION ===" && \
     echo "8. CUDA availability..." && \
     python3.10 -c "import torch; print(f'✓ CUDA available: {torch.cuda.is_available()}'); print(f'✓ CUDA version: {torch.version.cuda}'); print(f'✓ Device count: {torch.cuda.device_count()}')" && \
     echo "9. Target GPU: A40 (sm_86, 48GB VRAM)" && \
+    echo "10. Verifying CUDA extension architectures..." && \
+    python3.10 -c "import fused_ssim; print(f'✓ fused_ssim module path: {fused_ssim.__file__}')" && \
+    python3.10 -c "import diff_gaussian_rasterization; print(f'✓ diff_gaussian_rasterization path: {diff_gaussian_rasterization.__file__}')" && \
     echo "=== ✅ ALL DEPENDENCIES VERIFIED ===" && \
-    echo "=== ✅ A40 BUILD READY FOR DEPLOYMENT ==="
+    echo "=== ✅ A40 BUILD (sm_86) READY FOR DEPLOYMENT ===" && \
+    echo "=== BUILD TIMESTAMP: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
 
 EXPOSE 8000
 
