@@ -25,19 +25,8 @@ def _resolve_longsplat_repo() -> Path:
         if repo_path.exists():
             return repo_path
     
-    # Fallback: check common locations
-    project_root = Path(__file__).parent.parent.parent.parent
-    # Check sibling directory
-    sibling = project_root.parent / "LongSplat"
-    if sibling.exists():
-        return sibling
-    # Check in project root
-    local = project_root / "LongSplat"
-    if local.exists():
-        return local
-    
-    # Default fallback
-    return project_root.parent / "LongSplat"
+    # Simple defaults
+    return Path("/opt/LongSplat")
 
 LONGSPLAT_REPO = _resolve_longsplat_repo()
 
@@ -101,28 +90,51 @@ async def train_longsplat(
         if not await _setup_longsplat_repo():
             logger.error("Failed to setup LongSplat repository")
             return False
+            
+        # DIAGNOSTICS: Check key dependencies explicitly
+        try:
+            logger.info("Running dependency diagnostics...")
+            import torch
+            logger.info(f"PyTorch: {torch.__version__} (CUDA: {torch.version.cuda})")
+            import diff_gaussian_rasterization
+            logger.info(f"diff_gaussian_rasterization: {diff_gaussian_rasterization.__file__}")
+            import simple_knn
+            logger.info(f"simple_knn: {simple_knn.__file__}")
+            import fused_ssim
+            logger.info(f"fused_ssim: {fused_ssim.__file__}")
+            logger.info("Diagnostics passed: All CUDA extensions importable.")
+        except ImportError as e:
+            logger.error(f"Dependency diagnostic failed: {e}")
+            logger.error("This suggests the Docker image needs to be fully rebuilt.")
+            raise RuntimeError(f"Critical dependency missing: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected diagnostic error: {e}")
         
         # Prepare the scene directory structure - USE UNIQUE DIRECTORY PER JOB
-        # Extract job_id from output_dir (e.g., /app/storage/models/job_id -> job_id)
-        job_id = output_dir.name
-        scene_dir = frames_dir.parent / f"longsplat_scene_{job_id}"
-        images_dir = scene_dir / "images"
-        
-        # Clean up any existing scene directory for this job (ensure fresh start)
-        if scene_dir.exists():
-            logger.info(f"Cleaning up existing scene directory: {scene_dir}")
-            shutil.rmtree(scene_dir)
-        
-        images_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Copy frames to images directory
-        logger.info(f"Copying frames to {images_dir}")
-        frame_count = 0
-        for frame_path in sorted(frames_dir.glob("*.png")) + sorted(frames_dir.glob("*.jpg")):
-            shutil.copy2(frame_path, images_dir / frame_path.name)
-            frame_count += 1
-        
-        logger.info(f"Copied {frame_count} frames to scene directory")
+        try:
+            # Extract job_id from output_dir (e.g., /app/storage/models/job_id -> job_id)
+            job_id = output_dir.name
+            scene_dir = frames_dir.parent / f"longsplat_scene_{job_id}"
+            images_dir = scene_dir / "images"
+            
+            # Clean up any existing scene directory for this job (ensure fresh start)
+            if scene_dir.exists():
+                logger.info(f"Cleaning up existing scene directory: {scene_dir}")
+                shutil.rmtree(scene_dir)
+            
+            images_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Copy frames to images directory
+            logger.info(f"Copying frames to {images_dir}")
+            frame_count = 0
+            for frame_path in sorted(frames_dir.glob("*.png")) + sorted(frames_dir.glob("*.jpg")):
+                shutil.copy2(frame_path, images_dir / frame_path.name)
+                frame_count += 1
+            
+            logger.info(f"Copied {frame_count} frames to scene directory")
+        except Exception as e:
+            logger.error(f"Failed to prepare scene directory: {e}", exc_info=True)
+            return False
         
         # Training command
         train_script = LONGSPLAT_REPO / "train.py"
@@ -140,6 +152,8 @@ async def train_longsplat(
         total_frames = frame_count
         init_frames = max(10, min(total_frames // 5, 30))  # 10-30 frames for initialization
         
+        # PATCH: Optimized hyperparameters for faster training (<20 mins)
+        # Original: init=3000, pose=200, local=400, global=900, post=5000+
         cmd = [
             "/usr/bin/python3.10", str(train_script),
             "-s", str(scene_dir),
@@ -151,7 +165,10 @@ async def train_longsplat(
             "--quiet",  # Reduce logging overhead for speed
             "--init_frame_num", str(init_frames),  # More frames = denser initial point cloud
             "--window_size", "5",  # Default window for good coverage
-            "--post_iter", str(iterations),  # Use our iterations for post-refinement (main phase)
+            "--pose_iteration", "50",    # Reduced from 200
+            "--local_iter", "100",       # Reduced from 400
+            "--global_iter", "300",      # Reduced from 900
+            "--post_iter", "1000",       # Reduced from 5000 (huge speedup)
             "--init_iteraion", "1000",  # Faster initial optimization (typo is in LongSplat code)
         ]
         
@@ -167,39 +184,55 @@ async def train_longsplat(
         
         # Prepare environment with PYTHONPATH for LongSplat submodules
         env = os.environ.copy()
-        # Add LongSplat to PYTHONPATH so it can find its submodules
         pythonpath = env.get('PYTHONPATH', '')
         if str(LONGSPLAT_REPO) not in pythonpath:
+            # We only need LongSplat here - submodules are managed by sys.path or pip install
             env['PYTHONPATH'] = f"{LONGSPLAT_REPO}:{pythonpath}" if pythonpath else str(LONGSPLAT_REPO)
         
         logger.info(f"Using PYTHONPATH: {env['PYTHONPATH']}")
         
-        # Run training with timeout (long videos need more time)
+        # Run training with direct file logging to avoid buffer truncation
+        # This is critical because long training runs produce too much output for memory buffers
+        log_file_path = output_dir / "training.log"
+        logger.info(f"Streaming training output to {log_file_path}")
+        
         timeout_seconds = 3600 * 4  # 4 hours max
+        
         try:
-            stdout, stderr = await asyncio.wait_for(
-                run_command(cmd, cwd=str(LONGSPLAT_REPO), env=env),
-                timeout=timeout_seconds
-            )
-            logger.info(f"Training command completed successfully")
-            logger.info(f"Training stdout (last 50 lines): {stdout.split(chr(10))[-50:]}")
-            if stderr:
-                logger.warning(f"Training stderr: {stderr[-2000:]}")  # Last 2000 chars
-        except subprocess.CalledProcessError as cmd_error:
-            stderr = (cmd_error.args[3] if len(cmd_error.args) > 3 else "") or str(cmd_error)
-            if "no kernel image is available for execution on the device" in stderr:
-                logger.error(
-                    "GPU mismatch: This image was built for NVIDIA A40 (sm_86). "
-                    "Use a RunPod pod with GPU type A40, or rebuild the image for your GPU."
+            with open(log_file_path, "w") as log_file:
+                process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    cwd=str(LONGSPLAT_REPO),
+                    env=env,
+                    stdout=log_file,
+                    stderr=asyncio.subprocess.STDOUT  # Merge stderr into stdout
                 )
-            logger.error(f"Training command failed: {cmd_error}")
-            logger.error(f"Check if PYTHONPATH is set correctly in container")
-            logger.error(f"Command that failed: {' '.join(cmd)}")
-            raise
+                
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=timeout_seconds)
+                except asyncio.TimeoutError:
+                    process.kill()
+                    logger.error(f"LongSplat training timed out after {timeout_seconds} seconds")
+                    raise
+                
+                if process.returncode != 0:
+                    # Read the tail of the log file to show the error
+                    logger.error(f"Training failed with return code {process.returncode}")
+                    try:
+                        with open(log_file_path, "r") as f:
+                            # Read last 200 lines efficiently-ish
+                            lines = f.readlines()
+                            tail = "".join(lines[-200:])
+                            logger.error(f"Training Log Tail:\n{tail}")
+                    except Exception as read_err:
+                        logger.error(f"Could not read log tail: {read_err}")
+                    
+                    raise subprocess.CalledProcessError(process.returncode, cmd)
+            
+            logger.info("Training command completed successfully")
+            
         except Exception as cmd_error:
             logger.error(f"Training command failed: {cmd_error}")
-            logger.error(f"Check if PYTHONPATH is set correctly in container")
-            logger.error(f"Command that failed: {' '.join(cmd)}")
             raise
         
         # Check if point cloud was generated (use dynamic iteration number)
@@ -312,7 +345,17 @@ async def convert_to_3dgs_format(
         True if conversion succeeded
     """
     try:
-        convert_script = LONGSPLAT_REPO / "convert_3dgs.py"
+        convert_script = LONGSPLAT_REPO / "convert_3dgs.py" # Fallback
+        
+        # PATCH: Use our patched script if available
+        # We need to copy it from our service dir to the repo dir first
+        patched_script_source = Path(__file__).parent / "convert_3dgs_patched.py"
+        patched_script_dest = LONGSPLAT_REPO / "convert_3dgs_patched.py"
+        
+        if patched_script_source.exists():
+            logger.info(f"Installing patched conversion script from {patched_script_source}")
+            shutil.copy2(patched_script_source, patched_script_dest)
+            convert_script = patched_script_dest
         
         if not convert_script.exists():
             logger.warning("convert_3dgs.py not found, skipping conversion")
@@ -327,8 +370,8 @@ async def convert_to_3dgs_format(
         logger.info(f"Converting to 3DGS format: {' '.join(cmd)}")
         await run_command(cmd, cwd=str(LONGSPLAT_REPO))
         
-        # The convert script should create point_cloud.ply in the output directory
-        converted_ply = longsplat_output / "point_cloud.ply"
+        # The convert script creates file in converted_3dgs subdir
+        converted_ply = longsplat_output / "converted_3dgs" / "point_cloud.ply"
         if converted_ply.exists():
             shutil.copy2(converted_ply, output_ply)
             logger.info(f"Converted PLY saved to {output_ply}")

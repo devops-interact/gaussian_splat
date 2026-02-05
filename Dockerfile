@@ -10,7 +10,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     CUDA_HOME=/usr/local/cuda \
     PATH=/usr/local/cuda/bin:${PATH} \
     LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH} \
-    TORCH_CUDA_ARCH_LIST="8.6" \
+    TORCH_CUDA_ARCH_LIST="8.0 8.6+PTX" \
     FORCE_CUDA="1" \
     QT_QPA_PLATFORM=offscreen
 
@@ -48,10 +48,7 @@ COPY backend/requirements.txt /app/requirements.txt
 RUN python3.10 -m pip install -r /app/requirements.txt \
     && python3.10 -m pip install tqdm joblib
 
-# Clone gaussian-splatting for reference/utilities only (NOT for CUDA extensions)
-# CUDA extensions come from LongSplat's submodules to avoid version conflicts
-ARG GS_REPO=https://github.com/graphdeco-inria/gaussian-splatting.git
-RUN git clone --depth 1 ${GS_REPO} /opt/gaussian-splatting
+# (Pure LongSplat Build)
 
 # Verify torch and CUDA are available before building submodules
 RUN python3.10 -c "import torch; print(f'PyTorch {torch.__version__} available, CUDA: {torch.cuda.is_available()}'); print(f'CUDA_HOME: {torch.utils.cmake_prefix_path}')" && \
@@ -62,13 +59,35 @@ ARG LONGSPLAT_REPO=https://github.com/NVlabs/LongSplat.git
 RUN git clone --recursive ${LONGSPLAT_REPO} /opt/LongSplat
 WORKDIR /opt/LongSplat
 
+# Install LongSplat dependencies explicitly from its requirements.txt
+# We filter out packages we already installed manually (pytorch3d, torch) to avoid build errors
+RUN sed -i '/pytorch3d/d' requirements.txt && \
+    sed -i '/torch/d' requirements.txt && \
+    python3.10 -m pip install -r requirements.txt
+
 # Install LongSplat submodules - USE LONGSPLAT'S OWN VERSIONS (not gaussian-splatting)
 # Each repository has its own tested versions - no cross-linking!
 # Build for A40 (compute capability 8.6)
+# Force rebuild of submodules to ensure architecture flags are picked up
+ARG SUBMODULE_CACHEBUST=1
+
 WORKDIR /opt/LongSplat/submodules
-RUN TORCH_CUDA_ARCH_LIST="8.6" python3.10 -m pip install --no-build-isolation ./simple-knn
-RUN TORCH_CUDA_ARCH_LIST="8.6" python3.10 -m pip install --no-build-isolation ./diff-gaussian-rasterization
-RUN TORCH_CUDA_ARCH_LIST="8.6" python3.10 -m pip install --no-build-isolation ./fused-ssim
+RUN ls -la simple-knn/ && ls -la diff-gaussian-rasterization/ && ls -la fused-ssim/
+
+# CRITICAL FIX: fused-ssim hardcodes -arch=sm_89 which breaks on A40 (sm_86).
+# We remove this line so TORCH_CUDA_ARCH_LIST takes precedence.
+RUN sed -i '/-arch=sm_89/d' fused-ssim/setup.py && \
+    grep -q "sm_89" fused-ssim/setup.py && echo "Failed to remove hardcoded arch!" && exit 1 || echo "Successfully patched fused-ssim/setup.py"
+
+# Build strictly for A40 (sm_86) to avoid any "fat binary" confusion or incompatibilities
+RUN TORCH_CUDA_ARCH_LIST="8.6" python3.10 -m pip install --no-cache-dir --no-build-isolation --verbose ./simple-knn
+RUN TORCH_CUDA_ARCH_LIST="8.6" python3.10 -m pip install --no-cache-dir --no-build-isolation --verbose ./diff-gaussian-rasterization
+RUN TORCH_CUDA_ARCH_LIST="8.6" python3.10 -m pip install --no-cache-dir --no-build-isolation --verbose ./fused-ssim
+
+# Immediate verification of installed extensions
+RUN python3.10 -c "import simple_knn; print(f'simple_knn built at: {simple_knn.__file__}')" && \
+    python3.10 -c "import diff_gaussian_rasterization; print(f'diff_gaussian_rasterization built at: {diff_gaussian_rasterization.__file__}')" && \
+    python3.10 -c "import fused_ssim; print(f'fused_ssim built at: {fused_ssim.__file__}')"
 WORKDIR /opt/LongSplat
 
 # Install only essential LongSplat dependencies (skip CUDA packages that need torch at build time)
@@ -127,7 +146,6 @@ WORKDIR /app
 COPY backend/ /app/
 
 # Tell backend where repositories live
-ENV GAUSSIAN_SPLATTING_REPO=/opt/gaussian-splatting
 ENV LONGSPLAT_REPO=/opt/LongSplat
 
 # Storage
@@ -143,6 +161,7 @@ RUN echo "=== COMPREHENSIVE DEPENDENCY VERIFICATION ===" && \
     python3.10 -c "import fastapi; print(f'✓ FastAPI: {fastapi.__version__}')" && \
     python3.10 -c "from PIL import Image; print('✓ Pillow: OK')" && \
     echo "2. Gaussian Splatting CUDA extensions..." && \
+    # diff_gaussian_rasterization etc are now installed from LongSplat submodules, so we verify them below
     python3.10 -c "import diff_gaussian_rasterization; print('✓ diff_gaussian_rasterization: OK')" && \
     python3.10 -c "import simple_knn; print('✓ simple_knn: OK')" && \
     python3.10 -c "import fused_ssim; print('✓ fused_ssim: OK')" && \
@@ -183,9 +202,9 @@ RUN echo "=== COMPREHENSIVE DEPENDENCY VERIFICATION ===" && \
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
-  CMD curl -fsS http://localhost:8000/health || exit 1
+    CMD curl -fsS http://localhost:8000/health || exit 1
 
-# Set PYTHONPATH to include LongSplat, MASt3R, DUSt3R, and gaussian-splatting
-ENV PYTHONPATH=/opt/LongSplat:/opt/LongSplat/submodules/mast3r:/opt/LongSplat/submodules/mast3r/dust3r:/opt/gaussian-splatting:${PYTHONPATH}
+# Set PYTHONPATH to include LongSplat, MASt3R, DUSt3R
+ENV PYTHONPATH=/opt/LongSplat:/opt/LongSplat/submodules/mast3r:/opt/LongSplat/submodules/mast3r/dust3r:${PYTHONPATH}
 
 CMD ["python3.10", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

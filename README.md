@@ -244,10 +244,6 @@ curl https://your-pod-8000.proxy.runpod.net/api/presets
 - Old pipeline used COLMAP for pose estimation
 - **Fixed:** Replaced with LongSplat's internal MASt3R
 
-### "no kernel image is available for execution on the device"
-- **Cause:** The Docker image was built for a specific GPU (A40, sm_86). The pod is using a different GPU.
-- **Fix:** Use a RunPod pod with **GPU type A40** (48GB). If you already use A40, pull the latest image and redeploy so the container was built with `TORCH_CUDA_ARCH_LIST="8.6"`.
-
 ---
 
 ## Project Structure
