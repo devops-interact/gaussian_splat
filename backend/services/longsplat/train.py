@@ -328,37 +328,23 @@ async def _setup_longsplat_repo() -> bool:
         return False
 
 
+from .postprocess import PlyOptimizer
+
 async def convert_to_3dgs_format(
     longsplat_output: Path,
     output_ply: Path,
     prune_ratio: float = 0.6
 ) -> bool:
     """
-    Convert LongSplat output to standard 3DGS format for compatibility
-    
-    Args:
-        longsplat_output: Directory containing LongSplat model
-        output_ply: Path to save the converted PLY file
-        prune_ratio: Ratio of points to prune (0.0-1.0)
-    
-    Returns:
-        True if conversion succeeded
+    Convert LongSplat output to standard 3DGS format using the official script,
+    then apply internal post-processing (centering) for utility.
     """
     try:
-        convert_script = LONGSPLAT_REPO / "convert_3dgs.py" # Fallback
-        
-        # PATCH: Use our patched script if available
-        # We need to copy it from our service dir to the repo dir first
-        patched_script_source = Path(__file__).parent / "convert_3dgs_patched.py"
-        patched_script_dest = LONGSPLAT_REPO / "convert_3dgs_patched.py"
-        
-        if patched_script_source.exists():
-            logger.info(f"Installing patched conversion script from {patched_script_source}")
-            shutil.copy2(patched_script_source, patched_script_dest)
-            convert_script = patched_script_dest
+        # Standard script from the repo - NO PATCHING
+        convert_script = LONGSPLAT_REPO / "convert_3dgs.py"
         
         if not convert_script.exists():
-            logger.warning("convert_3dgs.py not found, skipping conversion")
+            logger.warning("convert_3dgs.py not found in repo, skipping conversion")
             return False
         
         cmd = [
@@ -367,18 +353,32 @@ async def convert_to_3dgs_format(
             "--prune_ratio", str(prune_ratio)
         ]
         
-        logger.info(f"Converting to 3DGS format: {' '.join(cmd)}")
+        logger.info(f"Running standard LongSplat conversion: {' '.join(cmd)}")
         await run_command(cmd, cwd=str(LONGSPLAT_REPO))
         
-        # The convert script creates file in converted_3dgs subdir
-        converted_ply = longsplat_output / "converted_3dgs" / "point_cloud.ply"
-        if converted_ply.exists():
-            shutil.copy2(converted_ply, output_ply)
-            logger.info(f"Converted PLY saved to {output_ply}")
-            return True
+        # Locate the raw output from the standard script
+        raw_ply = longsplat_output / "converted_3dgs" / "point_cloud.ply"
+        
+        if not raw_ply.exists():
+            # Fallback path if script implementation varies
+            raw_ply = longsplat_output / "point_cloud.ply"
+        
+        if raw_ply.exists():
+            logger.info(f"Raw PLY generated at {raw_ply}. Applying internal optimizations...")
+            
+            # Internal Post-Processing Pipeline
+            # 1. Center the model (Critical for viewer)
+            # 2. Save final artifact
+            if PlyOptimizer.center_model(raw_ply, output_ply):
+                logger.info(f"Final optimized model saved to {output_ply}")
+                return True
+            else:
+                logger.error("Post-processing failed, copying raw file instead.")
+                shutil.copy2(raw_ply, output_ply)
+                return True
         
         return False
         
     except Exception as e:
-        logger.error(f"Conversion to 3DGS format failed: {e}")
+        logger.error(f"Conversion/Optimization pipeline failed: {e}")
         return False
