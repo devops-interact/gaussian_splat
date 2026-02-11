@@ -7,7 +7,7 @@ import { Loader2, CheckCircle, AlertOctagon, Download, FileBox, Clock, Settings 
 
 interface JobStatusProps {
   jobId: string;
-  onComplete: (modelUrl: string) => void;
+  onComplete: (modelUrl: string, meshUrl?: string) => void;
 }
 
 const STATUS_LABELS: Record<JobStatusEnum, string> = {
@@ -74,7 +74,7 @@ export default function JobStatus({ jobId, onComplete }: JobStatusProps) {
         }
 
         if (response.status === JobStatusEnum.COMPLETED && response.model_url) {
-          onComplete(response.model_url);
+          onComplete(response.model_url, response.model_url_mesh ?? undefined);
           clearInterval(interval);
         }
       } catch (err) {

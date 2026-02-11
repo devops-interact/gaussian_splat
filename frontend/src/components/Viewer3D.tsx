@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
-import { Canvas, useThree, useFrame } from '@react-three/fiber';
-import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { Canvas, useThree, useFrame, useLoader } from '@react-three/fiber';
+import { OrbitControls, GizmoHelper, GizmoViewport, Environment } from '@react-three/drei';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as THREE from 'three';
 import {
   Camera,
@@ -12,12 +13,17 @@ import {
   MousePointer,
   X,
   Info,
+  Trash2,
+  CircleDot,
+  Layers,
+  Box,
 } from 'lucide-react';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface Viewer3DProps {
   modelUrl: string | null;
+  meshUrl?: string | null;
   onModelMetadata?: (meta: ModelMetadata) => void;
 }
 
@@ -32,6 +38,7 @@ export interface ModelMetadata {
 }
 
 type ViewerMode = 'orbit' | 'walkthrough' | 'measure';
+type RenderMode = 'points' | 'mesh';
 
 interface MeasurePoint {
   position: THREE.Vector3;
@@ -54,6 +61,7 @@ interface ParseResult {
     hasOpacity: boolean;
     properties: string[];
     format: string;
+    colorSource: 'rgb' | 'sh' | 'none';
     boundingBox: { min: [number, number, number]; max: [number, number, number] };
   };
 }
@@ -62,7 +70,6 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
   const bytes = new Uint8Array(buffer);
   const decoder = new TextDecoder('utf-8');
 
-  // Find "end_header"
   let headerEnd = -1;
   const searchLimit = Math.min(bytes.length, 20000);
   for (let i = 0; i < searchLimit; i++) {
@@ -73,9 +80,7 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
       bytes[i + 9] === 0x72
     ) {
       headerEnd = i + 10;
-      while (headerEnd < bytes.length && (bytes[headerEnd] === 0x0a || bytes[headerEnd] === 0x0d)) {
-        headerEnd++;
-      }
+      while (headerEnd < bytes.length && (bytes[headerEnd] === 0x0a || bytes[headerEnd] === 0x0d)) headerEnd++;
       break;
     }
   }
@@ -106,9 +111,6 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
   const propNames = properties.map(p => p.name);
   const format = isBinary ? (isLittleEndian ? 'binary_little_endian' : 'binary_big_endian') : 'ascii';
 
-  console.log(`PLY: ${vertexCount} vertices, format=${format}, props=[${propNames.slice(0, 15).join(', ')}${propNames.length > 15 ? '...' : ''}]`);
-
-  // Property indices
   const xIdx = propNames.indexOf('x');
   const yIdx = propNames.indexOf('y');
   const zIdx = propNames.indexOf('z');
@@ -120,10 +122,14 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
   const blueIdx = propNames.indexOf('blue');
   const opacityIdx = propNames.indexOf('opacity');
 
-  const hasColors = f_dc_0_idx !== -1 || redIdx !== -1;
+  const hasRGB = redIdx !== -1 && greenIdx !== -1 && blueIdx !== -1;
+  const hasSH = f_dc_0_idx !== -1 && f_dc_1_idx !== -1 && f_dc_2_idx !== -1;
+  const hasColors = hasRGB || hasSH;
   const hasOpacity = opacityIdx !== -1;
+  const colorSource: 'rgb' | 'sh' | 'none' = hasRGB ? 'rgb' : hasSH ? 'sh' : 'none';
 
-  // Pre-allocate arrays (will be trimmed later)
+  console.log(`PLY: ${vertexCount} verts, format=${format}, colorSource=${colorSource}, props=[${propNames.slice(0, 15).join(', ')}${propNames.length > 15 ? '...' : ''}]`);
+
   const positions = new Float32Array(vertexCount * 3);
   const colors = new Float32Array(vertexCount * 3);
   let visibleCount = 0;
@@ -133,8 +139,6 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
 
   if (isBinary) {
     const dataView = new DataView(buffer, headerEnd);
-
-    // Calculate byte offsets
     const propOffsets: number[] = [];
     let currentOffset = 0;
     for (const prop of properties) {
@@ -150,87 +154,60 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
       }
     }
     const bytesPerVertex = currentOffset;
-
-    // Verify we have enough data
-    const expectedSize = vertexCount * bytesPerVertex;
     const availableSize = buffer.byteLength - headerEnd;
-    if (availableSize < expectedSize) {
-      console.warn(`PLY data truncated: expected ${expectedSize} bytes, got ${availableSize}`);
-    }
 
     const readFloat = (offset: number, idx: number): number => {
       const type = properties[idx].type;
-      switch (type) {
-        case 'float': case 'float32': return dataView.getFloat32(offset + propOffsets[idx], isLittleEndian);
-        case 'double': case 'float64': return dataView.getFloat64(offset + propOffsets[idx], isLittleEndian);
-        default: return dataView.getFloat32(offset + propOffsets[idx], isLittleEndian);
-      }
+      if (type === 'double' || type === 'float64') return dataView.getFloat64(offset + propOffsets[idx], isLittleEndian);
+      return dataView.getFloat32(offset + propOffsets[idx], isLittleEndian);
     };
-
-    const readUchar = (offset: number, idx: number): number => {
-      return dataView.getUint8(offset + propOffsets[idx]);
-    };
+    const readUchar = (offset: number, idx: number): number => dataView.getUint8(offset + propOffsets[idx]);
 
     const maxVerts = Math.min(vertexCount, Math.floor(availableSize / bytesPerVertex));
 
     for (let i = 0; i < maxVerts; i++) {
       const vOff = i * bytesPerVertex;
-
       const x = readFloat(vOff, xIdx);
       const y = readFloat(vOff, yIdx);
       const z = readFloat(vOff, zIdx);
-
       if (!isFinite(x) || !isFinite(y) || !isFinite(z)) continue;
 
-      // Opacity filtering (sigmoid activation)
       if (opacityIdx !== -1) {
-        const rawOpacity = readFloat(vOff, opacityIdx);
-        const alpha = 1 / (1 + Math.exp(-rawOpacity));
-        if (alpha < 0.005) continue;
+        const rawOp = readFloat(vOff, opacityIdx);
+        if (1 / (1 + Math.exp(-rawOp)) < 0.005) continue;
       }
 
       const idx3 = visibleCount * 3;
-      positions[idx3] = x;
-      positions[idx3 + 1] = y;
-      positions[idx3 + 2] = z;
-
-      // Track bounding box
+      positions[idx3] = x; positions[idx3 + 1] = y; positions[idx3 + 2] = z;
       if (x < minX) minX = x; if (x > maxX) maxX = x;
       if (y < minY) minY = y; if (y > maxY) maxY = y;
       if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
 
-      // Color extraction
-      if (f_dc_0_idx !== -1) {
+      if (hasRGB) {
+        const rType = properties[redIdx].type;
+        if (rType === 'uchar' || rType === 'uint8') {
+          colors[idx3] = readUchar(vOff, redIdx) / 255;
+          colors[idx3 + 1] = readUchar(vOff, greenIdx) / 255;
+          colors[idx3 + 2] = readUchar(vOff, blueIdx) / 255;
+        } else {
+          colors[idx3] = Math.max(0, Math.min(1, readFloat(vOff, redIdx)));
+          colors[idx3 + 1] = Math.max(0, Math.min(1, readFloat(vOff, greenIdx)));
+          colors[idx3 + 2] = Math.max(0, Math.min(1, readFloat(vOff, blueIdx)));
+        }
+      } else if (hasSH) {
         const f0 = readFloat(vOff, f_dc_0_idx);
         const f1 = readFloat(vOff, f_dc_1_idx);
         const f2 = readFloat(vOff, f_dc_2_idx);
         colors[idx3] = Math.max(0, Math.min(1, SH_C0 * f0 + 0.5));
         colors[idx3 + 1] = Math.max(0, Math.min(1, SH_C0 * f1 + 0.5));
         colors[idx3 + 2] = Math.max(0, Math.min(1, SH_C0 * f2 + 0.5));
-      } else if (redIdx !== -1) {
-        const propType = properties[redIdx].type;
-        if (propType === 'uchar' || propType === 'uint8') {
-          colors[idx3] = readUchar(vOff, redIdx) / 255;
-          colors[idx3 + 1] = readUchar(vOff, greenIdx) / 255;
-          colors[idx3 + 2] = readUchar(vOff, blueIdx) / 255;
-        } else {
-          const r = readFloat(vOff, redIdx);
-          const g = readFloat(vOff, greenIdx);
-          const b = readFloat(vOff, blueIdx);
-          colors[idx3] = Math.max(0, Math.min(1, r));
-          colors[idx3 + 1] = Math.max(0, Math.min(1, g));
-          colors[idx3 + 2] = Math.max(0, Math.min(1, b));
-        }
       } else {
-        colors[idx3] = 0.7;
-        colors[idx3 + 1] = 0.7;
-        colors[idx3 + 2] = 0.7;
+        colors[idx3] = 0.7; colors[idx3 + 1] = 0.7; colors[idx3 + 2] = 0.7;
       }
 
       visibleCount++;
     }
   } else {
-    // ASCII PLY
     const dataText = decoder.decode(bytes.slice(headerEnd));
     const dataLines = dataText.split('\n').filter(l => l.trim());
     const count = Math.min(vertexCount, dataLines.length);
@@ -240,35 +217,30 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
       const x = parts[xIdx], y = parts[yIdx], z = parts[zIdx];
       if (!isFinite(x) || !isFinite(y) || !isFinite(z)) continue;
 
-      if (opacityIdx !== -1) {
-        const alpha = 1 / (1 + Math.exp(-parts[opacityIdx]));
-        if (alpha < 0.005) continue;
-      }
+      if (opacityIdx !== -1 && 1 / (1 + Math.exp(-parts[opacityIdx])) < 0.005) continue;
 
       const idx3 = visibleCount * 3;
       positions[idx3] = x; positions[idx3 + 1] = y; positions[idx3 + 2] = z;
-
       if (x < minX) minX = x; if (x > maxX) maxX = x;
       if (y < minY) minY = y; if (y > maxY) maxY = y;
       if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
 
-      if (f_dc_0_idx !== -1) {
-        colors[idx3] = Math.max(0, Math.min(1, SH_C0 * parts[f_dc_0_idx] + 0.5));
-        colors[idx3 + 1] = Math.max(0, Math.min(1, SH_C0 * parts[f_dc_1_idx] + 0.5));
-        colors[idx3 + 2] = Math.max(0, Math.min(1, SH_C0 * parts[f_dc_2_idx] + 0.5));
-      } else if (redIdx !== -1) {
+      if (hasRGB) {
         colors[idx3] = parts[redIdx] / 255;
         colors[idx3 + 1] = parts[greenIdx] / 255;
         colors[idx3 + 2] = parts[blueIdx] / 255;
+      } else if (hasSH) {
+        colors[idx3] = Math.max(0, Math.min(1, SH_C0 * parts[f_dc_0_idx] + 0.5));
+        colors[idx3 + 1] = Math.max(0, Math.min(1, SH_C0 * parts[f_dc_1_idx] + 0.5));
+        colors[idx3 + 2] = Math.max(0, Math.min(1, SH_C0 * parts[f_dc_2_idx] + 0.5));
       } else {
         colors[idx3] = 0.7; colors[idx3 + 1] = 0.7; colors[idx3 + 2] = 0.7;
       }
-
       visibleCount++;
     }
   }
 
-  console.log(`Parsed ${visibleCount} visible points (from ${vertexCount} total)`);
+  console.log(`Parsed ${visibleCount} visible points (from ${vertexCount} total), colorSource=${colorSource}`);
 
   return {
     positions: positions.slice(0, visibleCount * 3),
@@ -277,50 +249,33 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
     metadata: {
       totalVertices: vertexCount,
       visibleVertices: visibleCount,
-      hasColors,
-      hasOpacity,
-      properties: propNames,
-      format,
-      boundingBox: {
-        min: [minX, minY, minZ],
-        max: [maxX, maxY, maxZ],
-      },
+      hasColors, hasOpacity,
+      properties: propNames, format, colorSource,
+      boundingBox: { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] },
     },
   };
 }
 
-// ── Walkthrough Controls (First-Person) ──────────────────────────────────────
+// ── Walkthrough Controls ─────────────────────────────────────────────────────
 
 function WalkthroughControls({ active }: { active: boolean }) {
   const { camera, gl } = useThree();
   const euler = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
   const keys = useRef<Set<string>>(new Set());
   const isLocked = useRef(false);
-  const MOVE_SPEED = 3;
-  const LOOK_SPEED = 0.002;
 
   useEffect(() => {
-    if (!active) {
-      document.exitPointerLock?.();
-      isLocked.current = false;
-      return;
-    }
+    if (!active) { document.exitPointerLock?.(); isLocked.current = false; return; }
 
     const onKeyDown = (e: KeyboardEvent) => keys.current.add(e.code);
     const onKeyUp = (e: KeyboardEvent) => keys.current.delete(e.code);
-    const onClick = () => {
-      if (active && !isLocked.current) {
-        gl.domElement.requestPointerLock();
-      }
-    };
-    const onPointerLockChange = () => {
-      isLocked.current = document.pointerLockElement === gl.domElement;
-    };
-    const onMouseMove = (e: MouseEvent) => {
+    const onClick = () => { if (active && !isLocked.current) gl.domElement.requestPointerLock(); };
+    const onPLC = () => { isLocked.current = document.pointerLockElement === gl.domElement; };
+    const onMM = (e: MouseEvent) => {
       if (!isLocked.current) return;
       euler.current.setFromQuaternion(camera.quaternion);
-      euler.current.y -= e.movementX * LOOK_SPEED;
-      euler.current.x -= e.movementY * LOOK_SPEED;
+      euler.current.y -= e.movementX * 0.002;
+      euler.current.x -= e.movementY * 0.002;
       euler.current.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, euler.current.x));
       camera.quaternion.setFromEuler(euler.current);
     };
@@ -328,236 +283,153 @@ function WalkthroughControls({ active }: { active: boolean }) {
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     gl.domElement.addEventListener('click', onClick);
-    document.addEventListener('pointerlockchange', onPointerLockChange);
-    document.addEventListener('mousemove', onMouseMove);
-
+    document.addEventListener('pointerlockchange', onPLC);
+    document.addEventListener('mousemove', onMM);
     return () => {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       gl.domElement.removeEventListener('click', onClick);
-      document.removeEventListener('pointerlockchange', onPointerLockChange);
-      document.removeEventListener('mousemove', onMouseMove);
-      document.exitPointerLock?.();
-      isLocked.current = false;
+      document.removeEventListener('pointerlockchange', onPLC);
+      document.removeEventListener('mousemove', onMM);
+      document.exitPointerLock?.(); isLocked.current = false;
     };
   }, [active, camera, gl]);
 
   useFrame((_, delta) => {
     if (!active || !isLocked.current) return;
-
-    const direction = new THREE.Vector3();
-    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    const dir = new THREE.Vector3();
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-
-    if (keys.current.has('KeyW') || keys.current.has('ArrowUp')) direction.add(forward);
-    if (keys.current.has('KeyS') || keys.current.has('ArrowDown')) direction.sub(forward);
-    if (keys.current.has('KeyA') || keys.current.has('ArrowLeft')) direction.sub(right);
-    if (keys.current.has('KeyD') || keys.current.has('ArrowRight')) direction.add(right);
-    if (keys.current.has('Space')) direction.y += 1;
-    if (keys.current.has('ShiftLeft')) direction.y -= 1;
-
-    if (direction.lengthSq() > 0) {
-      direction.normalize().multiplyScalar(MOVE_SPEED * delta);
-      camera.position.add(direction);
-    }
+    if (keys.current.has('KeyW') || keys.current.has('ArrowUp')) dir.add(fwd);
+    if (keys.current.has('KeyS') || keys.current.has('ArrowDown')) dir.sub(fwd);
+    if (keys.current.has('KeyA') || keys.current.has('ArrowLeft')) dir.sub(right);
+    if (keys.current.has('KeyD') || keys.current.has('ArrowRight')) dir.add(right);
+    if (keys.current.has('Space')) dir.y += 1;
+    if (keys.current.has('ShiftLeft')) dir.y -= 1;
+    if (dir.lengthSq() > 0) { dir.normalize().multiplyScalar(3 * delta); camera.position.add(dir); }
   });
 
   return null;
 }
 
-// ── Measurement Line ─────────────────────────────────────────────────────────
+// ── Measurement Visuals ──────────────────────────────────────────────────────
 
-function MeasurementLine({
-  points,
-}: {
-  points: MeasurePoint[];
-}) {
-  if (points.length < 2) return null;
-
-  const linePoints = points.map(p => p.position);
-
-  const lineGeo = new THREE.BufferGeometry().setFromPoints(linePoints);
-  const lineMat = new THREE.LineBasicMaterial({ color: '#00ff88', linewidth: 2 });
-  const lineObj = new THREE.Line(lineGeo, lineMat);
+function MeasurementVisuals({ points }: { points: MeasurePoint[] }) {
+  const sphereGeo = useMemo(() => new THREE.SphereGeometry(0.03, 16, 16), []);
+  const greenMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#00ff88' }), []);
+  const orangeMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#ff8800' }), []);
+  const lineObj = useMemo(() => {
+    if (points.length < 2) return null;
+    const geo = new THREE.BufferGeometry().setFromPoints(points.map(p => p.position));
+    const mat = new THREE.LineBasicMaterial({ color: '#00ff88', linewidth: 2 });
+    return new THREE.Line(geo, mat);
+  }, [points]);
 
   return (
     <group>
-      <primitive object={lineObj} />
-      {/* Start point */}
-      <mesh position={linePoints[0]}>
-        <sphereGeometry args={[0.02, 16, 16]} />
-        <meshBasicMaterial color="#00ff88" />
-      </mesh>
-      {/* End point */}
-      <mesh position={linePoints[1]}>
-        <sphereGeometry args={[0.02, 16, 16]} />
-        <meshBasicMaterial color="#00ff88" />
-      </mesh>
+      {points.map((pt, i) => (
+        <mesh key={`mpt-${i}`} position={pt.position} geometry={sphereGeo} material={i === 0 ? orangeMat : greenMat} />
+      ))}
+      {lineObj && <primitive object={lineObj} />}
     </group>
   );
 }
 
 // ── MeasureTool ──────────────────────────────────────────────────────────────
 
-function MeasureTool({
-  active,
-  onMeasure,
-}: {
-  active: boolean;
-  onMeasure: (distance: number | null) => void;
-}) {
-  const { camera, raycaster, scene, gl } = useThree();
-  const points = useRef<MeasurePoint[]>([]);
-  const [measurePoints, setMeasurePoints] = useState<MeasurePoint[]>([]);
+function MeasureTool({ active, points, onAddPoint }: { active: boolean; points: MeasurePoint[]; onAddPoint: (pt: THREE.Vector3) => void }) {
+  const { camera, scene, gl, raycaster } = useThree();
+
+  useEffect(() => { raycaster.params.Points = { threshold: 0.1 }; }, [raycaster]);
 
   useEffect(() => {
-    if (!active) {
-      points.current = [];
-      setMeasurePoints([]);
-      onMeasure(null);
-      return;
-    }
-
+    if (!active) return;
     const onClick = (e: MouseEvent) => {
-      if (!active) return;
       const rect = gl.domElement.getBoundingClientRect();
       const mouse = new THREE.Vector2(
         ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -((e.clientY - rect.top) / rect.height) * 2 + 1
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
       );
-
       raycaster.setFromCamera(mouse, camera);
 
-      // Find intersection with point cloud
-      const intersects = raycaster.intersectObjects(scene.children, true);
-      if (intersects.length > 0) {
-        const point = intersects[0].point.clone();
+      // Try points first, then meshes
+      const pointObjs: THREE.Object3D[] = [];
+      const meshObjs: THREE.Object3D[] = [];
+      scene.traverse((o) => {
+        if (o instanceof THREE.Points) pointObjs.push(o);
+        else if (o instanceof THREE.Mesh && o.geometry.index) meshObjs.push(o);
+      });
 
-        if (points.current.length >= 2) {
-          points.current = [];
-        }
+      let intersects = raycaster.intersectObjects(pointObjs, false);
+      if (intersects.length === 0) intersects = raycaster.intersectObjects(meshObjs, false);
+      if (intersects.length > 0) { onAddPoint(intersects[0].point.clone()); return; }
 
-        points.current.push({ position: point });
-        setMeasurePoints([...points.current]);
-
-        if (points.current.length === 2) {
-          const dist = points.current[0].position.distanceTo(points.current[1].position);
-          onMeasure(dist);
-        } else {
-          onMeasure(null);
-        }
-      }
+      // Fallback: ground plane
+      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      const target = new THREE.Vector3();
+      raycaster.ray.intersectPlane(plane, target);
+      if (target) onAddPoint(target.clone());
     };
-
     gl.domElement.addEventListener('click', onClick);
     return () => gl.domElement.removeEventListener('click', onClick);
-  }, [active, camera, raycaster, scene, gl, onMeasure]);
+  }, [active, camera, scene, gl, raycaster, onAddPoint]);
 
-  return <MeasurementLine points={measurePoints} />;
+  return <MeasurementVisuals points={points} />;
 }
 
 // ── PointCloud Component ─────────────────────────────────────────────────────
 
-function PointCloud({
-  url,
-  onMetadata,
-  pointSize,
-}: {
-  url: string;
-  onMetadata: (meta: ModelMetadata) => void;
-  pointSize: number;
-}) {
+function PointCloud({ url, onMetadata, pointSize }: { url: string; onMetadata: (m: ModelMetadata) => void; pointSize: number }) {
   const meshRef = useRef<THREE.Points | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!url) return;
     setError(null);
-
     fetch(url)
-      .then(response => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        return response.arrayBuffer();
-      })
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer(); })
       .then(buffer => {
-        try {
-          const result = parseGaussianPLY(buffer);
+        const result = parseGaussianPLY(buffer);
+        if (result.vertexCount === 0) throw new Error('No visible points');
+        if (!meshRef.current) return;
 
-          if (result.vertexCount === 0) {
-            throw new Error('No visible points in model after filtering');
-          }
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(result.positions, 3));
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(result.colors, 3));
+        geometry.computeBoundingBox();
 
-          if (meshRef.current) {
-            const geometry = new THREE.BufferGeometry();
-            geometry.setAttribute('position', new THREE.Float32BufferAttribute(result.positions, 3));
-            geometry.setAttribute('color', new THREE.Float32BufferAttribute(result.colors, 3));
-            geometry.computeBoundingBox();
-
-            const bbox = geometry.boundingBox;
-            if (bbox) {
-              const center = new THREE.Vector3();
-              bbox.getCenter(center);
-              geometry.translate(-center.x, -center.y, -center.z);
-              const minY = bbox.min.y - center.y;
-              geometry.translate(0, -minY, 0);
-            }
-
-            geometry.computeBoundingSphere();
-
-            // Adaptive point size based on bounding sphere
-            const bsRadius = geometry.boundingSphere?.radius || 1;
-            const adaptiveSize = Math.max(0.002, Math.min(0.05, bsRadius / Math.sqrt(result.vertexCount) * 2));
-
-            const material = new THREE.PointsMaterial({
-              size: pointSize > 0 ? pointSize : adaptiveSize,
-              vertexColors: true,
-              sizeAttenuation: true,
-              transparent: true,
-              opacity: 0.95,
-              depthWrite: true,
-            });
-
-            // Dispose old
-            meshRef.current.geometry.dispose();
-            if (meshRef.current.material instanceof THREE.Material) {
-              meshRef.current.material.dispose();
-            }
-
-            meshRef.current.geometry = geometry;
-            meshRef.current.material = material;
-
-            // Emit metadata
-            onMetadata({
-              pointCount: result.vertexCount,
-              fileSize: buffer.byteLength,
-              boundingBox: result.metadata.boundingBox,
-              hasColors: result.metadata.hasColors,
-              hasOpacity: result.metadata.hasOpacity,
-              properties: result.metadata.properties,
-              format: result.metadata.format,
-            });
-          }
-        } catch (err: any) {
-          console.error('PLY parse error:', err);
-          setError(err.message || 'Failed to parse PLY');
+        const bbox = geometry.boundingBox;
+        if (bbox) {
+          const center = new THREE.Vector3();
+          bbox.getCenter(center);
+          geometry.translate(-center.x, -center.y, -center.z);
+          geometry.translate(0, -(bbox.min.y - center.y), 0);
         }
+        geometry.computeBoundingSphere();
+
+        const bsRadius = geometry.boundingSphere?.radius || 1;
+        const adaptiveSize = Math.max(0.002, Math.min(0.05, bsRadius / Math.sqrt(result.vertexCount) * 2));
+        const material = new THREE.PointsMaterial({
+          size: pointSize > 0 ? pointSize : adaptiveSize,
+          vertexColors: true, sizeAttenuation: true, transparent: true, opacity: 0.95, depthWrite: true,
+        });
+
+        meshRef.current.geometry.dispose();
+        if (meshRef.current.material instanceof THREE.Material) meshRef.current.material.dispose();
+        meshRef.current.geometry = geometry;
+        meshRef.current.material = material;
+
+        onMetadata({
+          pointCount: result.vertexCount, fileSize: buffer.byteLength,
+          boundingBox: result.metadata.boundingBox, hasColors: result.metadata.hasColors,
+          hasOpacity: result.metadata.hasOpacity, properties: result.metadata.properties,
+          format: result.metadata.format,
+        });
       })
-      .catch(err => {
-        console.error('Fetch error:', err);
-        setError('Failed to load model: ' + err.message);
-      });
+      .catch(err => { console.error('PLY error:', err); setError(err.message); });
   }, [url, onMetadata, pointSize]);
 
-  if (error) {
-    return (
-      <group>
-        <mesh>
-          <boxGeometry args={[0.5, 0.5, 0.5]} />
-          <meshStandardMaterial color="#ff3333" wireframe />
-        </mesh>
-      </group>
-    );
-  }
+  if (error) return <group><mesh><boxGeometry args={[0.5, 0.5, 0.5]} /><meshStandardMaterial color="#ff3333" wireframe /></mesh></group>;
 
   return (
     <points ref={meshRef}>
@@ -567,14 +439,58 @@ function PointCloud({
   );
 }
 
+// ── GLB Mesh Component ───────────────────────────────────────────────────────
+
+function GLBMesh({ url }: { url: string }) {
+  const gltf = useLoader(GLTFLoader, url);
+  const groupRef = useRef<THREE.Group>(null);
+
+  useEffect(() => {
+    if (!gltf?.scene || !groupRef.current) return;
+
+    const clone = gltf.scene.clone(true);
+
+    // Centre the model identically to the point cloud
+    const box = new THREE.Box3().setFromObject(clone);
+    const center = new THREE.Vector3();
+    box.getCenter(center);
+    clone.position.sub(center);
+    clone.position.y -= box.min.y - center.y;
+
+    // Ensure vertex-colour materials render correctly
+    clone.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        const m = child as THREE.Mesh;
+        const mat = m.material as THREE.MeshStandardMaterial;
+        if (mat) {
+          mat.vertexColors = true;
+          mat.needsUpdate = true;
+        }
+      }
+    });
+
+    // Clear previous children
+    while (groupRef.current.children.length) groupRef.current.remove(groupRef.current.children[0]);
+    groupRef.current.add(clone);
+  }, [gltf]);
+
+  return <group ref={groupRef} />;
+}
+
 // ── Scene Setup ──────────────────────────────────────────────────────────────
 
-function SceneSetup({ mode }: { mode: ViewerMode }) {
+function SceneSetup({ mode, renderMode }: { mode: ViewerMode; renderMode: RenderMode }) {
   return (
     <>
       <color attach="background" args={['#0a0a0a']} />
-      <ambientLight intensity={0.6} />
-      <directionalLight position={[5, 5, 5]} intensity={0.3} />
+      <ambientLight intensity={renderMode === 'mesh' ? 0.8 : 0.6} />
+      <directionalLight position={[5, 5, 5]} intensity={renderMode === 'mesh' ? 0.6 : 0.3} />
+      {renderMode === 'mesh' && (
+        <>
+          <directionalLight position={[-3, 3, -3]} intensity={0.3} />
+          <Environment preset="studio" background={false} />
+        </>
+      )}
       <gridHelper args={[30, 30, 0x222222, 0x111111]} position={[0, -0.01, 0]} />
       {mode === 'orbit' && (
         <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
@@ -587,48 +503,51 @@ function SceneSetup({ mode }: { mode: ViewerMode }) {
 
 // ── Main Viewer Component ────────────────────────────────────────────────────
 
-export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
+export default function Viewer3D({ modelUrl, meshUrl, onModelMetadata }: Viewer3DProps) {
   const [mode, setMode] = useState<ViewerMode>('orbit');
-  const [pointSize, setPointSize] = useState(0); // 0 = auto
+  const [renderMode, setRenderMode] = useState<RenderMode>('points');
+  const [pointSize, setPointSize] = useState(0);
+  const [measurePoints, setMeasurePoints] = useState<MeasurePoint[]>([]);
   const [measuredDistance, setMeasuredDistance] = useState<number | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const handleMetadata = useCallback((meta: ModelMetadata) => {
-    onModelMetadata?.(meta);
-  }, [onModelMetadata]);
+  const handleMetadata = useCallback((meta: ModelMetadata) => { onModelMetadata?.(meta); }, [onModelMetadata]);
 
-  const handleMeasure = useCallback((distance: number | null) => {
-    setMeasuredDistance(distance);
-  }, []);
-
-  // Snapshot
-  const handleSnapshot = useCallback(() => {
-    const canvas = document.querySelector('canvas');
-    if (!canvas) return;
-    // Need to render a frame before capturing
-    requestAnimationFrame(() => {
-      const dataUrl = canvas.toDataURL('image/png');
-      const a = document.createElement('a');
-      a.href = dataUrl;
-      a.download = `gaussian-splat-snapshot-${Date.now()}.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
+  const handleAddMeasurePoint = useCallback((point: THREE.Vector3) => {
+    setMeasurePoints(prev => {
+      const next = prev.length >= 2 ? [{ position: point }] : [...prev, { position: point }];
+      if (next.length === 2) setMeasuredDistance(next[0].position.distanceTo(next[1].position));
+      else setMeasuredDistance(null);
+      return next;
     });
   }, []);
 
-  // Reset view
-  const handleReset = useCallback(() => {
-    setMode('orbit');
-    setMeasuredDistance(null);
-    setPointSize(0);
+  const handleClearMeasure = useCallback(() => { setMeasurePoints([]); setMeasuredDistance(null); }, []);
+  const handleSnapshot = useCallback(() => {
+    const canvas = document.querySelector('canvas');
+    if (!canvas) return;
+    requestAnimationFrame(() => {
+      const a = document.createElement('a');
+      a.href = canvas.toDataURL('image/png');
+      a.download = `gaussian-splat-snapshot-${Date.now()}.png`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    });
   }, []);
+  const handleReset = useCallback(() => { setMode('orbit'); setMeasurePoints([]); setMeasuredDistance(null); setPointSize(0); }, []);
+
+  useEffect(() => { if (mode !== 'measure') { setMeasurePoints([]); setMeasuredDistance(null); } }, [mode]);
+
+  // Auto-select mesh mode when meshUrl becomes available
+  useEffect(() => { if (meshUrl && renderMode === 'points') setRenderMode('mesh'); }, [meshUrl]);
 
   if (!modelUrl) return null;
 
   const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-  const fullUrl = modelUrl.startsWith('http') ? modelUrl : `${apiBase}${modelUrl}`;
+  const fullPlyUrl = modelUrl.startsWith('http') ? modelUrl : `${apiBase}${modelUrl}`;
+  const fullMeshUrl = meshUrl ? (meshUrl.startsWith('http') ? meshUrl : `${apiBase}${meshUrl}`) : null;
+
+  const hasMesh = !!fullMeshUrl;
 
   return (
     <div className="w-full h-full relative group bg-[#0a0a0a] rounded-xl overflow-hidden">
@@ -639,152 +558,147 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         gl={{ preserveDrawingBuffer: true, antialias: true }}
         ref={canvasRef as any}
       >
-        <SceneSetup mode={mode} />
+        <SceneSetup mode={mode} renderMode={renderMode} />
 
         {mode === 'orbit' && (
-          <OrbitControls
-            makeDefault
-            enableDamping
-            dampingFactor={0.05}
-            rotateSpeed={0.8}
-            zoomSpeed={0.8}
-            panSpeed={0.8}
-            target={[0, 1, 0]}
-          />
+          <OrbitControls makeDefault enableDamping dampingFactor={0.05} rotateSpeed={0.8} zoomSpeed={0.8} panSpeed={0.8} target={[0, 1, 0]} />
         )}
 
         <WalkthroughControls active={mode === 'walkthrough'} />
-        <MeasureTool active={mode === 'measure'} onMeasure={handleMeasure} />
-        <PointCloud url={fullUrl} onMetadata={handleMetadata} pointSize={pointSize} />
+        <MeasureTool active={mode === 'measure'} points={measurePoints} onAddPoint={handleAddMeasurePoint} />
+
+        {/* Render mode: points or mesh */}
+        {renderMode === 'points' && (
+          <PointCloud url={fullPlyUrl} onMetadata={handleMetadata} pointSize={pointSize} />
+        )}
+        {renderMode === 'mesh' && fullMeshUrl && (
+          <GLBMesh url={fullMeshUrl} />
+        )}
+        {/* If in mesh mode but no mesh URL, fall back to points */}
+        {renderMode === 'mesh' && !fullMeshUrl && (
+          <PointCloud url={fullPlyUrl} onMetadata={handleMetadata} pointSize={pointSize} />
+        )}
       </Canvas>
 
-      {/* ── Top-Left: Mode Indicator ───────────────────────────────────────── */}
+      {/* ── Top-Left: Mode Indicator ─────────────────────────────────────── */}
       <div className="absolute top-3 left-3 z-10">
         <div className="bg-black/70 backdrop-blur-md text-white/90 text-xs px-3 py-1.5 rounded-lg border border-white/10 font-mono flex items-center gap-2">
-          {mode === 'orbit' && <><MousePointer className="w-3 h-3" /> Orbit Mode</>}
-          {mode === 'walkthrough' && <><Footprints className="w-3 h-3" /> Walk-Through Mode</>}
-          {mode === 'measure' && <><Ruler className="w-3 h-3" /> Measure Mode</>}
+          {mode === 'orbit' && <><MousePointer className="w-3 h-3" /> Orbit</>}
+          {mode === 'walkthrough' && <><Footprints className="w-3 h-3" /> Walk-Through</>}
+          {mode === 'measure' && <><Ruler className="w-3 h-3" /> Measure</>}
+          <span className="text-white/30">|</span>
+          {renderMode === 'points' ? (
+            <span className="text-blue-300 flex items-center gap-1"><Layers className="w-3 h-3" /> Points</span>
+          ) : (
+            <span className="text-purple-300 flex items-center gap-1"><Box className="w-3 h-3" /> Mesh</span>
+          )}
         </div>
       </div>
 
-      {/* ── Top-Right: Toolbar ─────────────────────────────────────────────── */}
+      {/* ── Top-Right: Toolbar ────────────────────────────────────────────── */}
       <div className="absolute top-3 right-3 z-10 flex flex-col gap-1.5">
-        {/* Mode Buttons */}
-        <ToolbarButton
-          icon={<MousePointer className="w-3.5 h-3.5" />}
-          label="Orbit"
-          active={mode === 'orbit'}
-          onClick={() => setMode('orbit')}
-        />
-        <ToolbarButton
-          icon={<Footprints className="w-3.5 h-3.5" />}
-          label="Walk"
-          active={mode === 'walkthrough'}
-          onClick={() => setMode('walkthrough')}
-        />
-        <ToolbarButton
-          icon={<Ruler className="w-3.5 h-3.5" />}
-          label="Measure"
-          active={mode === 'measure'}
-          onClick={() => setMode('measure')}
-        />
+        <ToolbarButton icon={<MousePointer className="w-3.5 h-3.5" />} label="Orbit" active={mode === 'orbit'} onClick={() => setMode('orbit')} />
+        <ToolbarButton icon={<Footprints className="w-3.5 h-3.5" />} label="Walk" active={mode === 'walkthrough'} onClick={() => setMode('walkthrough')} />
+        <ToolbarButton icon={<Ruler className="w-3.5 h-3.5" />} label="Measure" active={mode === 'measure'} onClick={() => setMode('measure')} />
 
         <div className="border-t border-white/10 my-1" />
 
-        {/* Actions */}
+        {/* Render mode toggle */}
         <ToolbarButton
-          icon={<Camera className="w-3.5 h-3.5" />}
-          label="Snapshot"
-          onClick={handleSnapshot}
+          icon={<Layers className="w-3.5 h-3.5" />}
+          label="Points"
+          active={renderMode === 'points'}
+          onClick={() => setRenderMode('points')}
         />
-        <ToolbarButton
-          icon={<RotateCcw className="w-3.5 h-3.5" />}
-          label="Reset"
-          onClick={handleReset}
-        />
-        <ToolbarButton
-          icon={<Info className="w-3.5 h-3.5" />}
-          label="Help"
-          active={showHelp}
-          onClick={() => setShowHelp(!showHelp)}
-        />
+        {hasMesh && (
+          <ToolbarButton
+            icon={<Box className="w-3.5 h-3.5" />}
+            label="Mesh"
+            active={renderMode === 'mesh'}
+            onClick={() => setRenderMode('mesh')}
+            accent="purple"
+          />
+        )}
+
+        <div className="border-t border-white/10 my-1" />
+
+        <ToolbarButton icon={<Camera className="w-3.5 h-3.5" />} label="Snapshot" onClick={handleSnapshot} />
+        <ToolbarButton icon={<RotateCcw className="w-3.5 h-3.5" />} label="Reset" onClick={handleReset} />
+        <ToolbarButton icon={<Info className="w-3.5 h-3.5" />} label="Help" active={showHelp} onClick={() => setShowHelp(!showHelp)} />
       </div>
 
-      {/* ── Bottom-Left: Point Size Controls ───────────────────────────────── */}
-      <div className="absolute bottom-3 left-3 z-10 flex items-center gap-2">
-        <div className="bg-black/70 backdrop-blur-md rounded-lg border border-white/10 flex items-center px-2 py-1 gap-1">
-          <span className="text-[10px] text-white/50 font-mono mr-1">Size</span>
-          <button
-            onClick={() => setPointSize(prev => Math.max(0.001, (prev || 0.01) / 1.5))}
-            className="text-white/60 hover:text-white p-0.5 transition-colors"
-          >
-            <ZoomOut className="w-3 h-3" />
-          </button>
-          <span className="text-[10px] text-white/70 font-mono w-10 text-center">
-            {pointSize > 0 ? pointSize.toFixed(3) : 'Auto'}
-          </span>
-          <button
-            onClick={() => setPointSize(prev => Math.min(0.1, (prev || 0.01) * 1.5))}
-            className="text-white/60 hover:text-white p-0.5 transition-colors"
-          >
-            <ZoomIn className="w-3 h-3" />
-          </button>
-          <button
-            onClick={() => setPointSize(0)}
-            className="text-white/40 hover:text-white p-0.5 ml-1 transition-colors text-[9px] font-mono"
-          >
-            Auto
-          </button>
-        </div>
-      </div>
-
-      {/* ── Bottom-Center: Context Help ────────────────────────────────────── */}
-      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-10">
-        <div className="bg-black/70 backdrop-blur-md text-white/70 text-[10px] px-3 py-1.5 rounded-lg border border-white/10 font-mono">
-          {mode === 'orbit' && 'Left: Rotate  |  Right: Pan  |  Scroll: Zoom'}
-          {mode === 'walkthrough' && 'Click to lock  |  WASD: Move  |  Space/Shift: Up/Down  |  ESC: Unlock'}
-          {mode === 'measure' && 'Click two points to measure distance'}
-        </div>
-      </div>
-
-      {/* ── Measurement Result ─────────────────────────────────────────────── */}
-      {measuredDistance !== null && (
-        <div className="absolute bottom-14 left-1/2 -translate-x-1/2 z-10">
-          <div className="bg-emerald-500/20 backdrop-blur-md text-emerald-300 text-sm px-4 py-2 rounded-lg border border-emerald-500/30 font-mono flex items-center gap-2">
-            <Ruler className="w-4 h-4" />
-            Distance: {measuredDistance.toFixed(4)} units
-            <button
-              onClick={() => { setMeasuredDistance(null); }}
-              className="ml-2 text-emerald-400/60 hover:text-emerald-300 transition-colors"
-            >
-              <X className="w-3 h-3" />
-            </button>
+      {/* ── Measure Sub-Controls ──────────────────────────────────────────── */}
+      {mode === 'measure' && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10">
+          <div className="bg-black/80 backdrop-blur-md border border-white/10 rounded-xl px-4 py-2.5 flex items-center gap-4 font-mono text-xs">
+            <div className="flex items-center gap-2">
+              <span className={`flex items-center gap-1.5 ${measurePoints.length >= 1 ? 'text-orange-400' : 'text-white/40'}`}>
+                <CircleDot className="w-3 h-3" /> Point A {measurePoints.length >= 1 ? '(set)' : ''}
+              </span>
+              <span className="text-white/20">&rarr;</span>
+              <span className={`flex items-center gap-1.5 ${measurePoints.length >= 2 ? 'text-emerald-400' : 'text-white/40'}`}>
+                <CircleDot className="w-3 h-3" /> Point B {measurePoints.length >= 2 ? '(set)' : ''}
+              </span>
+            </div>
+            {measuredDistance !== null && (
+              <>
+                <div className="border-l border-white/10 h-5" />
+                <div className="flex items-center gap-2">
+                  <Ruler className="w-3.5 h-3.5 text-emerald-400" />
+                  <span className="text-emerald-300 text-sm font-semibold">{measuredDistance.toFixed(3)}</span>
+                  <span className="text-white/40">units</span>
+                </div>
+              </>
+            )}
+            {measurePoints.length > 0 && (
+              <>
+                <div className="border-l border-white/10 h-5" />
+                <button onClick={handleClearMeasure} className="flex items-center gap-1 text-red-400/70 hover:text-red-400 transition-colors">
+                  <Trash2 className="w-3 h-3" /> Clear
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
 
-      {/* ── Help Panel ─────────────────────────────────────────────────────── */}
+      {/* ── Bottom-Left: Point Size Controls (points mode only) ───────────── */}
+      {renderMode === 'points' && (
+        <div className="absolute bottom-3 left-3 z-10 flex items-center gap-2">
+          <div className="bg-black/70 backdrop-blur-md rounded-lg border border-white/10 flex items-center px-2 py-1 gap-1">
+            <span className="text-[10px] text-white/50 font-mono mr-1">Size</span>
+            <button onClick={() => setPointSize(p => Math.max(0.001, (p || 0.01) / 1.5))} className="text-white/60 hover:text-white p-0.5 transition-colors"><ZoomOut className="w-3 h-3" /></button>
+            <span className="text-[10px] text-white/70 font-mono w-10 text-center">{pointSize > 0 ? pointSize.toFixed(3) : 'Auto'}</span>
+            <button onClick={() => setPointSize(p => Math.min(0.1, (p || 0.01) * 1.5))} className="text-white/60 hover:text-white p-0.5 transition-colors"><ZoomIn className="w-3 h-3" /></button>
+            <button onClick={() => setPointSize(0)} className="text-white/40 hover:text-white p-0.5 ml-1 transition-colors text-[9px] font-mono">Auto</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Bottom-Center: Context Help ───────────────────────────────────── */}
+      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-10">
+        <div className="bg-black/70 backdrop-blur-md text-white/70 text-[10px] px-3 py-1.5 rounded-lg border border-white/10 font-mono">
+          {mode === 'orbit' && 'Left: Rotate  |  Right: Pan  |  Scroll: Zoom'}
+          {mode === 'walkthrough' && 'Click to lock  |  WASD: Move  |  Space/Shift: Up/Down  |  ESC: Unlock'}
+          {mode === 'measure' && 'Click on the model to place points (A then B)'}
+        </div>
+      </div>
+
+      {/* ── Help Panel ────────────────────────────────────────────────────── */}
       {showHelp && (
         <div className="absolute top-14 right-3 z-20 w-64">
           <div className="bg-black/90 backdrop-blur-md border border-white/10 rounded-xl p-4 text-xs text-white/80 space-y-3">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-white text-sm">Viewer Controls</span>
-              <button onClick={() => setShowHelp(false)} className="text-white/40 hover:text-white">
-                <X className="w-3 h-3" />
-              </button>
+              <button onClick={() => setShowHelp(false)} className="text-white/40 hover:text-white"><X className="w-3 h-3" /></button>
             </div>
             <div className="space-y-2">
-              <HelpItem icon={<MousePointer className="w-3 h-3" />} title="Orbit Mode">
-                Left-click drag to rotate. Right-click drag to pan. Scroll to zoom.
-              </HelpItem>
-              <HelpItem icon={<Footprints className="w-3 h-3" />} title="Walk-Through">
-                Click to lock cursor. WASD to move. Mouse to look. Space/Shift for up/down. ESC to unlock.
-              </HelpItem>
-              <HelpItem icon={<Ruler className="w-3 h-3" />} title="Measure">
-                Click on two points in the model to measure distance between them.
-              </HelpItem>
-              <HelpItem icon={<Camera className="w-3 h-3" />} title="Snapshot">
-                Captures the current view as a PNG image and downloads it.
+              <HelpItem icon={<MousePointer className="w-3 h-3" />} title="Orbit Mode">Left-click drag to rotate. Right-click drag to pan. Scroll to zoom.</HelpItem>
+              <HelpItem icon={<Footprints className="w-3 h-3" />} title="Walk-Through">Click to lock cursor. WASD to move. Mouse to look. Space/Shift for up/down.</HelpItem>
+              <HelpItem icon={<Ruler className="w-3 h-3" />} title="Measure">Click two points on the model. Orange = Point A, Green = Point B.</HelpItem>
+              <HelpItem icon={<Camera className="w-3 h-3" />} title="Snapshot">Captures the current view as a PNG image.</HelpItem>
+              <HelpItem icon={<Layers className="w-3 h-3" />} title="Points / Mesh">
+                Toggle between the raw point cloud and reconstructed surface mesh for more definition.
               </HelpItem>
             </div>
           </div>
@@ -796,25 +710,16 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
 
 // ── Toolbar Button ───────────────────────────────────────────────────────────
 
-function ToolbarButton({
-  icon,
-  label,
-  active,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  active?: boolean;
-  onClick: () => void;
+function ToolbarButton({ icon, label, active, onClick, accent }: {
+  icon: React.ReactNode; label: string; active?: boolean; onClick: () => void; accent?: 'emerald' | 'purple';
 }) {
+  const color = accent === 'purple'
+    ? (active ? 'bg-purple-500/20 text-purple-300 border-purple-500/30' : 'bg-black/70 text-white/60 border-white/10 hover:text-white hover:bg-black/90')
+    : (active ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-black/70 text-white/60 border-white/10 hover:text-white hover:bg-black/90');
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-mono transition-all duration-150 border ${
-        active
-          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-          : 'bg-black/70 text-white/60 border-white/10 hover:text-white hover:bg-black/90'
-      } backdrop-blur-md`}
+      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-mono transition-all duration-150 border ${color} backdrop-blur-md`}
       title={label}
     >
       {icon}
@@ -825,21 +730,10 @@ function ToolbarButton({
 
 // ── Help Item ────────────────────────────────────────────────────────────────
 
-function HelpItem({
-  icon,
-  title,
-  children,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  children: React.ReactNode;
-}) {
+function HelpItem({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="flex items-center gap-1.5 text-white/90 font-medium mb-0.5">
-        {icon}
-        {title}
-      </div>
+      <div className="flex items-center gap-1.5 text-white/90 font-medium mb-0.5">{icon}{title}</div>
       <p className="text-white/50 leading-relaxed pl-5">{children}</p>
     </div>
   );

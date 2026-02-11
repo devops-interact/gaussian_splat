@@ -20,12 +20,46 @@ SH_C0 = 0.28209479177387814
 def sh_to_rgb(f_dc: np.ndarray) -> np.ndarray:
     """
     Convert Spherical Harmonics DC coefficients to RGB [0, 255] uint8 values.
-    
-    Formula: color = clamp(SH_C0 * f_dc + 0.5, 0, 1) * 255
+
+    Standard 3DGS formula: color = clamp(SH_C0 * f_dc + 0.5, 0, 1) * 255
+
+    If the input values look like they're already in [0,1] range (not SH space),
+    we treat them as direct RGB to avoid producing wrong colours.
     """
-    rgb_float = SH_C0 * f_dc + 0.5
-    rgb_float = np.clip(rgb_float, 0.0, 1.0)
-    return (rgb_float * 255).astype(np.uint8)
+    f_min, f_max = float(np.min(f_dc)), float(np.max(f_dc))
+    f_mean = float(np.mean(f_dc))
+
+    logger.info(
+        f"SH DC input stats: min={f_min:.4f}, max={f_max:.4f}, mean={f_mean:.4f}"
+    )
+
+    # Heuristic: standard SH DC values for 3DGS are typically in range [-2, 4].
+    # If ALL values are in [0, 1], they're probably already linear RGB, not SH.
+    if 0.0 <= f_min and f_max <= 1.0:
+        logger.warning(
+            "SH values appear to already be in [0,1] — treating as direct RGB "
+            "(skipping SH_C0 transform)"
+        )
+        rgb_float = np.clip(f_dc, 0.0, 1.0)
+    # If values are in [0, 255], they're already uint8-scale RGB
+    elif f_min >= 0.0 and f_max > 1.0 and f_max <= 255.0 and f_mean > 10.0:
+        logger.warning(
+            "SH values appear to be in [0,255] — treating as uint8 RGB"
+        )
+        rgb_float = np.clip(f_dc / 255.0, 0.0, 1.0)
+    else:
+        # Standard SH → RGB conversion
+        rgb_float = SH_C0 * f_dc + 0.5
+        rgb_float = np.clip(rgb_float, 0.0, 1.0)
+
+    rgb_uint8 = (rgb_float * 255).astype(np.uint8)
+
+    logger.info(
+        f"RGB output stats: min={int(np.min(rgb_uint8))}, max={int(np.max(rgb_uint8))}, "
+        f"mean={np.mean(rgb_uint8):.1f}"
+    )
+
+    return rgb_uint8
 
 
 def convert_longsplat_to_3dgs(checkpoint_dir: Path, output_ply: Path) -> bool:

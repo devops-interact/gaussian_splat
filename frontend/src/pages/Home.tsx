@@ -13,6 +13,7 @@ import { downloadModel } from '@/api/jobs';
 export default function Home() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [modelUrl, setModelUrl] = useState<string | null>(null);
+  const [meshUrl, setMeshUrl] = useState<string | null>(null);
   const [modelMetadata, setModelMetadata] = useState<ModelMetadata | null>(null);
   const [qualityPreset] = useState<string>('balanced');
   const [elapsedTime] = useState<string>('--');
@@ -21,11 +22,13 @@ export default function Home() {
   const handleUploadSuccess = (newJobId: string) => {
     setJobId(newJobId);
     setModelUrl(null);
+    setMeshUrl(null);
     setModelMetadata(null);
   };
 
-  const handleProcessingComplete = (url: string) => {
+  const handleProcessingComplete = (url: string, meshUrlResp?: string) => {
     setModelUrl(url);
+    setMeshUrl(meshUrlResp ?? null);
   };
 
   const handleModelMetadata = useCallback((meta: ModelMetadata) => {
@@ -68,7 +71,7 @@ export default function Home() {
       {/* ── 3D Viewer (Full Width) ─────────────────────────────────────── */}
       {modelUrl ? (
         <div className="rounded-xl overflow-hidden border border-white/[0.06] bg-[#0a0a0a] h-[520px] lg:h-[600px] shadow-2xl">
-          <Viewer3D modelUrl={modelUrl} onModelMetadata={handleModelMetadata} />
+          <Viewer3D modelUrl={modelUrl} meshUrl={meshUrl} onModelMetadata={handleModelMetadata} />
         </div>
       ) : (
         <Card className="h-[320px] lg:h-[420px] flex items-center justify-center border-dashed border-2 border-white/[0.04] bg-[#060606]">
@@ -150,6 +153,16 @@ export default function Home() {
                 <span className="text-white/70 group-hover:text-white">.ply.gz (Compressed)</span>
                 <Download className="w-3.5 h-3.5 text-white/30 group-hover:text-white/70" />
               </button>
+              {meshUrl && (
+                <a
+                  href={`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}${meshUrl}`}
+                  download={`model_${jobId}.glb`}
+                  className="flex items-center justify-between px-4 py-3 rounded-lg bg-purple-500/[0.06] border border-purple-500/[0.12] hover:bg-purple-500/[0.12] transition-colors text-sm font-mono group"
+                >
+                  <span className="text-purple-300/70 group-hover:text-purple-200">.glb (Mesh)</span>
+                  <Download className="w-3.5 h-3.5 text-purple-300/30 group-hover:text-purple-300/70" />
+                </a>
+              )}
             </div>
           </CardContent>
         </Card>

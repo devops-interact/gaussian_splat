@@ -14,6 +14,7 @@ from services.longsplat.train import train_longsplat
 from services.export.to_ply import export_to_ply
 from services.export.to_obj import export_to_obj
 from services.export.compress import compress_ply_gzip
+from services.export.to_mesh import reconstruct_mesh
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -141,18 +142,36 @@ async def process_job(job: Job) -> Job:
             except Exception as e:
                 logger.warning(f"Compression failed (optional): {e}")
         
-        # Step 5: Optionally export to OBJ (experimental)
-        job.progress = 0.95
+        # Step 5: Mesh reconstruction (Poisson surface → GLB)
+        job.progress = 0.93
         await job_manager.update_job(job)
-        
+
+        try:
+            glb_path = settings.MODELS_DIR / f"{job.job_id}.glb"
+            logger.info(f"Running mesh reconstruction for job {job.job_id}")
+            mesh_ok = await asyncio.get_event_loop().run_in_executor(
+                None, reconstruct_mesh, ply_path, glb_path
+            )
+            if mesh_ok:
+                job.model_url_mesh = f"/static/models/{job.job_id}.glb"
+                logger.info(f"Mesh GLB saved: {glb_path}")
+            else:
+                logger.warning("Mesh reconstruction returned False — skipping")
+        except Exception as e:
+            logger.warning(f"Mesh reconstruction failed (optional): {e}")
+
+        # Step 6: Optionally export to OBJ (experimental)
+        job.progress = 0.96
+        await job_manager.update_job(job)
+
         try:
             obj_path = await export_to_obj(ply_path, longsplat_output_dir / f"{job.job_id}.obj")
             logger.info(f"Exported OBJ to {obj_path}")
         except Exception as e:
             logger.warning(f"OBJ export failed (optional): {e}")
-        
+
         # Extract PLY metadata
-        job.progress = 0.97
+        job.progress = 0.98
         await job_manager.update_job(job)
         
         metadata = _extract_ply_metadata(ply_path)
