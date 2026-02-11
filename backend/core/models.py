@@ -31,6 +31,17 @@ class VideoValidation(BaseModel):
     warnings: List[str] = []
 
 
+class ModelMetadata(BaseModel):
+    """Metadata about the generated 3D model"""
+    file_size: Optional[int] = None  # bytes
+    point_count: Optional[int] = None
+    has_colors: bool = False
+    has_opacity: bool = False
+    bounding_box: Optional[dict] = None  # {"min": [x,y,z], "max": [x,y,z]}
+    properties: List[str] = []
+    format: Optional[str] = None
+
+
 class Job(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
     
@@ -47,6 +58,8 @@ class Job(BaseModel):
     quality_preset: QualityPreset = QualityPreset.BALANCED
     validation: Optional[VideoValidation] = None
     estimated_minutes: Optional[int] = None
+    model_metadata: Optional[ModelMetadata] = None
+    processing_time_seconds: Optional[float] = None
 
 
 class JobCreate(BaseModel):

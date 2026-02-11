@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { JobStatus as JobStatusEnum, JobStatusResponse } from '../types/job';
 import { getJobStatus, downloadModel } from '../api/jobs';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Loader2, CheckCircle, AlertOctagon, Download, FileBox, Clock, Settings } from 'lucide-react';
 
 interface JobStatusProps {
   jobId: string;
@@ -9,13 +12,13 @@ interface JobStatusProps {
 
 const STATUS_LABELS: Record<JobStatusEnum, string> = {
   [JobStatusEnum.UPLOADED]: 'Video uploaded',
-  [JobStatusEnum.VALIDATING]: 'Validating video',
-  [JobStatusEnum.EXTRACTING_FRAMES]: 'Extracting frames',
-  [JobStatusEnum.TRAINING]: 'Training 3D model (this takes a while)',
-  [JobStatusEnum.EXPORTING]: 'Exporting model',
-  [JobStatusEnum.COMPRESSING]: 'Compressing output',
-  [JobStatusEnum.COMPLETED]: 'Completed',
-  [JobStatusEnum.ERROR]: 'Error',
+  [JobStatusEnum.VALIDATING]: 'Validating video format',
+  [JobStatusEnum.EXTRACTING_FRAMES]: 'Extracting frames from video',
+  [JobStatusEnum.TRAINING]: 'Training 3D Splats (this takes time)',
+  [JobStatusEnum.EXPORTING]: 'Exporting PLY model',
+  [JobStatusEnum.COMPRESSING]: 'Compressing output file',
+  [JobStatusEnum.COMPLETED]: 'Reconstruction Completed',
+  [JobStatusEnum.ERROR]: 'Processing Error',
 };
 
 const PRESET_LABELS: Record<string, string> = {
@@ -50,6 +53,7 @@ export default function JobStatus({ jobId, onComplete }: JobStatusProps) {
     return () => clearInterval(timer);
   }, [startTime, status]);
 
+  // Poll job status
   useEffect(() => {
     if (status === JobStatusEnum.COMPLETED || status === JobStatusEnum.ERROR) {
       return;
@@ -61,7 +65,7 @@ export default function JobStatus({ jobId, onComplete }: JobStatusProps) {
         setStatus(response.status);
         setProgress(response.progress);
         setError(response.error_message || null);
-        
+
         if (response.quality_preset) {
           setQualityPreset(response.quality_preset);
         }
@@ -76,7 +80,7 @@ export default function JobStatus({ jobId, onComplete }: JobStatusProps) {
       } catch (err) {
         console.error('Error fetching job status:', err);
       }
-    }, 2000); // Poll every 2 seconds
+    }, 2000);
 
     return () => clearInterval(interval);
   }, [jobId, status, onComplete]);
@@ -100,80 +104,118 @@ export default function JobStatus({ jobId, onComplete }: JobStatusProps) {
     }
   };
 
-  const statusClass = 
-    status === JobStatusEnum.ERROR ? 'error' :
-    status === JobStatusEnum.COMPLETED ? 'success' :
-    'info';
+  const isComplete = status === JobStatusEnum.COMPLETED;
+  const isError = status === JobStatusEnum.ERROR;
+  const isActive = !isComplete && !isError;
 
   return (
-    <div className="status-section">
-      <h2>Processing Status</h2>
-      
-      {/* Preset and time info */}
-      {qualityPreset && (
-        <div style={{ 
-          fontSize: '0.9rem', 
-          color: '#888', 
-          marginBottom: '1rem',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center'
-        }}>
-          <span>Preset: {PRESET_LABELS[qualityPreset] || qualityPreset}</span>
-          <span>Elapsed: {elapsedTime}</span>
+    <Card className="w-full border-app-primary bg-app-card/30 h-full">
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center">
+            {isActive && <Loader2 className="w-5 h-5 mr-2 animate-spin text-blue-400" />}
+            {isComplete && <CheckCircle className="w-5 h-5 mr-2 text-green-400" />}
+            {isError && <AlertOctagon className="w-5 h-5 mr-2 text-red-500" />}
+            Processing Status
+          </CardTitle>
+          {isActive && (
+            <div className="font-mono text-xs text-blue-300 bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">
+              Running
+            </div>
+          )}
         </div>
-      )}
-      
-      <div className={`status-message ${statusClass}`}>
-        <strong>{STATUS_LABELS[status]}</strong>
-        {status !== JobStatusEnum.COMPLETED && status !== JobStatusEnum.ERROR && (
-          <span className="loading" style={{ marginLeft: '0.5rem' }}></span>
-        )}
-      </div>
+        <CardDescription>
+          Job ID: <span className="font-mono text-xs opacity-70">{jobId}</span>
+        </CardDescription>
+      </CardHeader>
 
-      {status !== JobStatusEnum.COMPLETED && status !== JobStatusEnum.ERROR && (
-        <>
-          <div className="progress-bar">
-            <div 
-              className="progress-fill" 
-              style={{ width: `${progress * 100}%` }}
-            >
-              {Math.round(progress * 100)}%
+      <CardContent className="space-y-6">
+        {/* Info Grid */}
+        {(qualityPreset || isActive) && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+            <div className="p-3 rounded-lg bg-app-elevated border border-app-secondary">
+              <span className="text-gray-400 block text-xs mb-1">Status</span>
+              <span className="font-medium text-white flex items-center">
+                {STATUS_LABELS[status]}
+              </span>
+            </div>
+
+            <div className="p-3 rounded-lg bg-app-elevated border border-app-secondary">
+              <span className="text-gray-400 block text-xs mb-1">Time Elapsed</span>
+              <span className="font-mono text-white flex items-center">
+                <Clock className="w-3 h-3 mr-2 opacity-50" />
+                {elapsedTime}
+              </span>
+            </div>
+
+            {qualityPreset && (
+              <div className="p-3 rounded-lg bg-app-elevated border border-app-secondary">
+                <span className="text-gray-400 block text-xs mb-1">Quality</span>
+                <span className="font-medium text-white flex items-center">
+                  <Settings className="w-3 h-3 mr-2 opacity-50" />
+                  {PRESET_LABELS[qualityPreset] || qualityPreset}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Progress Bar */}
+        {isActive && (
+          <div className="space-y-2">
+            <div className="flex justify-between text-xs text-gray-400">
+              <span>Progress</span>
+              <span>{Math.round(progress * 100)}%</span>
+            </div>
+            <div className="h-2 w-full bg-app-elevated rounded-full overflow-hidden border border-app-secondary">
+              <div
+                className="h-full bg-blue-500 transition-all duration-500 ease-out"
+                style={{ width: `${progress * 100}%` }}
+              />
+            </div>
+            {estimatedMinutes && (
+              <p className="text-xs text-center text-gray-500 mt-2">
+                Estimated total time: ~{estimatedMinutes} minutes
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Error Message */}
+        {error && (
+          <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm flex items-start">
+            <AlertOctagon className="w-5 h-5 mr-3 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold mb-1">Process Failed</p>
+              <p className="opacity-90">{error}</p>
             </div>
           </div>
-          {estimatedMinutes && (
-            <p style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.5rem', textAlign: 'center' }}>
-              Estimated total time: ~{estimatedMinutes} minutes
-            </p>
-          )}
-        </>
-      )}
+        )}
 
-      {error && (
-        <div className="status-message error" style={{ marginTop: '1rem' }}>
-          <strong>Error:</strong> {error}
-        </div>
-      )}
+        {/* Download Actions */}
+        {isComplete && (
+          <div className="flex flex-col sm:flex-row gap-3 pt-2">
+            <Button
+              className="flex-1"
+              onClick={() => handleDownload(false)}
+              disabled={downloading}
+            >
+              <FileBox className="w-4 h-4 mr-2" />
+              Download Model (.ply)
+            </Button>
 
-      {status === JobStatusEnum.COMPLETED && (
-        <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <button 
-            className="button" 
-            onClick={() => handleDownload(false)}
-            disabled={downloading}
-          >
-            {downloading ? 'Downloading...' : 'Download Model (.ply)'}
-          </button>
-          <button 
-            className="button" 
-            onClick={() => handleDownload(true)}
-            disabled={downloading}
-            style={{ background: '#444' }}
-          >
-            Download Compressed (.ply.gz)
-          </button>
-        </div>
-      )}
-    </div>
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => handleDownload(true)}
+              disabled={downloading}
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Download (.ply.gz)
+            </Button>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

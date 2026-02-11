@@ -9,18 +9,28 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@radix-ui/react-slot": "^1.2.4",
+    "@react-three/drei": "^9.99.0",
+    "@react-three/fiber": "^8.15.19",
+    "axios": "^1.6.2",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "framer-motion": "^12.34.0",
+    "lucide-react": "^0.563.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "three": "^0.162.0",
-    "@react-three/fiber": "^8.15.19",
-    "@react-three/drei": "^9.99.0",
-    "axios": "^1.6.2"
+    "tailwind-merge": "^3.4.0",
+    "three": "^0.162.0"
   },
   "devDependencies": {
+    "@types/node": "^25.2.3",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
     "@types/three": "^0.162.0",
     "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.24",
+    "postcss": "^8.5.6",
+    "tailwindcss": "^3.4.17",
     "typescript": "^5.3.3",
     "vite": "^5.0.8"
   }

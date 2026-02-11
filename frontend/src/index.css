@@ -1,0 +1,115 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-inter: 'Inter', system-ui, sans-serif;
+  --foreground-rgb: 255, 255, 255;
+  --background-start-rgb: 0, 0, 0;
+  --background-end-rgb: 0, 0, 0;
+}
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: #000000;
+    color: #e5e5e5;
+    font-family: var(--font-inter);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Dark scrollbars */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  /* Firefox scrollbar */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+  }
+
+  /* Form controls dark mode */
+  input,
+  textarea,
+  select {
+    background-color: #111111;
+    color: #e5e5e5;
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: rgba(255, 255, 255, 0.3);
+  }
+  input:focus,
+  textarea:focus,
+  select:focus {
+    outline: none;
+    border-color: rgba(62, 147, 201, 0.5);
+    box-shadow: 0 0 0 2px rgba(62, 147, 201, 0.15);
+  }
+
+  /* Selection */
+  ::selection {
+    background: rgba(62, 147, 201, 0.3);
+    color: white;
+  }
+}
+
+/* Custom Utilities */
+@layer utilities {
+  .glass-panel {
+    @apply bg-black/40 backdrop-blur-md border border-white/10;
+  }
+
+  .glass-button {
+    @apply bg-white/5 hover:bg-white/10 border border-white/10 transition-all duration-200;
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 2px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.15);
+  }
+}
+
+/* Canvas context menu suppression */
+canvas {
+  -webkit-touch-callout: none;
+}

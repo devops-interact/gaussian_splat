@@ -1,5 +1,25 @@
 # syntax=docker/dockerfile:1.5
 
+# ==========================================
+# STAGE 1: Frontend Build
+# ==========================================
+FROM node:18-alpine AS frontend-build
+WORKDIR /app/frontend
+
+# Install dependencies (cached)
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm ci || npm install
+
+# Build frontend
+COPY frontend/ ./
+# valid for simple-proxy or same-domain deployment
+ARG VITE_API_BASE_URL=/
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+RUN npm run build
+
+# ==========================================
+# STAGE 2: Backend & Runtime
+# ==========================================
 # RunPod A40 is linux/amd64. Force the correct platform when building on Apple Silicon.
 # IMPORTANT: Build with --no-cache to avoid stale CUDA kernels from previous builds!
 FROM --platform=linux/amd64 nvidia/cuda:12.1.1-devel-ubuntu22.04
@@ -144,6 +164,9 @@ RUN echo "=== VERIFYING LONGSPLAT DEPENDENCIES ===" && \
 # Back to app
 WORKDIR /app
 COPY backend/ /app/
+
+# Copy Frontend Build Artifacts
+COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
 
 # Tell backend where repositories live
 ENV LONGSPLAT_REPO=/opt/LongSplat

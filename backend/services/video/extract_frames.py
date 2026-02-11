@@ -25,17 +25,16 @@ async def extract_frames(
         Path to directory containing extracted frames
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-    frame_pattern = output_dir / "frame_%06d.jpg"
+    frame_pattern = output_dir / "frame_%06d.png"
     
     logger.info(f"Extracting frames from {video_path} at {fps} FPS")
     
-    # FFmpeg command to extract frames
+    # FFmpeg command to extract frames as lossless PNG for accurate colors
     cmd = [
         "ffmpeg",
         "-y",  # Overwrite without asking
         "-i", str(video_path),
         "-vf", f"fps={fps}",
-        "-q:v", "2",  # High quality JPEG
         str(frame_pattern)
     ]
     

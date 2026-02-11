@@ -27,34 +27,34 @@ class PresetConfig(BaseModel):
     estimated_minutes: int
 
 
-# Quality preset definitions
+# Quality preset definitions - Optimized for SPEED + DENSITY balance
 QUALITY_PRESETS: Dict[QualityPreset, PresetConfig] = {
     QualityPreset.FAST: PresetConfig(
         name="Fast",
-        description="Quick preview (~3-5 min). Lower quality, good for testing.",
+        description="Quick preview (~5-8 min). Good for testing.",
         fps=1.0,
-        iterations=2000,
+        iterations=3000,  # Reduced from 5k for speed
         resolution=2,
         init_frames_ratio=0.15,
-        estimated_minutes=5
+        estimated_minutes=7
     ),
     QualityPreset.BALANCED: PresetConfig(
         name="Balanced",
-        description="Good quality (~8-12 min). Recommended for most videos.",
+        description="Good quality (~15-20 min). Recommended for most videos.",
         fps=2.0,
-        iterations=5000,
+        iterations=8000,  # Reduced from 15k - rely on densification instead
         resolution=1,
-        init_frames_ratio=0.20,
-        estimated_minutes=10
+        init_frames_ratio=0.30,
+        estimated_minutes=18
     ),
     QualityPreset.QUALITY: PresetConfig(
         name="Quality",
-        description="Best quality (~20-30 min). For final production renders.",
+        description="Best quality (~25-35 min). For final production renders.",
         fps=3.0,
-        iterations=12000,
+        iterations=15000,  # Reduced from 30k
         resolution=1,
         init_frames_ratio=0.25,
-        estimated_minutes=25
+        estimated_minutes=32
     ),
 }
 

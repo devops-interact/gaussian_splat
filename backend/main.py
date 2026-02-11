@@ -4,7 +4,7 @@ FastAPI entrypoint for Gaussian Splatting Room Reconstruction MVP
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 import os
 import logging
 from pathlib import Path
@@ -36,7 +36,7 @@ app.add_middleware(
 # Include routers
 app.include_router(jobs_router, prefix="/api/jobs", tags=["jobs"])
 
-# Serve static files (generated models)
+# Serve static files (generated 3D models)
 storage_path = Path(__file__).parent / "storage"
 models_path = storage_path / "models"
 models_path.mkdir(parents=True, exist_ok=True)
@@ -44,9 +44,6 @@ models_path.mkdir(parents=True, exist_ok=True)
 app.mount("/static/models", StaticFiles(directory=str(models_path)), name="models")
 
 
-@app.get("/")
-async def root():
-    return {"message": "Gaussian Splatting Room Reconstruction API", "version": "0.2.0"}
 
 
 @app.get("/health")
@@ -83,6 +80,53 @@ async def get_preset(preset_id: str):
     except ValueError:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail=f"Preset '{preset_id}' not found")
+
+
+# Serve Frontend Static Files & SPA Fallback (Placed at end to avoid shadowing API routes)
+frontend_dist = Path("/app/frontend/dist")
+
+def _serve_index():
+    """Serve index.html with no-cache headers to prevent stale frontend."""
+    index_path = frontend_dist / "index.html"
+    html = index_path.read_text()
+    return HTMLResponse(
+        content=html,
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+if frontend_dist.exists():
+    # Mount assets (these are content-hashed, safe to cache)
+    assets_path = frontend_dist / "assets"
+    if assets_path.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_path)), name="assets")
+
+    # Serve other static files (vite.svg, etc.)
+    @app.get("/vite.svg")
+    async def serve_vite_svg():
+        svg_path = frontend_dist / "vite.svg"
+        if svg_path.exists():
+            return FileResponse(svg_path)
+
+    @app.get("/")
+    async def serve_root():
+        return _serve_index()
+
+    @app.get("/{full_path:path}")
+    async def serve_spa_catchall(full_path: str):
+        # Check if file exists in dist (but not index.html via this path)
+        file_path = frontend_dist / full_path
+        if file_path.exists() and file_path.is_file() and full_path != "index.html":
+            return FileResponse(file_path)
+        # Fallback to index.html (no cache)
+        return _serve_index()
+else:
+    @app.get("/")
+    async def api_root():
+        return {"message": "Gaussian Splatting Room Reconstruction API (No Frontend)", "version": "0.2.0"}
 
 
 if __name__ == "__main__":

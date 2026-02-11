@@ -1,24 +1,28 @@
 import { useState, useRef } from 'react';
 import { uploadVideo } from '../api/jobs';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Upload, FileVideo, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 // Quality preset definitions
 const PRESETS = [
   {
     id: 'fast',
     name: 'Fast',
-    description: 'Quick preview (~3-5 min). Lower quality, good for testing.',
+    description: 'Quick preview (~3-5 min). Lower quality.',
     time: '3-5 min'
   },
   {
     id: 'balanced',
     name: 'Balanced',
-    description: 'Good quality (~8-12 min). Recommended for most videos.',
+    description: 'Good quality (~8-12 min). Recommended.',
     time: '8-12 min'
   },
   {
     id: 'quality',
     name: 'Quality',
-    description: 'Best quality (~20-30 min). For final production renders.',
+    description: 'Best quality (~20-30 min). Production use.',
     time: '20-30 min'
   }
 ];
@@ -65,23 +69,21 @@ export default function VideoUpload({ onUploadSuccess, disabled }: VideoUploadPr
 
     try {
       const result = await uploadVideo(file, selectedPreset) as UploadResult;
-      
+
       // Show warnings if any
       if (result.warnings && result.warnings.length > 0) {
         setWarnings(result.warnings);
       }
-      
+
       // Show video info
       if (result.video_info) {
         setVideoInfo(result.video_info);
       }
-      
+
       onUploadSuccess(result.job_id);
     } catch (err: any) {
       console.error('Upload error:', err);
-      console.error('Response:', err.response);
-      console.error('Request:', err.request);
-      
+
       // Handle validation errors
       const detail = err.response?.data?.detail;
       if (typeof detail === 'object' && detail.errors) {
@@ -106,91 +108,116 @@ export default function VideoUpload({ onUploadSuccess, disabled }: VideoUploadPr
     }
   };
 
+  const onUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
   return (
-    <div className="upload-section">
-      <h2>Upload Video</h2>
-      <p style={{ color: '#b0b0b0', marginTop: '0.5rem', marginBottom: '1rem' }}>
-        Upload a video file of a room to start 3D reconstruction
-      </p>
+    <Card className="w-full border-app-primary bg-app-card/30 h-full">
+      <CardHeader>
+        <CardTitle>New Project</CardTitle>
+        <CardDescription>Upload a video to start 3D reconstruction</CardDescription>
+      </CardHeader>
 
-      {/* Quality Preset Selector */}
-      <div className="preset-selector" style={{ marginBottom: '1.5rem' }}>
-        <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>
-          Quality Preset:
-        </label>
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          {PRESETS.map((preset) => (
-            <button
-              key={preset.id}
-              onClick={() => setSelectedPreset(preset.id)}
-              disabled={disabled || uploading}
-              style={{
-                padding: '0.75rem 1rem',
-                border: selectedPreset === preset.id ? '2px solid #66b3ff' : '2px solid #444',
-                borderRadius: '8px',
-                background: selectedPreset === preset.id ? 'rgba(102, 179, 255, 0.1)' : 'transparent',
-                color: selectedPreset === preset.id ? '#66b3ff' : '#fff',
-                cursor: disabled || uploading ? 'not-allowed' : 'pointer',
-                opacity: disabled || uploading ? 0.5 : 1,
-                transition: 'all 0.2s',
-                flex: '1',
-                minWidth: '120px'
-              }}
-            >
-              <div style={{ fontWeight: 600 }}>{preset.name}</div>
-              <div style={{ fontSize: '0.75rem', opacity: 0.7, marginTop: '0.25rem' }}>
-                {preset.time}
-              </div>
-            </button>
-          ))}
+      <CardContent className="space-y-6">
+        {/* Presets */}
+        <div className="space-y-3">
+          <label className="text-sm font-medium text-gray-300">Quality Preset</label>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {PRESETS.map((preset) => (
+              <button
+                key={preset.id}
+                onClick={() => setSelectedPreset(preset.id)}
+                disabled={disabled || uploading}
+                className={cn(
+                  "flex flex-col items-start p-3 rounded-lg border text-left transition-all duration-200",
+                  selectedPreset === preset.id
+                    ? "border-primary-500 bg-primary-500/10 text-primary-400"
+                    : "border-app-secondary bg-app-elevated/50 text-gray-400 hover:border-gray-600 hover:bg-app-elevated",
+                  (disabled || uploading) && "opacity-50 cursor-not-allowed"
+                )}
+              >
+                <div className="flex items-center justify-between w-full mb-1">
+                  <span className="font-semibold text-sm">{preset.name}</span>
+                  {selectedPreset === preset.id && <CheckCircle className="w-3 h-3" />}
+                </div>
+                <span className="text-xs opacity-70 mb-2 flex items-center">
+                  <Clock className="w-3 h-3 mr-1" /> {preset.time}
+                </span>
+                <p className="text-[10px] opacity-60 leading-tight">{preset.description}</p>
+              </button>
+            ))}
+          </div>
         </div>
-        <p style={{ 
-          fontSize: '0.85rem', 
-          color: '#888', 
-          marginTop: '0.5rem',
-          fontStyle: 'italic' 
-        }}>
-          {PRESETS.find(p => p.id === selectedPreset)?.description}
-        </p>
-      </div>
 
-      <div className="file-input">
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".mp4,.mov,.avi,.webm"
-          onChange={handleFileChange}
-          disabled={disabled || uploading}
-        />
-      </div>
+        {/* Upload Area */}
+        <div
+          className={cn(
+            "border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center text-center transition-all",
+            "border-app-secondary bg-app-elevated/20 hover:bg-app-elevated/40 hover:border-gray-500",
+            (disabled || uploading) && "opacity-50 pointer-events-none"
+          )}
+        >
+          <div className="w-12 h-12 rounded-full bg-app-elevated flex items-center justify-center mb-4">
+            <Upload className="w-6 h-6 text-gray-400" />
+          </div>
 
-      {uploading && (
-        <div className="status-message info">
-          <span className="loading"></span>
-          Uploading and validating video...
+          <h3 className="text-lg font-medium text-white mb-2">
+            {uploading ? 'Uploading Video...' : 'Upload Video File'}
+          </h3>
+
+          <p className="text-sm text-gray-400 max-w-xs mb-6">
+            Supported formats: MP4, MOV, AVI, WEBM. Max size 500MB.
+          </p>
+
+          <Button
+            onClick={onUploadClick}
+            disabled={disabled || uploading}
+            loading={uploading}
+            size="lg"
+            className="w-full max-w-xs"
+          >
+            {uploading ? 'Processing...' : 'Select File'}
+          </Button>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".mp4,.mov,.avi,.webm"
+            onChange={handleFileChange}
+            className="hidden"
+          />
         </div>
-      )}
 
-      {videoInfo && (
-        <div className="status-message info" style={{ background: 'rgba(100, 108, 255, 0.1)' }}>
-          Video: {videoInfo.duration.toFixed(1)}s, {videoInfo.resolution}, {videoInfo.fps.toFixed(1)} fps
-        </div>
-      )}
+        {/* Status Messages */}
+        {videoInfo && (
+          <div className="flex items-center p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-sm">
+            <FileVideo className="w-4 h-4 mr-2" />
+            <span>
+              Video: {videoInfo.duration.toFixed(1)}s • {videoInfo.resolution} • {videoInfo.fps.toFixed(1)} fps
+            </span>
+          </div>
+        )}
 
-      {warnings.length > 0 && (
-        <div className="status-message" style={{ background: 'rgba(255, 200, 0, 0.1)', borderColor: '#ffc800' }}>
-          <strong>Warnings:</strong>
-          <ul style={{ margin: '0.5rem 0 0 1rem', padding: 0 }}>
-            {warnings.map((w, i) => <li key={i}>{w}</li>)}
-          </ul>
-        </div>
-      )}
+        {warnings.length > 0 && (
+          <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-500 text-sm">
+            <div className="flex items-center font-semibold mb-1">
+              <AlertTriangle className="w-4 h-4 mr-2" />
+              Warnings
+            </div>
+            <ul className="list-disc list-inside space-y-1 ml-5 opacity-90 text-xs">
+              {warnings.map((w, i) => <li key={i}>{w}</li>)}
+            </ul>
+          </div>
+        )}
 
-      {error && (
-        <div className="status-message error">
-          {error}
-        </div>
-      )}
-    </div>
+        {error && (
+          <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 text-sm flex items-center">
+            <AlertTriangle className="w-4 h-4 mr-2" />
+            {error}
+          </div>
+        )}
+      </CardContent>
+    </Card>
   );
 }

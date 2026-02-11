@@ -39,13 +39,31 @@ class PlyOptimizer:
             
             logger.info(f"Found centroid at ({centroid_x:.4f}, {centroid_y:.4f}, {centroid_z:.4f})")
             
-            # Center positions
+            # Filter out NaNs and Infs FIRST (before centering)
+            valid_mask = np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
+            if not np.all(valid_mask):
+                invalid_count = np.sum(~valid_mask)
+                logger.warning(f"Found {invalid_count} invalid points (NaN/Inf). Removing them.")
+                # Create filtered vertex element preserving ALL properties
+                vertex_data = plydata['vertex'].data[valid_mask]
+                plydata['vertex'] = PlyElement.describe(vertex_data, 'vertex')
+                vertex = plydata['vertex']
+                x = vertex['x']
+                y = vertex['y']
+                z = vertex['z']
+                # Recalculate centroid after filtering
+                centroid_x = np.mean(x)
+                centroid_y = np.mean(y)
+                centroid_z = np.mean(z)
+            
+            # Center positions IN-PLACE on the original vertex data
+            # This preserves ALL Gaussian properties (f_dc_*, opacity, scale_*, rot_*)
             vertex['x'] = x - centroid_x
             vertex['y'] = y - centroid_y
             vertex['z'] = z - centroid_z
             
-            # Save optimized PLY
-            PlyData([vertex], text=False).write(str(output_path))
+            # Write the ORIGINAL plydata object to preserve full structure
+            plydata.write(str(output_path))
             logger.info(f"Saved centered model to {output_path}")
             return True
             

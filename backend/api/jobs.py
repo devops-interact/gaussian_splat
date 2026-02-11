@@ -154,6 +154,7 @@ async def get_job_status(job_id: str):
         "model_url_compressed": job.model_url_compressed,
         "quality_preset": job.quality_preset.value if job.quality_preset else "balanced",
         "estimated_minutes": job.estimated_minutes,
+        "processing_time_seconds": job.processing_time_seconds,
         "created_at": job.created_at.isoformat(),
         "updated_at": job.updated_at.isoformat()
     }
@@ -164,6 +165,17 @@ async def get_job_status(job_id: str):
             "resolution": f"{job.validation.width}x{job.validation.height}" if job.validation.width else None,
             "fps": job.validation.fps,
             "warnings": job.validation.warnings
+        }
+    
+    if job.model_metadata:
+        response["model_metadata"] = {
+            "file_size": job.model_metadata.file_size,
+            "point_count": job.model_metadata.point_count,
+            "has_colors": job.model_metadata.has_colors,
+            "has_opacity": job.model_metadata.has_opacity,
+            "bounding_box": job.model_metadata.bounding_box,
+            "properties": job.model_metadata.properties,
+            "format": job.model_metadata.format,
         }
     
     return response

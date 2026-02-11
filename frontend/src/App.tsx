@@ -1,11 +1,12 @@
 import Home from './pages/Home'
-import './styles/global.css'
+import { DashboardLayout } from './components/layout/dashboard-layout'
+import './index.css'
 
 function App() {
   return (
-    <div className="app">
+    <DashboardLayout>
       <Home />
-    </div>
+    </DashboardLayout>
   )
 }
 
