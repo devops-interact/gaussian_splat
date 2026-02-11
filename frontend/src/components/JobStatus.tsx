@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import { JobStatus as JobStatusEnum, JobStatusResponse } from '../types/job';
-import { getJobStatus, downloadModel } from '../api/jobs';
+import { getJobStatus } from '../api/jobs';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Loader2, CheckCircle, AlertOctagon, Download, FileBox, Clock, Settings } from 'lucide-react';
+import { Loader2, CheckCircle, AlertOctagon, Clock, Settings } from 'lucide-react';
 
 interface JobStatusProps {
   jobId: string;
-  onComplete: (modelUrl: string, meshUrl?: string) => void;
+  onComplete: (modelUrl: string) => void;
+  embedded?: boolean;
 }
 
 const STATUS_LABELS: Record<JobStatusEnum, string> = {
@@ -27,11 +27,10 @@ const PRESET_LABELS: Record<string, string> = {
   quality: 'Quality (~20-30 min)',
 };
 
-export default function JobStatus({ jobId, onComplete }: JobStatusProps) {
+export default function JobStatus({ jobId, onComplete, embedded }: JobStatusProps) {
   const [status, setStatus] = useState<JobStatusEnum>(JobStatusEnum.UPLOADED);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [downloading, setDownloading] = useState(false);
   const [qualityPreset, setQualityPreset] = useState<string | null>(null);
   const [estimatedMinutes, setEstimatedMinutes] = useState<number | null>(null);
   const [startTime] = useState<Date>(new Date());
@@ -74,7 +73,7 @@ export default function JobStatus({ jobId, onComplete }: JobStatusProps) {
         }
 
         if (response.status === JobStatusEnum.COMPLETED && response.model_url) {
-          onComplete(response.model_url, response.model_url_mesh ?? undefined);
+          onComplete(response.model_url);
           clearInterval(interval);
         }
       } catch (err) {
@@ -85,31 +84,12 @@ export default function JobStatus({ jobId, onComplete }: JobStatusProps) {
     return () => clearInterval(interval);
   }, [jobId, status, onComplete]);
 
-  const handleDownload = async (compressed: boolean = false) => {
-    setDownloading(true);
-    try {
-      const blob = await downloadModel(jobId, compressed);
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = compressed ? `model_${jobId}.ply.gz` : `model_${jobId}.ply`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (err: any) {
-      alert('Download failed: ' + (err.response?.data?.detail || err.message));
-    } finally {
-      setDownloading(false);
-    }
-  };
-
   const isComplete = status === JobStatusEnum.COMPLETED;
   const isError = status === JobStatusEnum.ERROR;
   const isActive = !isComplete && !isError;
 
-  return (
-    <Card className="w-full h-full">
+  const content = (
+    <>
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle className="flex items-center">
@@ -191,31 +171,11 @@ export default function JobStatus({ jobId, onComplete }: JobStatusProps) {
             </div>
           </div>
         )}
-
-        {/* Download Actions */}
-        {isComplete && (
-          <div className="flex flex-col sm:flex-row gap-3 pt-2">
-            <Button
-              className="flex-1"
-              onClick={() => handleDownload(false)}
-              disabled={downloading}
-            >
-              <FileBox className="w-4 h-4 mr-2" />
-              Download Model (.ply)
-            </Button>
-
-            <Button
-              variant="outline"
-              className="flex-1"
-              onClick={() => handleDownload(true)}
-              disabled={downloading}
-            >
-              <Download className="w-4 h-4 mr-2" />
-              Download (.ply.gz)
-            </Button>
-          </div>
-        )}
       </CardContent>
-    </Card>
+    </>
   );
+
+  if (embedded) return content;
+
+  return <Card className="w-full h-full">{content}</Card>;
 }

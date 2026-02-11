@@ -22,6 +22,7 @@ interface TechnicalDetailsProps {
     elapsedTime?: string;
     isProcessing?: boolean;
   };
+  embedded?: boolean;
 }
 
 function formatFileSize(bytes: number): string {
@@ -37,7 +38,7 @@ function formatNumber(n: number): string {
   return n.toLocaleString();
 }
 
-export default function TechnicalDetails({ metadata, jobInfo }: TechnicalDetailsProps) {
+export default function TechnicalDetails({ metadata, jobInfo, embedded }: TechnicalDetailsProps) {
   const details = useMemo(() => {
     if (!metadata) return null;
 
@@ -61,8 +62,8 @@ export default function TechnicalDetails({ metadata, jobInfo }: TechnicalDetails
 
   const isProcessing = jobInfo?.isProcessing ?? false;
 
-  return (
-    <Card className="w-full">
+  const content = (
+    <>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-base font-mono flex items-center gap-2">
@@ -127,8 +128,12 @@ export default function TechnicalDetails({ metadata, jobInfo }: TechnicalDetails
           </div>
         )}
       </CardContent>
-    </Card>
+    </>
   );
+
+  if (embedded) return content;
+
+  return <Card className="w-full">{content}</Card>;
 }
 
 // ── Sub-components ───────────────────────────────────────────────────────────

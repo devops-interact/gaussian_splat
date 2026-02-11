@@ -159,13 +159,12 @@ def _add_rgb_colors_to_3dgs_ply(source_ply: Path, output_ply: Path) -> bool:
         logger.info(f"Converted SH DC -> RGB for {num_points} points")
         logger.info(f"RGB sample (first 5): {rgb[:5]}")
         
-        # Check if RGB properties already exist
+        # Check if RGB properties already exist — if so, preserve them
         if 'red' in prop_names and 'green' in prop_names and 'blue' in prop_names:
-            # Overwrite existing RGB with correct values from SH
-            vertex['red'] = rgb[:, 0]
-            vertex['green'] = rgb[:, 1]
-            vertex['blue'] = rgb[:, 2]
-            plydata.write(str(output_ply))
+            logger.info("RGB properties already exist in source PLY — preserving original colors (not overwriting)")
+            import shutil
+            shutil.copy2(source_ply, output_ply)
+            return True
         else:
             # Build new structured array with RGB properties added
             old_dtype = vertex.data.dtype

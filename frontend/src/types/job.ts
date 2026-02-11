@@ -36,7 +36,6 @@ export interface Job {
   error_message?: string;
   model_url?: string;
   model_url_compressed?: string;
-  model_url_mesh?: string;
   quality_preset?: string;
   estimated_minutes?: number;
   processing_time_seconds?: number;
@@ -53,7 +52,6 @@ export interface JobStatusResponse {
   error_message?: string;
   model_url?: string;
   model_url_compressed?: string;
-  model_url_mesh?: string;
   quality_preset?: string;
   estimated_minutes?: number;
   processing_time_seconds?: number;

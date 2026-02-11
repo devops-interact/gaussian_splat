@@ -55,7 +55,6 @@ class Job(BaseModel):
     model_filename: Optional[str] = None
     model_url: Optional[str] = None
     model_url_compressed: Optional[str] = None  # Compressed version
-    model_url_mesh: Optional[str] = None  # GLB mesh reconstruction
     quality_preset: QualityPreset = QualityPreset.BALANCED
     validation: Optional[VideoValidation] = None
     estimated_minutes: Optional[int] = None

@@ -157,7 +157,7 @@ async def train_longsplat(
         # Scale sub-iteration parameters proportionally with main iterations.
         # Reference baseline: 15000 iterations = full quality (original defaults).
         # Lower presets scale down proportionally, with sensible minimums.
-        quality_factor = min(1.0, iterations / 15000)
+        quality_factor = min(1.0, iterations / 20000)
         pose_iter   = max(40,  int(100  * quality_factor))
         local_iter  = max(80,  int(200  * quality_factor))
         global_iter = max(240, int(600  * quality_factor))
@@ -180,7 +180,7 @@ async def train_longsplat(
             "--port", str(unique_port),
             "--quiet",
             "--init_frame_num", str(init_frames),
-            "--window_size", "5",
+            "--window_size", "8",
             "--pose_iteration", str(pose_iter),
             "--local_iter", str(local_iter),
             "--global_iter", str(global_iter),

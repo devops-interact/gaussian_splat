@@ -152,7 +152,6 @@ async def get_job_status(job_id: str):
         "error_message": job.error_message,
         "model_url": job.model_url,
         "model_url_compressed": job.model_url_compressed,
-        "model_url_mesh": job.model_url_mesh,
         "quality_preset": job.quality_preset.value if job.quality_preset else "balanced",
         "estimated_minutes": job.estimated_minutes,
         "processing_time_seconds": job.processing_time_seconds,

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { Canvas, useThree, useFrame, useLoader } from '@react-three/fiber';
-import { OrbitControls, GizmoHelper, GizmoViewport, Environment } from '@react-three/drei';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { Canvas, useThree, useFrame } from '@react-three/fiber';
+import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import * as THREE from 'three';
 import {
   Camera,
@@ -15,15 +14,12 @@ import {
   Info,
   Trash2,
   CircleDot,
-  Layers,
-  Box,
 } from 'lucide-react';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 interface Viewer3DProps {
   modelUrl: string | null;
-  meshUrl?: string | null;
   onModelMetadata?: (meta: ModelMetadata) => void;
 }
 
@@ -38,7 +34,6 @@ export interface ModelMetadata {
 }
 
 type ViewerMode = 'orbit' | 'walkthrough' | 'measure';
-type RenderMode = 'points' | 'mesh';
 
 interface MeasurePoint {
   position: THREE.Vector3;
@@ -136,7 +131,7 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
   const hasSH = f_dc_0_idx !== -1 && f_dc_1_idx !== -1 && f_dc_2_idx !== -1;
   const hasColors = hasRGB || hasSH;
   const hasOpacity = opacityIdx !== -1;
-  const colorSource: 'rgb' | 'sh' | 'none' = hasRGB ? 'rgb' : hasSH ? 'sh' : 'none';
+  const colorSource: 'rgb' | 'sh' | 'none' = hasSH ? 'sh' : hasRGB ? 'rgb' : 'none';
 
   console.log(`PLY: ${vertexCount} verts, format=${format}, colorSource=${colorSource}, props=[${propNames.slice(0, 15).join(', ')}${propNames.length > 15 ? '...' : ''}]`);
 
@@ -193,7 +188,14 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
       if (y < minY) minY = y; if (y > maxY) maxY = y;
       if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
 
-      if (hasRGB) {
+      if (hasSH) {
+        const f0 = readFloat(vOff, f_dc_0_idx);
+        const f1 = readFloat(vOff, f_dc_1_idx);
+        const f2 = readFloat(vOff, f_dc_2_idx);
+        colors[idx3] = Math.max(0, Math.min(1, SH_C0 * f0 + 0.5));
+        colors[idx3 + 1] = Math.max(0, Math.min(1, SH_C0 * f1 + 0.5));
+        colors[idx3 + 2] = Math.max(0, Math.min(1, SH_C0 * f2 + 0.5));
+      } else if (hasRGB) {
         const rType = properties[redIdx].type;
         if (rType === 'uchar' || rType === 'uint8') {
           colors[idx3] = readUchar(vOff, redIdx) / 255;
@@ -204,13 +206,6 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
           colors[idx3 + 1] = Math.max(0, Math.min(1, readFloat(vOff, greenIdx)));
           colors[idx3 + 2] = Math.max(0, Math.min(1, readFloat(vOff, blueIdx)));
         }
-      } else if (hasSH) {
-        const f0 = readFloat(vOff, f_dc_0_idx);
-        const f1 = readFloat(vOff, f_dc_1_idx);
-        const f2 = readFloat(vOff, f_dc_2_idx);
-        colors[idx3] = Math.max(0, Math.min(1, SH_C0 * f0 + 0.5));
-        colors[idx3 + 1] = Math.max(0, Math.min(1, SH_C0 * f1 + 0.5));
-        colors[idx3 + 2] = Math.max(0, Math.min(1, SH_C0 * f2 + 0.5));
       } else {
         colors[idx3] = 0.7; colors[idx3 + 1] = 0.7; colors[idx3 + 2] = 0.7;
       }
@@ -235,14 +230,14 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
       if (y < minY) minY = y; if (y > maxY) maxY = y;
       if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
 
-      if (hasRGB) {
-        colors[idx3] = parts[redIdx] / 255;
-        colors[idx3 + 1] = parts[greenIdx] / 255;
-        colors[idx3 + 2] = parts[blueIdx] / 255;
-      } else if (hasSH) {
+      if (hasSH) {
         colors[idx3] = Math.max(0, Math.min(1, SH_C0 * parts[f_dc_0_idx] + 0.5));
         colors[idx3 + 1] = Math.max(0, Math.min(1, SH_C0 * parts[f_dc_1_idx] + 0.5));
         colors[idx3 + 2] = Math.max(0, Math.min(1, SH_C0 * parts[f_dc_2_idx] + 0.5));
+      } else if (hasRGB) {
+        colors[idx3] = parts[redIdx] / 255;
+        colors[idx3 + 1] = parts[greenIdx] / 255;
+        colors[idx3 + 2] = parts[blueIdx] / 255;
       } else {
         colors[idx3] = 0.7; colors[idx3 + 1] = 0.7; colors[idx3 + 2] = 0.7;
       }
@@ -413,14 +408,12 @@ function PointCloud({ url, onMetadata, pointSize }: { url: string; onMetadata: (
           const center = new THREE.Vector3();
           bbox.getCenter(center);
           geometry.translate(-center.x, -center.y, -center.z);
-          geometry.translate(0, -(bbox.min.y - center.y), 0);
         }
         geometry.computeBoundingSphere();
 
         const bsRadius = geometry.boundingSphere?.radius || 1;
-        // More generous adaptive size: use bsRadius^1.2 to boost for sparse clouds
-        const densityFactor = bsRadius / Math.pow(result.vertexCount, 0.4);
-        const adaptiveSize = Math.max(0.005, Math.min(0.08, densityFactor * 3));
+        // Tighter, smaller points for denser visual appearance
+        const adaptiveSize = Math.max(0.001, Math.min(0.015, bsRadius / Math.sqrt(result.vertexCount) * 1.5));
         console.log(`Adaptive point size: radius=${bsRadius.toFixed(3)}, count=${result.vertexCount}, size=${adaptiveSize.toFixed(4)}`);
         const material = new THREE.PointsMaterial({
           size: pointSize > 0 ? pointSize : adaptiveSize,
@@ -452,58 +445,14 @@ function PointCloud({ url, onMetadata, pointSize }: { url: string; onMetadata: (
   );
 }
 
-// ── GLB Mesh Component ───────────────────────────────────────────────────────
-
-function GLBMesh({ url }: { url: string }) {
-  const gltf = useLoader(GLTFLoader, url);
-  const groupRef = useRef<THREE.Group>(null);
-
-  useEffect(() => {
-    if (!gltf?.scene || !groupRef.current) return;
-
-    const clone = gltf.scene.clone(true);
-
-    // Centre the model identically to the point cloud
-    const box = new THREE.Box3().setFromObject(clone);
-    const center = new THREE.Vector3();
-    box.getCenter(center);
-    clone.position.sub(center);
-    clone.position.y -= box.min.y - center.y;
-
-    // Ensure vertex-colour materials render correctly
-    clone.traverse((child) => {
-      if ((child as THREE.Mesh).isMesh) {
-        const m = child as THREE.Mesh;
-        const mat = m.material as THREE.MeshStandardMaterial;
-        if (mat) {
-          mat.vertexColors = true;
-          mat.needsUpdate = true;
-        }
-      }
-    });
-
-    // Clear previous children
-    while (groupRef.current.children.length) groupRef.current.remove(groupRef.current.children[0]);
-    groupRef.current.add(clone);
-  }, [gltf]);
-
-  return <group ref={groupRef} />;
-}
-
 // ── Scene Setup ──────────────────────────────────────────────────────────────
 
-function SceneSetup({ mode, renderMode }: { mode: ViewerMode; renderMode: RenderMode }) {
+function SceneSetup({ mode }: { mode: ViewerMode }) {
   return (
     <>
       <color attach="background" args={['#060606']} />
-      <ambientLight intensity={renderMode === 'mesh' ? 0.8 : 0.6} />
-      <directionalLight position={[5, 5, 5]} intensity={renderMode === 'mesh' ? 0.6 : 0.3} />
-      {renderMode === 'mesh' && (
-        <>
-          <directionalLight position={[-3, 3, -3]} intensity={0.3} />
-          <Environment preset="studio" background={false} />
-        </>
-      )}
+      <ambientLight intensity={0.6} />
+      <directionalLight position={[5, 5, 5]} intensity={0.3} />
       <gridHelper args={[30, 30, 0x0c1f1f, 0x081717]} position={[0, -0.01, 0]} />
       {mode === 'orbit' && (
         <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
@@ -516,9 +465,8 @@ function SceneSetup({ mode, renderMode }: { mode: ViewerMode; renderMode: Render
 
 // ── Main Viewer Component ────────────────────────────────────────────────────
 
-export default function Viewer3D({ modelUrl, meshUrl, onModelMetadata }: Viewer3DProps) {
+export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
   const [mode, setMode] = useState<ViewerMode>('orbit');
-  const [renderMode, setRenderMode] = useState<RenderMode>('points');
   const [pointSize, setPointSize] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -597,16 +545,10 @@ export default function Viewer3D({ modelUrl, meshUrl, onModelMetadata }: Viewer3
 
   useEffect(() => { if (mode !== 'measure') { handleResetCalibration(); } }, [mode]);
 
-  // Auto-select mesh mode when meshUrl becomes available
-  useEffect(() => { if (meshUrl && renderMode === 'points') setRenderMode('mesh'); }, [meshUrl]);
-
   if (!modelUrl) return null;
 
   const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
   const fullPlyUrl = modelUrl.startsWith('http') ? modelUrl : `${apiBase}${modelUrl}`;
-  const fullMeshUrl = meshUrl ? (meshUrl.startsWith('http') ? meshUrl : `${apiBase}${meshUrl}`) : null;
-
-  const hasMesh = !!fullMeshUrl;
 
   return (
     <div className="w-full h-full relative group bg-[#060606] rounded-xl overflow-hidden">
@@ -617,26 +559,16 @@ export default function Viewer3D({ modelUrl, meshUrl, onModelMetadata }: Viewer3
         gl={{ preserveDrawingBuffer: true, antialias: true }}
         ref={canvasRef as any}
       >
-        <SceneSetup mode={mode} renderMode={renderMode} />
+        <SceneSetup mode={mode} />
 
         {mode === 'orbit' && (
-          <OrbitControls makeDefault enableDamping dampingFactor={0.05} rotateSpeed={0.8} zoomSpeed={0.8} panSpeed={0.8} target={[0, 1, 0]} />
+          <OrbitControls makeDefault enableDamping dampingFactor={0.05} rotateSpeed={0.8} zoomSpeed={0.8} panSpeed={0.8} target={[0, 0, 0]} />
         )}
 
         <WalkthroughControls active={mode === 'walkthrough'} />
         <MeasureTool active={mode === 'measure'} points={visibleMeasurePoints} onAddPoint={handleAddMeasurePoint} />
 
-        {/* Render mode: points or mesh */}
-        {renderMode === 'points' && (
-          <PointCloud url={fullPlyUrl} onMetadata={handleMetadata} pointSize={pointSize} />
-        )}
-        {renderMode === 'mesh' && fullMeshUrl && (
-          <GLBMesh url={fullMeshUrl} />
-        )}
-        {/* If in mesh mode but no mesh URL, fall back to points */}
-        {renderMode === 'mesh' && !fullMeshUrl && (
-          <PointCloud url={fullPlyUrl} onMetadata={handleMetadata} pointSize={pointSize} />
-        )}
+        <PointCloud url={fullPlyUrl} onMetadata={handleMetadata} pointSize={pointSize} />
       </Canvas>
 
       {/* ── Top-Left: Mode Indicator ─────────────────────────────────────── */}
@@ -645,12 +577,6 @@ export default function Viewer3D({ modelUrl, meshUrl, onModelMetadata }: Viewer3
           {mode === 'orbit' && <><MousePointer className="w-3 h-3" /> Orbit</>}
           {mode === 'walkthrough' && <><Footprints className="w-3 h-3" /> Walk-Through</>}
           {mode === 'measure' && <><Ruler className="w-3 h-3" /> Measure</>}
-          <span className="text-white/20">|</span>
-          {renderMode === 'points' ? (
-            <span className="text-[#35c889] flex items-center gap-1"><Layers className="w-3 h-3" /> Points</span>
-          ) : (
-            <span className="text-[#a4a4ff] flex items-center gap-1"><Box className="w-3 h-3" /> Mesh</span>
-          )}
         </div>
       </div>
 
@@ -659,25 +585,6 @@ export default function Viewer3D({ modelUrl, meshUrl, onModelMetadata }: Viewer3
         <ToolbarButton icon={<MousePointer className="w-3.5 h-3.5" />} label="Orbit" active={mode === 'orbit'} onClick={() => setMode('orbit')} />
         <ToolbarButton icon={<Footprints className="w-3.5 h-3.5" />} label="Walk" active={mode === 'walkthrough'} onClick={() => setMode('walkthrough')} />
         <ToolbarButton icon={<Ruler className="w-3.5 h-3.5" />} label="Measure" active={mode === 'measure'} onClick={() => setMode('measure')} />
-
-        <div className="border-t border-white/[0.06] my-1" />
-
-        {/* Render mode toggle */}
-        <ToolbarButton
-          icon={<Layers className="w-3.5 h-3.5" />}
-          label="Points"
-          active={renderMode === 'points'}
-          onClick={() => setRenderMode('points')}
-        />
-        {hasMesh && (
-          <ToolbarButton
-            icon={<Box className="w-3.5 h-3.5" />}
-            label="Mesh"
-            active={renderMode === 'mesh'}
-            onClick={() => setRenderMode('mesh')}
-            accent="lavender"
-          />
-        )}
 
         <div className="border-t border-white/[0.06] my-1" />
 
@@ -777,18 +684,16 @@ export default function Viewer3D({ modelUrl, meshUrl, onModelMetadata }: Viewer3
         </div>
       )}
 
-      {/* ── Bottom-Left: Point Size Controls (points mode only) ───────────── */}
-      {renderMode === 'points' && (
-        <div className="absolute bottom-3 left-3 z-10 flex items-center gap-2">
-          <div className="bg-black/70 backdrop-blur-md rounded-lg border border-white/[0.06] flex items-center px-2 py-1 gap-1">
-            <span className="text-[10px] text-white/40 font-mono mr-1">Size</span>
-            <button onClick={() => setPointSize(p => Math.max(0.001, (p || 0.01) / 1.5))} className="text-white/50 hover:text-[#35c889] p-0.5 transition-colors"><ZoomOut className="w-3 h-3" /></button>
-            <span className="text-[10px] text-[#35c889]/60 font-mono w-10 text-center">{pointSize > 0 ? pointSize.toFixed(3) : 'Auto'}</span>
-            <button onClick={() => setPointSize(p => Math.min(0.1, (p || 0.01) * 1.5))} className="text-white/50 hover:text-[#35c889] p-0.5 transition-colors"><ZoomIn className="w-3 h-3" /></button>
-            <button onClick={() => setPointSize(0)} className="text-white/30 hover:text-[#35c889] p-0.5 ml-1 transition-colors text-[9px] font-mono">Auto</button>
-          </div>
+      {/* ── Bottom-Left: Point Size Controls ──────────────────────────────── */}
+      <div className="absolute bottom-3 left-3 z-10 flex items-center gap-2">
+        <div className="bg-black/70 backdrop-blur-md rounded-lg border border-white/[0.06] flex items-center px-2 py-1 gap-1">
+          <span className="text-[10px] text-white/40 font-mono mr-1">Size</span>
+          <button onClick={() => setPointSize(p => Math.max(0.001, (p || 0.01) / 1.5))} className="text-white/50 hover:text-[#35c889] p-0.5 transition-colors"><ZoomOut className="w-3 h-3" /></button>
+          <span className="text-[10px] text-[#35c889]/60 font-mono w-10 text-center">{pointSize > 0 ? pointSize.toFixed(3) : 'Auto'}</span>
+          <button onClick={() => setPointSize(p => Math.min(0.1, (p || 0.01) * 1.5))} className="text-white/50 hover:text-[#35c889] p-0.5 transition-colors"><ZoomIn className="w-3 h-3" /></button>
+          <button onClick={() => setPointSize(0)} className="text-white/30 hover:text-[#35c889] p-0.5 ml-1 transition-colors text-[9px] font-mono">Auto</button>
         </div>
-      )}
+      </div>
 
       {/* ── Bottom-Center: Context Help ───────────────────────────────────── */}
       <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-10">
@@ -812,9 +717,6 @@ export default function Viewer3D({ modelUrl, meshUrl, onModelMetadata }: Viewer3
               <HelpItem icon={<Footprints className="w-3 h-3" />} title="Walk-Through">Click to lock cursor. WASD to move. Mouse to look. Space/Shift for up/down.</HelpItem>
               <HelpItem icon={<Ruler className="w-3 h-3" />} title="Measure">Step 1: Click two reference points and enter their known distance. Step 2: Measure any distance in meters.</HelpItem>
               <HelpItem icon={<Camera className="w-3 h-3" />} title="Snapshot">Captures the current view as a PNG image.</HelpItem>
-              <HelpItem icon={<Layers className="w-3 h-3" />} title="Points / Mesh">
-                Toggle between the raw point cloud and reconstructed surface mesh for more definition.
-              </HelpItem>
             </div>
           </div>
         </div>
