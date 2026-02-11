@@ -44,6 +44,16 @@ interface MeasurePoint {
   position: THREE.Vector3;
 }
 
+type MeasurePhase = 'calibrate' | 'measure';
+
+interface CalibrationState {
+  points: MeasurePoint[];          // 2 reference points
+  rawDistance: number;             // 3D distance between them
+  realMeters: number;             // user-entered real distance in meters
+  scaleFactor: number;            // realMeters / rawDistance
+}
+
+
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const SH_C0 = 0.28209479177387814;
@@ -316,12 +326,12 @@ function WalkthroughControls({ active }: { active: boolean }) {
 
 function MeasurementVisuals({ points }: { points: MeasurePoint[] }) {
   const sphereGeo = useMemo(() => new THREE.SphereGeometry(0.03, 16, 16), []);
-  const greenMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#00ff88' }), []);
-  const orangeMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#ff8800' }), []);
+  const greenMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#35c889' }), []);
+  const orangeMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#a4a4ff' }), []);
   const lineObj = useMemo(() => {
     if (points.length < 2) return null;
     const geo = new THREE.BufferGeometry().setFromPoints(points.map(p => p.position));
-    const mat = new THREE.LineBasicMaterial({ color: '#00ff88', linewidth: 2 });
+    const mat = new THREE.LineBasicMaterial({ color: '#35c889', linewidth: 2 });
     return new THREE.Line(geo, mat);
   }, [points]);
 
@@ -408,10 +418,13 @@ function PointCloud({ url, onMetadata, pointSize }: { url: string; onMetadata: (
         geometry.computeBoundingSphere();
 
         const bsRadius = geometry.boundingSphere?.radius || 1;
-        const adaptiveSize = Math.max(0.002, Math.min(0.05, bsRadius / Math.sqrt(result.vertexCount) * 2));
+        // More generous adaptive size: use bsRadius^1.2 to boost for sparse clouds
+        const densityFactor = bsRadius / Math.pow(result.vertexCount, 0.4);
+        const adaptiveSize = Math.max(0.005, Math.min(0.08, densityFactor * 3));
+        console.log(`Adaptive point size: radius=${bsRadius.toFixed(3)}, count=${result.vertexCount}, size=${adaptiveSize.toFixed(4)}`);
         const material = new THREE.PointsMaterial({
           size: pointSize > 0 ? pointSize : adaptiveSize,
-          vertexColors: true, sizeAttenuation: true, transparent: true, opacity: 0.95, depthWrite: true,
+          vertexColors: true, sizeAttenuation: true, transparent: true, opacity: 0.92, depthWrite: true,
         });
 
         meshRef.current.geometry.dispose();
@@ -482,7 +495,7 @@ function GLBMesh({ url }: { url: string }) {
 function SceneSetup({ mode, renderMode }: { mode: ViewerMode; renderMode: RenderMode }) {
   return (
     <>
-      <color attach="background" args={['#0a0a0a']} />
+      <color attach="background" args={['#060606']} />
       <ambientLight intensity={renderMode === 'mesh' ? 0.8 : 0.6} />
       <directionalLight position={[5, 5, 5]} intensity={renderMode === 'mesh' ? 0.6 : 0.3} />
       {renderMode === 'mesh' && (
@@ -491,7 +504,7 @@ function SceneSetup({ mode, renderMode }: { mode: ViewerMode; renderMode: Render
           <Environment preset="studio" background={false} />
         </>
       )}
-      <gridHelper args={[30, 30, 0x222222, 0x111111]} position={[0, -0.01, 0]} />
+      <gridHelper args={[30, 30, 0x0c1f1f, 0x081717]} position={[0, -0.01, 0]} />
       {mode === 'orbit' && (
         <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
           <GizmoViewport axisColors={['#ff4444', '#44ff44', '#4444ff']} labelColor="white" />
@@ -507,23 +520,65 @@ export default function Viewer3D({ modelUrl, meshUrl, onModelMetadata }: Viewer3
   const [mode, setMode] = useState<ViewerMode>('orbit');
   const [renderMode, setRenderMode] = useState<RenderMode>('points');
   const [pointSize, setPointSize] = useState(0);
-  const [measurePoints, setMeasurePoints] = useState<MeasurePoint[]>([]);
-  const [measuredDistance, setMeasuredDistance] = useState<number | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // ── Measurement state ───────────────────────────────────────────────────
+  const [measurePhase, setMeasurePhase] = useState<MeasurePhase>('calibrate');
+  const [calibration, setCalibration] = useState<CalibrationState | null>(null);
+  const [calibPoints, setCalibPoints] = useState<MeasurePoint[]>([]);
+  const [meterInput, setMeterInput] = useState('1.0');
+  const [measurePoints, setMeasurePoints] = useState<MeasurePoint[]>([]);
+  const [measuredDistance, setMeasuredDistance] = useState<number | null>(null);
+
+  // All visible points for measurement visuals (both calib and measure)
+  const visibleMeasurePoints = measurePhase === 'calibrate' ? calibPoints : measurePoints;
 
   const handleMetadata = useCallback((meta: ModelMetadata) => { onModelMetadata?.(meta); }, [onModelMetadata]);
 
   const handleAddMeasurePoint = useCallback((point: THREE.Vector3) => {
-    setMeasurePoints(prev => {
-      const next = prev.length >= 2 ? [{ position: point }] : [...prev, { position: point }];
-      if (next.length === 2) setMeasuredDistance(next[0].position.distanceTo(next[1].position));
-      else setMeasuredDistance(null);
-      return next;
-    });
+    if (measurePhase === 'calibrate') {
+      setCalibPoints(prev => {
+        if (prev.length >= 2) return [{ position: point }];
+        return [...prev, { position: point }];
+      });
+    } else {
+      // Measure mode
+      setMeasurePoints(prev => {
+        const next = prev.length >= 2 ? [{ position: point }] : [...prev, { position: point }];
+        if (next.length === 2 && calibration) {
+          const rawDist = next[0].position.distanceTo(next[1].position);
+          setMeasuredDistance(rawDist * calibration.scaleFactor);
+        } else {
+          setMeasuredDistance(null);
+        }
+        return next;
+      });
+    }
+  }, [measurePhase, calibration]);
+
+  const handleConfirmCalibration = useCallback(() => {
+    if (calibPoints.length !== 2) return;
+    const rawDist = calibPoints[0].position.distanceTo(calibPoints[1].position);
+    const meters = parseFloat(meterInput) || 1.0;
+    const scale = meters / rawDist;
+    setCalibration({ points: calibPoints, rawDistance: rawDist, realMeters: meters, scaleFactor: scale });
+    setMeasurePhase('measure');
+    setMeasurePoints([]);
+    setMeasuredDistance(null);
+  }, [calibPoints, meterInput]);
+
+  const handleResetCalibration = useCallback(() => {
+    setCalibration(null);
+    setCalibPoints([]);
+    setMeasurePhase('calibrate');
+    setMeasurePoints([]);
+    setMeasuredDistance(null);
+    setMeterInput('1.0');
   }, []);
 
   const handleClearMeasure = useCallback(() => { setMeasurePoints([]); setMeasuredDistance(null); }, []);
+
   const handleSnapshot = useCallback(() => {
     const canvas = document.querySelector('canvas');
     if (!canvas) return;
@@ -534,9 +589,13 @@ export default function Viewer3D({ modelUrl, meshUrl, onModelMetadata }: Viewer3
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
     });
   }, []);
-  const handleReset = useCallback(() => { setMode('orbit'); setMeasurePoints([]); setMeasuredDistance(null); setPointSize(0); }, []);
 
-  useEffect(() => { if (mode !== 'measure') { setMeasurePoints([]); setMeasuredDistance(null); } }, [mode]);
+  const handleReset = useCallback(() => {
+    setMode('orbit'); setPointSize(0);
+    handleResetCalibration();
+  }, [handleResetCalibration]);
+
+  useEffect(() => { if (mode !== 'measure') { handleResetCalibration(); } }, [mode]);
 
   // Auto-select mesh mode when meshUrl becomes available
   useEffect(() => { if (meshUrl && renderMode === 'points') setRenderMode('mesh'); }, [meshUrl]);
@@ -550,7 +609,7 @@ export default function Viewer3D({ modelUrl, meshUrl, onModelMetadata }: Viewer3
   const hasMesh = !!fullMeshUrl;
 
   return (
-    <div className="w-full h-full relative group bg-[#0a0a0a] rounded-xl overflow-hidden">
+    <div className="w-full h-full relative group bg-[#060606] rounded-xl overflow-hidden">
       {/* 3D Canvas */}
       <Canvas
         camera={{ position: [0, 2, 5], fov: 60, near: 0.01, far: 1000 }}
@@ -565,7 +624,7 @@ export default function Viewer3D({ modelUrl, meshUrl, onModelMetadata }: Viewer3
         )}
 
         <WalkthroughControls active={mode === 'walkthrough'} />
-        <MeasureTool active={mode === 'measure'} points={measurePoints} onAddPoint={handleAddMeasurePoint} />
+        <MeasureTool active={mode === 'measure'} points={visibleMeasurePoints} onAddPoint={handleAddMeasurePoint} />
 
         {/* Render mode: points or mesh */}
         {renderMode === 'points' && (
@@ -582,15 +641,15 @@ export default function Viewer3D({ modelUrl, meshUrl, onModelMetadata }: Viewer3
 
       {/* ── Top-Left: Mode Indicator ─────────────────────────────────────── */}
       <div className="absolute top-3 left-3 z-10">
-        <div className="bg-black/70 backdrop-blur-md text-white/90 text-xs px-3 py-1.5 rounded-lg border border-white/10 font-mono flex items-center gap-2">
+        <div className="bg-black/70 backdrop-blur-md text-white/80 text-xs px-3 py-1.5 rounded-lg border border-white/[0.06] font-mono flex items-center gap-2">
           {mode === 'orbit' && <><MousePointer className="w-3 h-3" /> Orbit</>}
           {mode === 'walkthrough' && <><Footprints className="w-3 h-3" /> Walk-Through</>}
           {mode === 'measure' && <><Ruler className="w-3 h-3" /> Measure</>}
-          <span className="text-white/30">|</span>
+          <span className="text-white/20">|</span>
           {renderMode === 'points' ? (
-            <span className="text-blue-300 flex items-center gap-1"><Layers className="w-3 h-3" /> Points</span>
+            <span className="text-[#35c889] flex items-center gap-1"><Layers className="w-3 h-3" /> Points</span>
           ) : (
-            <span className="text-purple-300 flex items-center gap-1"><Box className="w-3 h-3" /> Mesh</span>
+            <span className="text-[#a4a4ff] flex items-center gap-1"><Box className="w-3 h-3" /> Mesh</span>
           )}
         </div>
       </div>
@@ -601,7 +660,7 @@ export default function Viewer3D({ modelUrl, meshUrl, onModelMetadata }: Viewer3
         <ToolbarButton icon={<Footprints className="w-3.5 h-3.5" />} label="Walk" active={mode === 'walkthrough'} onClick={() => setMode('walkthrough')} />
         <ToolbarButton icon={<Ruler className="w-3.5 h-3.5" />} label="Measure" active={mode === 'measure'} onClick={() => setMode('measure')} />
 
-        <div className="border-t border-white/10 my-1" />
+        <div className="border-t border-white/[0.06] my-1" />
 
         {/* Render mode toggle */}
         <ToolbarButton
@@ -616,11 +675,11 @@ export default function Viewer3D({ modelUrl, meshUrl, onModelMetadata }: Viewer3
             label="Mesh"
             active={renderMode === 'mesh'}
             onClick={() => setRenderMode('mesh')}
-            accent="purple"
+            accent="lavender"
           />
         )}
 
-        <div className="border-t border-white/10 my-1" />
+        <div className="border-t border-white/[0.06] my-1" />
 
         <ToolbarButton icon={<Camera className="w-3.5 h-3.5" />} label="Snapshot" onClick={handleSnapshot} />
         <ToolbarButton icon={<RotateCcw className="w-3.5 h-3.5" />} label="Reset" onClick={handleReset} />
@@ -630,32 +689,88 @@ export default function Viewer3D({ modelUrl, meshUrl, onModelMetadata }: Viewer3
       {/* ── Measure Sub-Controls ──────────────────────────────────────────── */}
       {mode === 'measure' && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10">
-          <div className="bg-black/80 backdrop-blur-md border border-white/10 rounded-xl px-4 py-2.5 flex items-center gap-4 font-mono text-xs">
-            <div className="flex items-center gap-2">
-              <span className={`flex items-center gap-1.5 ${measurePoints.length >= 1 ? 'text-orange-400' : 'text-white/40'}`}>
-                <CircleDot className="w-3 h-3" /> Point A {measurePoints.length >= 1 ? '(set)' : ''}
-              </span>
-              <span className="text-white/20">&rarr;</span>
-              <span className={`flex items-center gap-1.5 ${measurePoints.length >= 2 ? 'text-emerald-400' : 'text-white/40'}`}>
-                <CircleDot className="w-3 h-3" /> Point B {measurePoints.length >= 2 ? '(set)' : ''}
-              </span>
-            </div>
-            {measuredDistance !== null && (
+          <div className="bg-black/80 backdrop-blur-md border border-white/[0.06] rounded-xl px-4 py-2.5 flex items-center gap-3 font-mono text-xs">
+            {/* Phase indicator */}
+            <span className={`text-[10px] px-1.5 py-0.5 rounded ${measurePhase === 'calibrate' ? 'bg-[#a4a4ff]/15 text-[#a4a4ff]' : 'bg-[#35c889]/15 text-[#35c889]'}`}>
+              {measurePhase === 'calibrate' ? 'STEP 1: Calibrate' : 'STEP 2: Measure'}
+            </span>
+            <div className="border-l border-white/[0.06] h-5" />
+
+            {measurePhase === 'calibrate' ? (
               <>
-                <div className="border-l border-white/10 h-5" />
+                {/* Calibration: pick 2 reference points, then enter real distance */}
                 <div className="flex items-center gap-2">
-                  <Ruler className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="text-emerald-300 text-sm font-semibold">{measuredDistance.toFixed(3)}</span>
-                  <span className="text-white/40">units</span>
+                  <span className={`flex items-center gap-1 ${calibPoints.length >= 1 ? 'text-[#a4a4ff]' : 'text-white/30'}`}>
+                    <CircleDot className="w-3 h-3" /> A {calibPoints.length >= 1 ? '✓' : ''}
+                  </span>
+                  <span className="text-white/15">&rarr;</span>
+                  <span className={`flex items-center gap-1 ${calibPoints.length >= 2 ? 'text-[#35c889]' : 'text-white/30'}`}>
+                    <CircleDot className="w-3 h-3" /> B {calibPoints.length >= 2 ? '✓' : ''}
+                  </span>
                 </div>
+                {calibPoints.length === 2 && (
+                  <>
+                    <div className="border-l border-white/[0.06] h-5" />
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-white/40">=</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        value={meterInput}
+                        onChange={e => setMeterInput(e.target.value)}
+                        className="w-16 bg-[#081717] border border-white/[0.08] rounded px-1.5 py-0.5 text-white text-xs font-mono text-center focus:border-[#35c889]/40 focus:outline-none"
+                      />
+                      <span className="text-white/40">m</span>
+                    </div>
+                    <button
+                      onClick={handleConfirmCalibration}
+                      className="px-2 py-0.5 rounded bg-[#35c889]/15 text-[#35c889] border border-[#35c889]/20 hover:bg-[#35c889]/25 transition-colors"
+                    >
+                      Confirm
+                    </button>
+                  </>
+                )}
               </>
-            )}
-            {measurePoints.length > 0 && (
+            ) : (
               <>
-                <div className="border-l border-white/10 h-5" />
-                <button onClick={handleClearMeasure} className="flex items-center gap-1 text-red-400/70 hover:text-red-400 transition-colors">
-                  <Trash2 className="w-3 h-3" /> Clear
+                {/* Measure mode: pick points, show calibrated distance */}
+                <div className="flex items-center gap-2">
+                  <span className={`flex items-center gap-1 ${measurePoints.length >= 1 ? 'text-[#a4a4ff]' : 'text-white/30'}`}>
+                    <CircleDot className="w-3 h-3" /> A {measurePoints.length >= 1 ? '✓' : ''}
+                  </span>
+                  <span className="text-white/15">&rarr;</span>
+                  <span className={`flex items-center gap-1 ${measurePoints.length >= 2 ? 'text-[#35c889]' : 'text-white/30'}`}>
+                    <CircleDot className="w-3 h-3" /> B {measurePoints.length >= 2 ? '✓' : ''}
+                  </span>
+                </div>
+                {measuredDistance !== null && (
+                  <>
+                    <div className="border-l border-white/[0.06] h-5" />
+                    <div className="flex items-center gap-2">
+                      <Ruler className="w-3.5 h-3.5 text-[#35c889]" />
+                      <span className="text-[#35c889] text-sm font-semibold">{measuredDistance.toFixed(3)}</span>
+                      <span className="text-white/30">m</span>
+                    </div>
+                  </>
+                )}
+                {measurePoints.length > 0 && (
+                  <>
+                    <div className="border-l border-white/[0.06] h-5" />
+                    <button onClick={handleClearMeasure} className="flex items-center gap-1 text-white/40 hover:text-white transition-colors">
+                      <Trash2 className="w-3 h-3" /> Clear
+                    </button>
+                  </>
+                )}
+                <div className="border-l border-white/[0.06] h-5" />
+                <button onClick={handleResetCalibration} className="flex items-center gap-1 text-[#a4a4ff]/60 hover:text-[#a4a4ff] transition-colors text-[10px]">
+                  Recalibrate
                 </button>
+                {calibration && (
+                  <span className="text-white/20 text-[9px]">
+                    (1u = {calibration.scaleFactor.toFixed(3)}m)
+                  </span>
+                )}
               </>
             )}
           </div>
@@ -665,29 +780,29 @@ export default function Viewer3D({ modelUrl, meshUrl, onModelMetadata }: Viewer3
       {/* ── Bottom-Left: Point Size Controls (points mode only) ───────────── */}
       {renderMode === 'points' && (
         <div className="absolute bottom-3 left-3 z-10 flex items-center gap-2">
-          <div className="bg-black/70 backdrop-blur-md rounded-lg border border-white/10 flex items-center px-2 py-1 gap-1">
-            <span className="text-[10px] text-white/50 font-mono mr-1">Size</span>
-            <button onClick={() => setPointSize(p => Math.max(0.001, (p || 0.01) / 1.5))} className="text-white/60 hover:text-white p-0.5 transition-colors"><ZoomOut className="w-3 h-3" /></button>
-            <span className="text-[10px] text-white/70 font-mono w-10 text-center">{pointSize > 0 ? pointSize.toFixed(3) : 'Auto'}</span>
-            <button onClick={() => setPointSize(p => Math.min(0.1, (p || 0.01) * 1.5))} className="text-white/60 hover:text-white p-0.5 transition-colors"><ZoomIn className="w-3 h-3" /></button>
-            <button onClick={() => setPointSize(0)} className="text-white/40 hover:text-white p-0.5 ml-1 transition-colors text-[9px] font-mono">Auto</button>
+          <div className="bg-black/70 backdrop-blur-md rounded-lg border border-white/[0.06] flex items-center px-2 py-1 gap-1">
+            <span className="text-[10px] text-white/40 font-mono mr-1">Size</span>
+            <button onClick={() => setPointSize(p => Math.max(0.001, (p || 0.01) / 1.5))} className="text-white/50 hover:text-[#35c889] p-0.5 transition-colors"><ZoomOut className="w-3 h-3" /></button>
+            <span className="text-[10px] text-[#35c889]/60 font-mono w-10 text-center">{pointSize > 0 ? pointSize.toFixed(3) : 'Auto'}</span>
+            <button onClick={() => setPointSize(p => Math.min(0.1, (p || 0.01) * 1.5))} className="text-white/50 hover:text-[#35c889] p-0.5 transition-colors"><ZoomIn className="w-3 h-3" /></button>
+            <button onClick={() => setPointSize(0)} className="text-white/30 hover:text-[#35c889] p-0.5 ml-1 transition-colors text-[9px] font-mono">Auto</button>
           </div>
         </div>
       )}
 
       {/* ── Bottom-Center: Context Help ───────────────────────────────────── */}
       <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-10">
-        <div className="bg-black/70 backdrop-blur-md text-white/70 text-[10px] px-3 py-1.5 rounded-lg border border-white/10 font-mono">
+        <div className="bg-black/70 backdrop-blur-md text-white/50 text-[10px] px-3 py-1.5 rounded-lg border border-white/[0.06] font-mono">
           {mode === 'orbit' && 'Left: Rotate  |  Right: Pan  |  Scroll: Zoom'}
           {mode === 'walkthrough' && 'Click to lock  |  WASD: Move  |  Space/Shift: Up/Down  |  ESC: Unlock'}
-          {mode === 'measure' && 'Click on the model to place points (A then B)'}
+          {mode === 'measure' && (measurePhase === 'calibrate' ? 'Click two reference points, then enter their real distance in meters' : 'Click two points to measure the calibrated distance')}
         </div>
       </div>
 
       {/* ── Help Panel ────────────────────────────────────────────────────── */}
       {showHelp && (
         <div className="absolute top-14 right-3 z-20 w-64">
-          <div className="bg-black/90 backdrop-blur-md border border-white/10 rounded-xl p-4 text-xs text-white/80 space-y-3">
+          <div className="bg-[#060606]/95 backdrop-blur-md border border-white/[0.06] rounded-xl p-4 text-xs text-white/70 space-y-3">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-white text-sm">Viewer Controls</span>
               <button onClick={() => setShowHelp(false)} className="text-white/40 hover:text-white"><X className="w-3 h-3" /></button>
@@ -695,7 +810,7 @@ export default function Viewer3D({ modelUrl, meshUrl, onModelMetadata }: Viewer3
             <div className="space-y-2">
               <HelpItem icon={<MousePointer className="w-3 h-3" />} title="Orbit Mode">Left-click drag to rotate. Right-click drag to pan. Scroll to zoom.</HelpItem>
               <HelpItem icon={<Footprints className="w-3 h-3" />} title="Walk-Through">Click to lock cursor. WASD to move. Mouse to look. Space/Shift for up/down.</HelpItem>
-              <HelpItem icon={<Ruler className="w-3 h-3" />} title="Measure">Click two points on the model. Orange = Point A, Green = Point B.</HelpItem>
+              <HelpItem icon={<Ruler className="w-3 h-3" />} title="Measure">Step 1: Click two reference points and enter their known distance. Step 2: Measure any distance in meters.</HelpItem>
               <HelpItem icon={<Camera className="w-3 h-3" />} title="Snapshot">Captures the current view as a PNG image.</HelpItem>
               <HelpItem icon={<Layers className="w-3 h-3" />} title="Points / Mesh">
                 Toggle between the raw point cloud and reconstructed surface mesh for more definition.
@@ -711,11 +826,11 @@ export default function Viewer3D({ modelUrl, meshUrl, onModelMetadata }: Viewer3
 // ── Toolbar Button ───────────────────────────────────────────────────────────
 
 function ToolbarButton({ icon, label, active, onClick, accent }: {
-  icon: React.ReactNode; label: string; active?: boolean; onClick: () => void; accent?: 'emerald' | 'purple';
+  icon: React.ReactNode; label: string; active?: boolean; onClick: () => void; accent?: 'green' | 'lavender';
 }) {
-  const color = accent === 'purple'
-    ? (active ? 'bg-purple-500/20 text-purple-300 border-purple-500/30' : 'bg-black/70 text-white/60 border-white/10 hover:text-white hover:bg-black/90')
-    : (active ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-black/70 text-white/60 border-white/10 hover:text-white hover:bg-black/90');
+  const color = accent === 'lavender'
+    ? (active ? 'bg-[#a4a4ff]/15 text-[#a4a4ff] border-[#a4a4ff]/20' : 'bg-black/70 text-white/50 border-white/[0.06] hover:text-white hover:bg-[#081717]')
+    : (active ? 'bg-[#35c889]/15 text-[#35c889] border-[#35c889]/20' : 'bg-black/70 text-white/50 border-white/[0.06] hover:text-white hover:bg-[#081717]');
   return (
     <button
       onClick={onClick}
@@ -733,8 +848,8 @@ function ToolbarButton({ icon, label, active, onClick, accent }: {
 function HelpItem({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="flex items-center gap-1.5 text-white/90 font-medium mb-0.5">{icon}{title}</div>
-      <p className="text-white/50 leading-relaxed pl-5">{children}</p>
+      <div className="flex items-center gap-1.5 text-white/80 font-medium mb-0.5">{icon}{title}</div>
+      <p className="text-white/40 leading-relaxed pl-5">{children}</p>
     </div>
   );
 }

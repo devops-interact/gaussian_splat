@@ -113,7 +113,7 @@ export default function VideoUpload({ onUploadSuccess, disabled }: VideoUploadPr
   };
 
   return (
-    <Card className="w-full border-app-primary bg-app-card/30 h-full">
+    <Card className="w-full h-full">
       <CardHeader>
         <CardTitle>New Project</CardTitle>
         <CardDescription>Upload a video to start 3D reconstruction</CardDescription>
@@ -132,14 +132,14 @@ export default function VideoUpload({ onUploadSuccess, disabled }: VideoUploadPr
                 className={cn(
                   "flex flex-col items-start p-3 rounded-lg border text-left transition-all duration-200",
                   selectedPreset === preset.id
-                    ? "border-primary-500 bg-primary-500/10 text-primary-400"
-                    : "border-app-secondary bg-app-elevated/50 text-gray-400 hover:border-gray-600 hover:bg-app-elevated",
+                    ? "border-[#35c889]/25 bg-[#35c889]/[0.06] text-[#35c889]"
+                    : "border-white/[0.06] bg-[#060606]/50 text-gray-400 hover:border-[#35c889]/[0.12] hover:bg-[#081717]/50",
                   (disabled || uploading) && "opacity-50 cursor-not-allowed"
                 )}
               >
                 <div className="flex items-center justify-between w-full mb-1">
                   <span className="font-semibold text-sm">{preset.name}</span>
-                  {selectedPreset === preset.id && <CheckCircle className="w-3 h-3" />}
+                  {selectedPreset === preset.id && <CheckCircle className="w-3 h-3 text-[#35c889]" />}
                 </div>
                 <span className="text-xs opacity-70 mb-2 flex items-center">
                   <Clock className="w-3 h-3 mr-1" /> {preset.time}
@@ -154,11 +154,11 @@ export default function VideoUpload({ onUploadSuccess, disabled }: VideoUploadPr
         <div
           className={cn(
             "border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center text-center transition-all",
-            "border-app-secondary bg-app-elevated/20 hover:bg-app-elevated/40 hover:border-gray-500",
+            "border-white/[0.06] bg-[#060606]/30 hover:bg-[#081717]/40 hover:border-[#35c889]/[0.15]",
             (disabled || uploading) && "opacity-50 pointer-events-none"
           )}
         >
-          <div className="w-12 h-12 rounded-full bg-app-elevated flex items-center justify-center mb-4">
+          <div className="w-12 h-12 rounded-full bg-[#081717] flex items-center justify-center mb-4 border border-white/[0.06]">
             <Upload className="w-6 h-6 text-gray-400" />
           </div>
 
@@ -191,7 +191,7 @@ export default function VideoUpload({ onUploadSuccess, disabled }: VideoUploadPr
 
         {/* Status Messages */}
         {videoInfo && (
-          <div className="flex items-center p-3 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-300 text-sm">
+          <div className="flex items-center p-3 rounded-lg bg-[#a4a4ff]/[0.06] border border-[#a4a4ff]/[0.12] text-[#a4a4ff] text-sm">
             <FileVideo className="w-4 h-4 mr-2" />
             <span>
               Video: {videoInfo.duration.toFixed(1)}s • {videoInfo.resolution} • {videoInfo.fps.toFixed(1)} fps
@@ -200,7 +200,7 @@ export default function VideoUpload({ onUploadSuccess, disabled }: VideoUploadPr
         )}
 
         {warnings.length > 0 && (
-          <div className="p-3 rounded-lg bg-yellow-500/10 border border-yellow-500/20 text-yellow-500 text-sm">
+          <div className="p-3 rounded-lg bg-yellow-500/[0.06] border border-yellow-500/[0.12] text-yellow-400 text-sm">
             <div className="flex items-center font-semibold mb-1">
               <AlertTriangle className="w-4 h-4 mr-2" />
               Warnings
@@ -212,7 +212,7 @@ export default function VideoUpload({ onUploadSuccess, disabled }: VideoUploadPr
         )}
 
         {error && (
-          <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 text-sm flex items-center">
+          <div className="p-3 rounded-lg bg-red-500/[0.06] border border-red-500/[0.12] text-red-400 text-sm flex items-center">
             <AlertTriangle className="w-4 h-4 mr-2" />
             {error}
           </div>

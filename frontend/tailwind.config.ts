@@ -9,30 +9,32 @@ const config: Config = {
     theme: {
         extend: {
             colors: {
-                // Contextual Color System
+                // Brand color scheme
+                // #000000  — base black
+                // #060606  — elevated dark
+                // #081717  — card / teal-tinted dark
+                // #35c889  — primary green accent
+                // #a4a4ff  — secondary lavender accent
+                brand: {
+                    green: '#35c889',
+                    lavender: '#a4a4ff',
+                },
                 primary: {
-                    DEFAULT: '#000000', // bg-primary = pure black
-                    50: '#e6f4f9',
-                    100: '#cce9f3',
-                    200: '#99d3e7',
-                    300: '#66bddb',
-                    400: '#3E93C9', // Main blue accent
-                    500: '#357eb0',
-                    600: '#2c6997',
-                    700: '#23547e',
-                    800: '#1a3f65',
-                    900: '#112a4c',
+                    DEFAULT: '#000000',
+                    400: '#35c889',
+                    500: '#2db377',
+                    600: '#259966',
                 },
                 surface: {
-                    primary: '#000000',    // Main background
-                    secondary: '#0a0a0a',  // Elevated surfaces
-                    tertiary: '#111111',   // Cards, panels
-                    elevated: '#1a1a1a',   // Modals, dropdowns
+                    primary: '#000000',
+                    secondary: '#060606',
+                    tertiary: '#081717',
+                    elevated: '#0c1f1f',
                 },
                 border: {
-                    primary: 'rgba(255, 255, 255, 0.1)',   // border-primary
-                    secondary: 'rgba(255, 255, 255, 0.05)', // border-secondary
-                    accent: '#3E93C9',                       // border-accent
+                    primary: 'rgba(255, 255, 255, 0.08)',
+                    secondary: 'rgba(255, 255, 255, 0.04)',
+                    accent: '#35c889',
                 },
                 secondary: {
                     50: '#f8fafc',
@@ -46,18 +48,6 @@ const config: Config = {
                     800: '#1e293b',
                     900: '#0f172a',
                 },
-                accent: {
-                    50: '#f0f9ff',
-                    100: '#e0f2fe',
-                    200: '#bae6fd',
-                    300: '#7dd3fc',
-                    400: '#38bdf8',
-                    500: '#0ea5e9',
-                    600: '#0284c7',
-                    700: '#0369a1',
-                    800: '#075985',
-                    900: '#0c4a6e',
-                },
             },
             fontFamily: {
                 sans: ['var(--font-inter)', 'Inter', 'system-ui', 'sans-serif'],
@@ -69,15 +59,15 @@ const config: Config = {
             },
             backgroundColor: {
                 'app-primary': '#000000',
-                'app-secondary': '#0a0a0a',
-                'app-tertiary': '#111111',
-                'app-elevated': '#1a1a1a',
-                'app-card': 'rgba(17, 17, 17, 0.5)',
+                'app-secondary': '#060606',
+                'app-tertiary': '#081717',
+                'app-elevated': '#0c1f1f',
+                'app-card': 'rgba(8, 23, 23, 0.6)',
             },
             borderColor: {
-                'app-primary': 'rgba(255, 255, 255, 0.1)',
-                'app-secondary': 'rgba(255, 255, 255, 0.05)',
-                'app-accent': '#3E93C9',
+                'app-primary': 'rgba(255, 255, 255, 0.08)',
+                'app-secondary': 'rgba(255, 255, 255, 0.04)',
+                'app-accent': '#35c889',
             },
             animation: {
                 'fade-in': 'fadeIn 0.5s ease-in-out',

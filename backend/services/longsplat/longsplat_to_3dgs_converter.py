@@ -23,32 +23,50 @@ def sh_to_rgb(f_dc: np.ndarray) -> np.ndarray:
 
     Standard 3DGS formula: color = clamp(SH_C0 * f_dc + 0.5, 0, 1) * 255
 
-    If the input values look like they're already in [0,1] range (not SH space),
-    we treat them as direct RGB to avoid producing wrong colours.
+    Detection strategy:
+      - SH DC coefficients from 3DGS have negative values and std > 0.3
+      - Direct RGB [0,1] is always non-negative with smaller variance
+      - Direct RGB [0,255] has mean >> 10 and max around 255
     """
     f_min, f_max = float(np.min(f_dc)), float(np.max(f_dc))
     f_mean = float(np.mean(f_dc))
+    f_std = float(np.std(f_dc))
+    has_negatives = f_min < -0.01
 
     logger.info(
-        f"SH DC input stats: min={f_min:.4f}, max={f_max:.4f}, mean={f_mean:.4f}"
+        f"SH DC input stats: min={f_min:.4f}, max={f_max:.4f}, "
+        f"mean={f_mean:.4f}, std={f_std:.4f}, has_negatives={has_negatives}"
     )
 
-    # Heuristic: standard SH DC values for 3DGS are typically in range [-2, 4].
-    # If ALL values are in [0, 1], they're probably already linear RGB, not SH.
-    if 0.0 <= f_min and f_max <= 1.0:
-        logger.warning(
-            "SH values appear to already be in [0,1] — treating as direct RGB "
-            "(skipping SH_C0 transform)"
-        )
-        rgb_float = np.clip(f_dc, 0.0, 1.0)
-    # If values are in [0, 255], they're already uint8-scale RGB
-    elif f_min >= 0.0 and f_max > 1.0 and f_max <= 255.0 and f_mean > 10.0:
-        logger.warning(
-            "SH values appear to be in [0,255] — treating as uint8 RGB"
-        )
+    # Case 1: Values clearly in [0, 255] range — already uint8-scale RGB
+    if f_min >= 0.0 and f_max > 1.0 and f_max <= 255.0 and f_mean > 10.0:
+        logger.info("Detected uint8-scale RGB [0,255] — dividing by 255")
         rgb_float = np.clip(f_dc / 255.0, 0.0, 1.0)
+
+    # Case 2: Has negative values → definitely SH (RGB can't be negative)
+    elif has_negatives:
+        logger.info("Detected SH coefficients (has negatives) — applying SH_C0 transform")
+        rgb_float = SH_C0 * f_dc + 0.5
+        rgb_float = np.clip(rgb_float, 0.0, 1.0)
+
+    # Case 3: All in [0,1] — could be direct RGB or SH.
+    # Use standard deviation: SH DC values from trained models have std > 0.3
+    # while direct RGB [0,1] from normalized images has lower variance and
+    # the SH transform would wash them out.  Always apply SH transform here
+    # because LongSplat outputs f_dc_* as SH, and a "dark scene" where
+    # f_dc happens to be in [0,1] would still need the SH_C0 multiply.
+    elif 0.0 <= f_min and f_max <= 1.0:
+        # Apply SH transform — this is the safer default for 3DGS output
+        logger.info(
+            "Values in [0,1] — applying SH_C0 transform (3DGS default). "
+            f"std={f_std:.4f}"
+        )
+        rgb_float = SH_C0 * f_dc + 0.5
+        rgb_float = np.clip(rgb_float, 0.0, 1.0)
+
     else:
-        # Standard SH → RGB conversion
+        # General case — standard SH → RGB
+        logger.info("Applying standard SH_C0 transform")
         rgb_float = SH_C0 * f_dc + 0.5
         rgb_float = np.clip(rgb_float, 0.0, 1.0)
 

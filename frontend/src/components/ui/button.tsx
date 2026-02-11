@@ -5,16 +5,16 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-    "inline-flex items-center justify-center whitespace-nowrap rounded-lg text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-950 disabled:pointer-events-none disabled:opacity-50",
+    "inline-flex items-center justify-center whitespace-nowrap rounded-lg text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#35c889]/40 focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:pointer-events-none disabled:opacity-50",
     {
         variants: {
             variant: {
-                default: "bg-primary-500 text-white hover:bg-primary-600 active:bg-primary-700 shadow-md hover:shadow-lg",
-                destructive: "bg-red-600 text-white hover:bg-red-700 active:bg-red-800 shadow-md hover:shadow-lg",
-                outline: "border border-app-secondary bg-transparent text-gray-300 hover:bg-app-elevated hover:text-white",
-                secondary: "bg-app-elevated text-gray-300 hover:bg-gray-700 hover:text-white",
-                ghost: "text-gray-400 hover:bg-app-elevated hover:text-white",
-                link: "text-primary-500 underline-offset-4 hover:underline hover:text-primary-400",
+                default: "bg-[#35c889]/15 text-[#35c889] border border-[#35c889]/20 hover:bg-[#35c889]/25 hover:border-[#35c889]/30 active:bg-[#35c889]/30 shadow-md hover:shadow-lg shadow-[#35c889]/5",
+                destructive: "bg-red-500/12 text-red-400 border border-red-500/15 hover:bg-red-500/20 hover:border-red-500/25 active:bg-red-500/25 shadow-md hover:shadow-lg",
+                outline: "border border-white/[0.08] bg-transparent text-gray-300 hover:bg-[#081717] hover:text-white hover:border-white/[0.12]",
+                secondary: "bg-[#081717] text-gray-300 border border-white/[0.06] hover:bg-[#0c1f1f] hover:text-white",
+                ghost: "text-gray-400 hover:bg-[#081717] hover:text-white",
+                link: "text-[#35c889] underline-offset-4 hover:underline hover:text-[#35c889]/80",
             },
             size: {
                 default: "h-11 px-6 py-3",

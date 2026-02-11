@@ -154,9 +154,22 @@ async def train_longsplat(
         # Ensure at least 15 frames, but respect ratio
         init_frames = max(15, int(total_frames * init_ratio))
         
-        # OPTIMIZED FOR SPEED: 60% reduction across all parameters
-        # Target: ~18 min processing time (vs 61 min)
-        # Estimated total: ~5,360 iterations (vs 32,000)
+        # Scale sub-iteration parameters proportionally with main iterations.
+        # Reference baseline: 15000 iterations = full quality (original defaults).
+        # Lower presets scale down proportionally, with sensible minimums.
+        quality_factor = min(1.0, iterations / 15000)
+        pose_iter   = max(40,  int(100  * quality_factor))
+        local_iter  = max(80,  int(200  * quality_factor))
+        global_iter = max(240, int(600  * quality_factor))
+        post_iter   = max(800, int(2000 * quality_factor))
+        init_iter   = max(600, int(1500 * quality_factor))
+
+        logger.info(
+            f"Quality factor: {quality_factor:.2f} → pose={pose_iter}, "
+            f"local={local_iter}, global={global_iter}, "
+            f"post={post_iter}, init={init_iter}"
+        )
+
         cmd = [
             "/usr/bin/python3.10", str(train_script),
             "-s", str(scene_dir),
@@ -168,11 +181,11 @@ async def train_longsplat(
             "--quiet",
             "--init_frame_num", str(init_frames),
             "--window_size", "5",
-            "--pose_iteration", "40",      # Was 100 (↓60%)
-            "--local_iter", "80",           # Was 200 (↓60%)
-            "--global_iter", "240",         # Was 600 (↓60%)
-            "--post_iter", "800",           # Was 2000 (↓60%)
-            "--init_iteraion", "600",       # Was 1500 (↓60%)
+            "--pose_iteration", str(pose_iter),
+            "--local_iter", str(local_iter),
+            "--global_iter", str(global_iter),
+            "--post_iter", str(post_iter),
+            "--init_iteraion", str(init_iter),
         ]
         
         logger.info(f"Using {init_frames} initial frames (out of {total_frames} total)")

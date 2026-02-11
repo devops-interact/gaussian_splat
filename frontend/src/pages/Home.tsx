@@ -62,7 +62,7 @@ export default function Home() {
         <h2 className="text-xl font-bold tracking-tight text-white mb-1 font-mono">
           3D Reconstruction
         </h2>
-        <p className="text-gray-500 text-sm max-w-2xl">
+        <p className="text-gray-600 text-sm max-w-2xl">
           Upload room video scans to generate high-fidelity 3D Gaussian Splats.
           View, measure, and interact with your reconstructions directly in the browser.
         </p>
@@ -70,13 +70,13 @@ export default function Home() {
 
       {/* ── 3D Viewer (Full Width) ─────────────────────────────────────── */}
       {modelUrl ? (
-        <div className="rounded-xl overflow-hidden border border-white/[0.06] bg-[#0a0a0a] h-[520px] lg:h-[600px] shadow-2xl">
+        <div className="rounded-xl overflow-hidden border border-[#35c889]/[0.08] bg-[#060606] h-[520px] lg:h-[600px] shadow-2xl shadow-[#35c889]/[0.03]">
           <Viewer3D modelUrl={modelUrl} meshUrl={meshUrl} onModelMetadata={handleModelMetadata} />
         </div>
       ) : (
         <Card className="h-[320px] lg:h-[420px] flex items-center justify-center border-dashed border-2 border-white/[0.04] bg-[#060606]">
           <CardContent className="text-center text-gray-600">
-            <div className="w-16 h-16 rounded-2xl bg-white/[0.03] flex items-center justify-center mx-auto mb-4 border border-white/[0.06]">
+            <div className="w-16 h-16 rounded-2xl bg-[#081717]/50 flex items-center justify-center mx-auto mb-4 border border-white/[0.06]">
               <Box className="w-8 h-8 text-gray-700" />
             </div>
             <h3 className="text-base font-medium text-gray-500 mb-1 font-mono">3D Viewer</h3>
@@ -105,7 +105,7 @@ export default function Home() {
               onComplete={handleProcessingComplete}
             />
           ) : (
-            <Card className="h-full flex items-center justify-center border-app-primary bg-app-card/30 min-h-[200px]">
+            <Card className="h-full flex items-center justify-center min-h-[200px]">
               <CardContent className="text-center text-gray-600 py-8">
                 <p className="text-sm font-mono">No active job</p>
                 <p className="text-xs text-gray-700 mt-1">Upload a video to start processing</p>
@@ -121,8 +121,7 @@ export default function Home() {
             jobInfo={{
               qualityPreset,
               elapsedTime,
-              projectName: jobId ? `Reconstruction ${jobId.slice(0, 8)}` : undefined,
-              updatedAt: new Date().toLocaleDateString('en-GB'),
+              isProcessing: !!jobId && modelUrl === null,
             }}
           />
         </div>
@@ -130,37 +129,37 @@ export default function Home() {
 
       {/* ── Downloads Section ──────────────────────────────────────────── */}
       {modelUrl && jobId && (
-        <Card className="border-app-primary bg-app-card/30">
+        <Card>
           <CardContent className="p-5">
             <h4 className="text-sm font-mono font-semibold text-white flex items-center gap-2 mb-4">
-              <Download className="w-4 h-4 text-blue-400" />
+              <Download className="w-4 h-4 text-[#35c889]" />
               Downloads
             </h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <button
                 onClick={() => handleDownload(false)}
                 disabled={downloading}
-                className="flex items-center justify-between px-4 py-3 rounded-lg bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.06] transition-colors text-sm font-mono group"
+                className="flex items-center justify-between px-4 py-3 rounded-lg bg-[#060606] border border-white/[0.06] hover:bg-[#081717] hover:border-[#35c889]/[0.12] transition-colors text-sm font-mono group"
               >
-                <span className="text-white/70 group-hover:text-white">.ply (Full Quality)</span>
-                <Download className="w-3.5 h-3.5 text-white/30 group-hover:text-white/70" />
+                <span className="text-white/60 group-hover:text-white">.ply (Full Quality)</span>
+                <Download className="w-3.5 h-3.5 text-white/20 group-hover:text-[#35c889]/60" />
               </button>
               <button
                 onClick={() => handleDownload(true)}
                 disabled={downloading}
-                className="flex items-center justify-between px-4 py-3 rounded-lg bg-white/[0.03] border border-white/[0.06] hover:bg-white/[0.06] transition-colors text-sm font-mono group"
+                className="flex items-center justify-between px-4 py-3 rounded-lg bg-[#060606] border border-white/[0.06] hover:bg-[#081717] hover:border-[#35c889]/[0.12] transition-colors text-sm font-mono group"
               >
-                <span className="text-white/70 group-hover:text-white">.ply.gz (Compressed)</span>
-                <Download className="w-3.5 h-3.5 text-white/30 group-hover:text-white/70" />
+                <span className="text-white/60 group-hover:text-white">.ply.gz (Compressed)</span>
+                <Download className="w-3.5 h-3.5 text-white/20 group-hover:text-[#35c889]/60" />
               </button>
               {meshUrl && (
                 <a
                   href={`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'}${meshUrl}`}
                   download={`model_${jobId}.glb`}
-                  className="flex items-center justify-between px-4 py-3 rounded-lg bg-purple-500/[0.06] border border-purple-500/[0.12] hover:bg-purple-500/[0.12] transition-colors text-sm font-mono group"
+                  className="flex items-center justify-between px-4 py-3 rounded-lg bg-[#a4a4ff]/[0.04] border border-[#a4a4ff]/[0.08] hover:bg-[#a4a4ff]/[0.08] hover:border-[#a4a4ff]/[0.15] transition-colors text-sm font-mono group"
                 >
-                  <span className="text-purple-300/70 group-hover:text-purple-200">.glb (Mesh)</span>
-                  <Download className="w-3.5 h-3.5 text-purple-300/30 group-hover:text-purple-300/70" />
+                  <span className="text-[#a4a4ff]/60 group-hover:text-[#a4a4ff]">.glb (Mesh)</span>
+                  <Download className="w-3.5 h-3.5 text-[#a4a4ff]/20 group-hover:text-[#a4a4ff]/60" />
                 </a>
               )}
             </div>

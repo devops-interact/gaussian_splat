@@ -1,27 +1,73 @@
 # LongSplat Integration
 
 ## Overview
+
 LongSplat is a robust unposed 3D Gaussian Splatting framework designed for casually captured long videos. It addresses challenges like irregular camera motion, unknown poses, and expansive scenes where traditional methods fail due to pose drift or memory limitations.
+
+**Repository:** https://github.com/NVlabs/LongSplat.git
+
+---
 
 ## Key Features
 
-### 1. Incremental Joint Optimization
-LongSplat concurrently optimizes camera poses and 3D Gaussians. This joint optimization strategy helps avoid local minima and ensures global consistency across the reconstruction, which is critical for long, drift-prone sequences.
+### Incremental Joint Optimization
+Concurrently optimizes camera poses and 3D Gaussians. This joint optimization avoids local minima and ensures global consistency across the reconstruction — critical for long, drift-prone sequences.
 
-### 2. Pose Estimation with 3D Priors
-The framework leverages a Pose Estimation Module that utilizes learned 3D priors to provide robust initialization and correction, superior to standard structure-from-motion techniques in difficult scenarios.
+### Pose Estimation with 3D Priors
+Leverages a Pose Estimation Module (MASt3R) that uses learned 3D priors for robust initialization and correction, superior to standard structure-from-motion (COLMAP) in difficult scenarios.
 
-### 3. Adaptive Octree Anchor Formation
-To manage memory efficiency in large scenes, LongSplat uses an adaptive Octree mechanism. This dynamically adjusts anchor densities based on scene complexity, significantly reducing memory usage without compromising detail.
+### Adaptive Octree Anchor Formation
+Manages memory efficiency in large scenes using an adaptive Octree mechanism that dynamically adjusts anchor densities based on scene complexity, reducing memory usage without compromising detail.
 
-## Configuration & Optimization
-We have tuned the training parameters for efficiency while maintaining these core benefits:
-- **optimized iterations**: Reduced incremental steps to speed up processing time (~20 mins vs 67 mins).
-- **Auto-Centering**: Post-processing ensures the final model is centered at (0,0,0) for immediate viewing.
-- **Native Color Learning**: We rely on the model's natural convergence for color ("SH DC") rather than random initialization, preserving the fidelity of the input video.
+---
 
-## Usage
-Run the training service via Docker. The system will automatically handle:
-1. Video preprocessing.
-2. LongSplat training (Pose + Gaussian optimization).
-3. Conversion to standard 3DGS PLY format (centered).
+## Build Configuration
+
+All CUDA extensions are built from LongSplat's own submodules. No external `gaussian-splatting` repository dependency.
+
+| Component | Source | Notes |
+|---|---|---|
+| diff-gaussian-rasterization | LongSplat submodule | CUDA rasterizer |
+| simple-knn | LongSplat submodule | KNN for point clouds |
+| fused-ssim | LongSplat submodule | Structural similarity |
+| MASt3R | LongSplat submodule | Pose estimation (DUSt3R + CRoCo) |
+
+**Target architecture:** `sm_86` (NVIDIA A40). The Dockerfile strictly targets this to avoid `no kernel image` runtime errors.
+
+**Dependency handling:** `torch` and `pytorch3d` are installed from pre-built wheels before LongSplat's `requirements.txt` is processed (those entries are filtered out to prevent build conflicts).
+
+---
+
+## Training Optimization
+
+Parameters are tuned for efficiency while preserving reconstruction quality:
+
+- **Optimized iterations** — reduced incremental steps (~20 min vs 67 min baseline)
+- **Auto-centering** — post-processing ensures the output model is centered at (0, 0, 0) for immediate viewing
+- **Native color learning** — relies on the model's natural SH DC convergence rather than random initialization, preserving input video color fidelity
+
+---
+
+## Pipeline Integration
+
+The backend orchestrates LongSplat training as step 3 of the processing pipeline:
+
+1. Video preprocessing (FFmpeg frame extraction)
+2. Frame preparation (scene directory structure)
+3. **LongSplat training** (MASt3R pose estimation + Gaussian optimization)
+4. Conversion to standard 3DGS PLY format (centered, with SH→RGB heuristic)
+
+The training wrapper (`backend/services/longsplat/train.py`) handles:
+- LongSplat repository path resolution via `LONGSPLAT_REPO` env
+- Scene directory setup (copies frames to `images/`)
+- Training execution with configurable timeout (4 hr max)
+- stdout/stderr capture for production logging
+- Output PLY validation
+
+---
+
+## References
+
+- [LongSplat Paper](https://linjohnss.github.io/longsplat/)
+- [LongSplat GitHub](https://github.com/NVlabs/LongSplat)
+- [MASt3R GitHub](https://github.com/naver/mast3r)

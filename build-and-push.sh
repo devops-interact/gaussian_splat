@@ -46,7 +46,7 @@ docker image prune -f 2>/dev/null || true
 
 # Prune dangling images
 echo -e "${BLUE}Pruning dangling images...${NC}"
-docker images -f "dangling=true" -q | xargs -r docker rmi -f 2>/dev/null || true
+docker images -f "dangling=true" -q | xargs docker rmi -f 2>/dev/null || true
 
 echo -e "${GREEN}✓ Docker pruned successfully${NC}"
 

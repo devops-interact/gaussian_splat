@@ -44,3 +44,6 @@ Thumbs.db
 
 # Gaussian Splatting (cloned separately in Docker)
 gaussian-splatting/
+
+# Debug artifacts
+temp_debug/
