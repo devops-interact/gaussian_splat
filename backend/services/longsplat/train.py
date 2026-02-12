@@ -170,13 +170,15 @@ async def train_longsplat(
             f"post={post_iter}, init={init_iter}"
         )
 
+        # NOTE: LongSplat's train.py does NOT support --save_iterations or
+        # --checkpoint_iterations (those are standard 3DGS flags). LongSplat
+        # always saves the final PLY automatically via scene.save() at the end
+        # of its refinement phase (iteration 30000 + post_iter).
         cmd = [
             "/usr/bin/python3.10", str(train_script),
             "-s", str(scene_dir),
             "-m", str(output_dir),
             "--iterations", str(iterations),
-            "--save_iterations", str(iterations),
-            "--checkpoint_iterations", str(iterations),
             "--resolution", str(resolution),
             "--mode", "custom",
             "--port", str(unique_port),
