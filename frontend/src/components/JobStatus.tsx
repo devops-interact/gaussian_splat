@@ -6,7 +6,7 @@ import { Loader2, CheckCircle, AlertOctagon, Clock, Settings } from 'lucide-reac
 
 interface JobStatusProps {
   jobId: string;
-  onComplete: (modelUrl: string) => void;
+  onComplete: (modelUrl: string, objUrl?: string) => void;
   embedded?: boolean;
 }
 
@@ -22,9 +22,8 @@ const STATUS_LABELS: Record<JobStatusEnum, string> = {
 };
 
 const PRESET_LABELS: Record<string, string> = {
-  fast: 'Fast (~3-5 min)',
-  balanced: 'Balanced (~8-12 min)',
-  quality: 'Quality (~20-30 min)',
+  balanced: 'Balanced (~15-25 min)',
+  quality: 'Quality (~30-45 min)',
 };
 
 export default function JobStatus({ jobId, onComplete, embedded }: JobStatusProps) {
@@ -73,7 +72,7 @@ export default function JobStatus({ jobId, onComplete, embedded }: JobStatusProp
         }
 
         if (response.status === JobStatusEnum.COMPLETED && response.model_url) {
-          onComplete(response.model_url);
+          onComplete(response.model_url, response.model_url_obj ?? undefined);
           clearInterval(interval);
         }
       } catch (err) {

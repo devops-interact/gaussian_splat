@@ -147,6 +147,7 @@ async def process_job(job: Job) -> Job:
 
         try:
             obj_path = await export_to_obj(ply_path, longsplat_output_dir / f"{job.job_id}.obj")
+            job.model_url_obj = f"/static/models/{job.job_id}/{job.job_id}.obj"
             logger.info(f"Exported OBJ to {obj_path}")
         except Exception as e:
             logger.warning(f"OBJ export failed (optional): {e}")

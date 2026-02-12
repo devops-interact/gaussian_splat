@@ -1,7 +1,7 @@
 """
 FastAPI entrypoint for Gaussian Splatting Room Reconstruction MVP
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse
@@ -32,6 +32,31 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def ensure_cors_headers(request: Request, call_next):
+    """
+    Belt-and-suspenders CORS: guarantee Access-Control headers are present
+    on every response, including error responses and RunPod proxy edge cases.
+    """
+    # Handle preflight OPTIONS immediately
+    if request.method == "OPTIONS":
+        return Response(
+            status_code=200,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+                "Access-Control-Allow-Headers": "*",
+                "Access-Control-Max-Age": "86400",
+            },
+        )
+
+    response = await call_next(request)
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+    response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
 
 # Include routers
 app.include_router(jobs_router, prefix="/api/jobs", tags=["jobs"])

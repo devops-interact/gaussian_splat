@@ -7,12 +7,13 @@ import Viewer3D from '@/components/Viewer3D';
 import TechnicalDetails from '@/components/TechnicalDetails';
 import type { ModelMetadata } from '@/components/Viewer3D';
 import { Card, CardContent } from '@/components/ui/card';
-import { Box, Download, ChevronDown, FileBox, FileArchive } from 'lucide-react';
+import { Box, Download, ChevronDown, FileBox, FileArchive, FileCode } from 'lucide-react';
 import { downloadModel } from '@/api/jobs';
 
 export default function Home() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [modelUrl, setModelUrl] = useState<string | null>(null);
+  const [objUrl, setObjUrl] = useState<string | null>(null);
   const [modelMetadata, setModelMetadata] = useState<ModelMetadata | null>(null);
   const [qualityPreset] = useState<string>('balanced');
   const [elapsedTime] = useState<string>('--');
@@ -35,11 +36,13 @@ export default function Home() {
   const handleUploadSuccess = (newJobId: string) => {
     setJobId(newJobId);
     setModelUrl(null);
+    setObjUrl(null);
     setModelMetadata(null);
   };
 
-  const handleProcessingComplete = (url: string) => {
+  const handleProcessingComplete = (url: string, objUrlResp?: string) => {
     setModelUrl(url);
+    setObjUrl(objUrlResp ?? null);
   };
 
   const handleModelMetadata = useCallback((meta: ModelMetadata) => {
@@ -67,8 +70,21 @@ export default function Home() {
     }
   };
 
+  const handleObjDownload = () => {
+    if (!objUrl) return;
+    setDownloadOpen(false);
+    const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+    const fullUrl = objUrl.startsWith('http') ? objUrl : `${apiBase}${objUrl}`;
+    const a = document.createElement('a');
+    a.href = fullUrl;
+    a.download = `model_${jobId}.obj`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* ── Header with Download Dropdown ───────────────────────────────── */}
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -76,8 +92,7 @@ export default function Home() {
             3D Reconstruction
           </h2>
           <p className="text-gray-600 text-sm max-w-2xl">
-            Upload room video scans to generate high-fidelity 3D Gaussian Splats.
-            View, measure, and interact with your reconstructions directly in the browser.
+            Upload video scans to generate high-fidelity 3D Gaussian Splats.
           </p>
         </div>
 
@@ -95,7 +110,7 @@ export default function Home() {
             </button>
 
             {downloadOpen && (
-              <div className="absolute right-0 top-full mt-2 w-56 rounded-xl bg-[#0a0a0a] border border-white/[0.08] shadow-2xl shadow-black/50 backdrop-blur-xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-150">
+              <div className="absolute right-0 top-full mt-2 w-56 rounded-xl bg-[#0a0a0a] border border-white/[0.08] shadow-2xl shadow-black/50 backdrop-blur-xl z-50 overflow-hidden">
                 <div className="p-1.5">
                   <button
                     onClick={() => handleDownload(false)}
@@ -119,6 +134,18 @@ export default function Home() {
                       <span className="block text-[10px] text-white/30">Compressed</span>
                     </div>
                   </button>
+                  {objUrl && (
+                    <button
+                      onClick={handleObjDownload}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-mono text-white/70 hover:text-white hover:bg-[#081717] transition-colors group"
+                    >
+                      <FileCode className="w-4 h-4 text-amber-400/50 group-hover:text-amber-400" />
+                      <div>
+                        <span className="block text-white/80 group-hover:text-white">.obj</span>
+                        <span className="block text-[10px] text-white/30">Wavefront OBJ</span>
+                      </div>
+                    </button>
+                  )}
                 </div>
               </div>
             )}
@@ -126,37 +153,38 @@ export default function Home() {
         )}
       </div>
 
-      {/* ── 3D Viewer (Full Width) ─────────────────────────────────────── */}
-      {modelUrl ? (
-        <div className="rounded-xl overflow-hidden border border-[#35c889]/[0.08] bg-[#060606] h-[520px] lg:h-[600px] shadow-2xl shadow-[#35c889]/[0.03]">
-          <Viewer3D modelUrl={modelUrl} onModelMetadata={handleModelMetadata} />
-        </div>
-      ) : (
-        <Card className="h-[320px] lg:h-[420px] flex items-center justify-center border-dashed border-2 border-white/[0.04] bg-[#060606]">
-          <CardContent className="text-center text-gray-600">
-            <div className="w-16 h-16 rounded-2xl bg-[#081717]/50 flex items-center justify-center mx-auto mb-4 border border-white/[0.06]">
-              <Box className="w-8 h-8 text-gray-700" />
+      {/* ── Main Layout: Viewer (2/3) | Sidebar (1/3) ──────────────────── */}
+      <div className="flex flex-col lg:flex-row gap-4 lg:items-start">
+        {/* ── 3D Viewer (2/3 width) ─────────────────────────────────────── */}
+        <div className="w-full lg:w-2/3 flex-shrink-0">
+          {modelUrl ? (
+            <div className="rounded-xl overflow-hidden border border-[#35c889]/[0.08] bg-[#060606] h-[400px] sm:h-[520px] lg:h-[calc(100vh-160px)] shadow-2xl shadow-[#35c889]/[0.03]">
+              <Viewer3D modelUrl={modelUrl} onModelMetadata={handleModelMetadata} />
             </div>
-            <h3 className="text-base font-medium text-gray-500 mb-1 font-mono">3D Viewer</h3>
-            <p className="text-sm text-gray-600 max-w-xs mx-auto">
-              Upload a video to start reconstruction. Your 3D model will appear here.
-            </p>
-          </CardContent>
-        </Card>
-      )}
+          ) : (
+            <Card className="h-[300px] sm:h-[400px] lg:h-[calc(100vh-160px)] flex items-center justify-center border-dashed border-2 border-white/[0.04] bg-[#060606]">
+              <CardContent className="text-center text-gray-600">
+                <div className="w-16 h-16 rounded-2xl bg-[#081717]/50 flex items-center justify-center mx-auto mb-4 border border-white/[0.06]">
+                  <Box className="w-8 h-8 text-gray-700" />
+                </div>
+                <h3 className="text-base font-medium text-gray-500 mb-1 font-mono">3D Viewer</h3>
+                <p className="text-sm text-gray-600 max-w-xs mx-auto">
+                  Upload a video to start reconstruction. Your 3D model will appear here.
+                </p>
+              </CardContent>
+            </Card>
+          )}
+        </div>
 
-      {/* ── Panels Grid (Upload | Status + Metadata) ───────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {/* Upload Panel */}
-        <div>
+        {/* ── Sidebar (1/3 width): Upload + Status + Metadata ──────────── */}
+        <div className="w-full lg:w-1/3 flex flex-col gap-4 lg:max-h-[calc(100vh-160px)] lg:overflow-y-auto scrollbar-thin">
+          {/* Upload Panel */}
           <VideoUpload
             onUploadSuccess={handleUploadSuccess}
             disabled={!!jobId && modelUrl === null}
           />
-        </div>
 
-        {/* Combined Status + Metadata Panel */}
-        <div>
+          {/* Combined Status + Metadata Panel */}
           <Card className="w-full">
             {/* Processing Status Section */}
             {jobId ? (

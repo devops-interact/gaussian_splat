@@ -8,22 +8,16 @@ import { cn } from '@/lib/utils';
 // Quality preset definitions
 const PRESETS = [
   {
-    id: 'fast',
-    name: 'Fast',
-    description: 'Quick preview (~3-5 min). Lower quality.',
-    time: '3-5 min'
-  },
-  {
     id: 'balanced',
     name: 'Balanced',
-    description: 'Good quality (~8-12 min). Recommended.',
-    time: '8-12 min'
+    description: 'Good quality (~15-25 min). Recommended for most videos.',
+    time: '15-25 min'
   },
   {
     id: 'quality',
     name: 'Quality',
-    description: 'Best quality (~20-30 min). Production use.',
-    time: '20-30 min'
+    description: 'Best quality (~30-45 min). For production renders.',
+    time: '30-45 min'
   }
 ];
 
@@ -123,7 +117,7 @@ export default function VideoUpload({ onUploadSuccess, disabled }: VideoUploadPr
         {/* Presets */}
         <div className="space-y-3">
           <label className="text-sm font-medium text-gray-300">Quality Preset</label>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {PRESETS.map((preset) => (
               <button
                 key={preset.id}
@@ -153,31 +147,26 @@ export default function VideoUpload({ onUploadSuccess, disabled }: VideoUploadPr
         {/* Upload Area */}
         <div
           className={cn(
-            "border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center text-center transition-all",
+            "border-2 border-dashed rounded-xl p-5 flex flex-col items-center justify-center text-center transition-all",
             "border-white/[0.06] bg-[#060606]/30 hover:bg-[#081717]/40 hover:border-[#35c889]/[0.15]",
             (disabled || uploading) && "opacity-50 pointer-events-none"
           )}
         >
-          <div className="w-12 h-12 rounded-full bg-[#081717] flex items-center justify-center mb-4 border border-white/[0.06]">
-            <Upload className="w-6 h-6 text-gray-400" />
+          <div className="w-10 h-10 rounded-full bg-[#081717] flex items-center justify-center mb-3 border border-white/[0.06]">
+            <Upload className="w-5 h-5 text-gray-400" />
           </div>
 
-          <h3 className="text-lg font-medium text-white mb-2">
-            {uploading ? 'Uploading Video...' : 'Upload Video File'}
-          </h3>
-
-          <p className="text-sm text-gray-400 max-w-xs mb-6">
-            Supported formats: MP4, MOV, AVI, WEBM. Max size 500MB.
+          <p className="text-xs text-gray-400 mb-4">
+            MP4, MOV, AVI, WEBM — Max 500MB
           </p>
 
           <Button
             onClick={onUploadClick}
             disabled={disabled || uploading}
             loading={uploading}
-            size="lg"
-            className="w-full max-w-xs"
+            className="w-full"
           >
-            {uploading ? 'Processing...' : 'Select File'}
+            {uploading ? 'Uploading...' : 'Select Video File'}
           </Button>
 
           <input

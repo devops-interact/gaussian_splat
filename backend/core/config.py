@@ -11,7 +11,6 @@ from enum import Enum
 
 class QualityPreset(str, Enum):
     """Quality presets for 3D reconstruction"""
-    FAST = "fast"
     BALANCED = "balanced"
     QUALITY = "quality"
 
@@ -29,15 +28,6 @@ class PresetConfig(BaseModel):
 
 # Quality preset definitions - Optimized for SPEED + DENSITY balance
 QUALITY_PRESETS: Dict[QualityPreset, PresetConfig] = {
-    QualityPreset.FAST: PresetConfig(
-        name="Fast",
-        description="Quick preview (~5-10 min). Good for testing.",
-        fps=1.0,
-        iterations=5000,
-        resolution=2,
-        init_frames_ratio=0.15,
-        estimated_minutes=8
-    ),
     QualityPreset.BALANCED: PresetConfig(
         name="Balanced",
         description="Good quality (~15-25 min). Recommended for most videos.",
