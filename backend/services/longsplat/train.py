@@ -163,11 +163,14 @@ async def train_longsplat(
         global_iter = max(240, int(600  * quality_factor))
         post_iter   = max(800, int(2000 * quality_factor))
         init_iter   = max(600, int(1500 * quality_factor))
+        # Iterations for Scaffold-GS → standard 3DGS conversion refinement
+        convert_iters = max(2000, int(8000 * quality_factor))
 
         logger.info(
             f"Quality factor: {quality_factor:.2f} → pose={pose_iter}, "
             f"local={local_iter}, global={global_iter}, "
-            f"post={post_iter}, init={init_iter}"
+            f"post={post_iter}, init={init_iter}, "
+            f"convert={convert_iters}"
         )
 
         # NOTE: LongSplat's train.py does NOT support --save_iterations or
@@ -257,27 +260,85 @@ async def train_longsplat(
             ply_files = list(output_dir.glob("**/*.ply"))
             logger.info(f"Found {len(checkpoint_files)} checkpoint files, {len(ply_files)} PLY files")
             
-            # CRITICAL: Convert LongSplat output to standard 3DGS format
-            # Use custom converter instead of broken convert_3dgs.py
-            logger.info("Converting LongSplat output to standard 3DGS format...")
+            # ── CRITICAL: Run LongSplat's convert_3dgs.py ─────────────────────
+            # LongSplat is built on Scaffold-GS which stores colors in MLPs,
+            # NOT as per-point SH coefficients. The PLY from training contains
+            # anchors with neural features — not renderable colors.
+            # convert_3dgs.py properly:
+            #   1. Loads the Scaffold-GS model (anchors + MLP weights)
+            #   2. Expands anchors into individual Gaussians (anchor × n_offsets)
+            #   3. Trains for additional iterations to learn SH color coefficients
+            #   4. Saves standard 3DGS PLY with proper f_dc_* properties
+            # The scene directory must still exist (needs images for rendering).
+            convert_script = LONGSPLAT_REPO / "convert_3dgs.py"
+            if convert_script.exists():
+                convert_cmd = [
+                    "/usr/bin/python3.10", str(convert_script),
+                    "-m", str(output_dir),
+                    "--iteration", str(convert_iters),
+                    "--prune_ratio", "0.4",  # Keep 60% of anchors for denser result
+                ]
+                convert_log_path = output_dir / "convert_3dgs.log"
+                logger.info(f"Running Scaffold-GS → 3DGS conversion ({convert_iters} refinement iters): {' '.join(convert_cmd)}")
+                
+                try:
+                    with open(convert_log_path, "w") as convert_log:
+                        convert_proc = await asyncio.create_subprocess_exec(
+                            *convert_cmd,
+                            cwd=str(LONGSPLAT_REPO),
+                            env=env,
+                            stdout=convert_log,
+                            stderr=asyncio.subprocess.STDOUT,
+                        )
+                        await asyncio.wait_for(convert_proc.wait(), timeout=3600)  # 1 hour max
+                    
+                    if convert_proc.returncode == 0:
+                        converted_ply = output_dir / "converted_3dgs" / "point_cloud.ply"
+                        logger.info(f"convert_3dgs.py succeeded (exit 0), checking for {converted_ply}")
+                        if converted_ply.exists():
+                            logger.info(f"Converted PLY exists: {converted_ply.stat().st_size} bytes")
+                        else:
+                            logger.warning("convert_3dgs.py succeeded but converted_3dgs/point_cloud.ply not found")
+                    else:
+                        logger.warning(f"convert_3dgs.py exited with code {convert_proc.returncode}")
+                        try:
+                            with open(convert_log_path, "r") as f:
+                                tail = "".join(f.readlines()[-50:])
+                                logger.warning(f"convert_3dgs.py log tail:\n{tail}")
+                        except Exception:
+                            pass
+                except asyncio.TimeoutError:
+                    logger.warning("convert_3dgs.py timed out after 1 hour, continuing with fallback")
+                except Exception as conv_err:
+                    logger.warning(f"convert_3dgs.py failed: {conv_err}, continuing with fallback")
+            else:
+                logger.warning(f"convert_3dgs.py not found at {convert_script}, skipping Scaffold-GS conversion")
+            
+            # ── Custom converter: adds red/green/blue for Blender ──────────────
+            # If convert_3dgs.py succeeded, the converter will find
+            # converted_3dgs/point_cloud.ply (standard 3DGS with f_dc_*)
+            # and just add RGB uchar properties for Blender compatibility.
+            # If it failed, falls back to raw Scaffold-GS format handling.
+            logger.info("Running custom converter (adds Blender-compatible RGB)...")
             conversion_success = convert_longsplat_to_3dgs(
                 checkpoint_dir=output_dir,
                 output_ply=output_dir / "model.ply"
             )
             
             if conversion_success:
-                logger.info("Conversion completed - PLY has f_dc_* properties")
-                # Clean up scene directory
-                try:
-                    if scene_dir.exists():
-                        shutil.rmtree(scene_dir)
-                        logger.info(f"Cleaned up scene directory: {scene_dir}")
-                except Exception as cleanup_error:
-                    logger.warning(f"Failed to clean up scene directory: {cleanup_error}")
-                return True
+                logger.info("Conversion completed - PLY has f_dc_* + RGB properties")
             else:
                 logger.error("Conversion failed - PLY may be missing properties")
-                return False
+            
+            # Clean up scene directory (safe now — convert_3dgs.py already ran)
+            try:
+                if scene_dir.exists():
+                    shutil.rmtree(scene_dir)
+                    logger.info(f"Cleaned up scene directory: {scene_dir}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to clean up scene directory: {cleanup_error}")
+            
+            return conversion_success
             
         except Exception as cmd_error:
             logger.error(f"Training command failed: {cmd_error}")

@@ -111,6 +111,28 @@ def convert_longsplat_to_3dgs(checkpoint_dir: Path, output_ply: Path) -> bool:
     try:
         logger.info(f"Converting LongSplat output from {checkpoint_dir}")
         
+        # ── Priority 1: converted_3dgs/point_cloud.ply ──────────────────────
+        # This is the output of LongSplat's convert_3dgs.py which properly
+        # converts Scaffold-GS (anchor+MLP) into standard 3DGS with real
+        # f_dc_* SH color coefficients trained against the video frames.
+        converted_ply = checkpoint_dir / "converted_3dgs" / "point_cloud.ply"
+        if converted_ply.exists():
+            logger.info(f"Found properly converted 3DGS PLY: {converted_ply} ({converted_ply.stat().st_size} bytes)")
+            # Verify it has f_dc_* properties
+            try:
+                check_data = PlyData.read(str(converted_ply))
+                check_props = [p.name for p in check_data['vertex'].properties]
+                n_verts = len(check_data['vertex'].data)
+                logger.info(f"Converted PLY: {n_verts} vertices, props={check_props[:15]}...")
+                if 'f_dc_0' in check_props:
+                    logger.info("Converted PLY has standard 3DGS f_dc_* properties — adding RGB for Blender")
+                    return _add_rgb_colors_to_3dgs_ply(converted_ply, output_ply)
+                else:
+                    logger.warning(f"Converted PLY lacks f_dc_0 (has: {check_props[:10]}), falling through")
+            except Exception as e:
+                logger.warning(f"Could not read converted PLY: {e}, falling through")
+        
+        # ── Priority 2: Any point_cloud.ply with f_dc_* properties ──────────
         # Find the latest checkpoint or point cloud
         checkpoint_files = list(checkpoint_dir.glob("**/*.pth"))
         ply_files = list(checkpoint_dir.glob("**/point_cloud.ply"))
@@ -135,7 +157,8 @@ def convert_longsplat_to_3dgs(checkpoint_dir: Path, output_ply: Path) -> bool:
                 logger.info("Source PLY has 3DGS format — adding RGB colors for Blender compatibility")
                 return _add_rgb_colors_to_3dgs_ply(source_ply, output_ply)
             
-            # Otherwise, we need to convert from LongSplat format
+            # Otherwise, we need to convert from LongSplat/Scaffold-GS format
+            logger.warning("Source PLY is Scaffold-GS format (no f_dc_*) — colors may be inaccurate")
             return _convert_from_raw_longsplat(vertex, prop_names, output_ply)
             
         elif checkpoint_files:
