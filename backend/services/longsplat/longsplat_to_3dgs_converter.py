@@ -5,6 +5,7 @@ This replaces the broken convert_3dgs.py dependency.
 IMPORTANT: Writes BOTH f_dc_* (SH coefficients for 3DGS viewers) AND standard
 red/green/blue (uchar) properties for Blender/MeshLab compatibility.
 """
+import re
 import torch
 import numpy as np
 from pathlib import Path
@@ -12,6 +13,20 @@ from plyfile import PlyData, PlyElement
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _pick_latest_ply(ply_files):
+    """Pick the PLY file from the highest training iteration (numeric sort).
+    
+    Paths look like .../iteration_12000/point_cloud.ply
+    Alphabetical sort would rank iteration_12000 < iteration_7000 because '1' < '7'.
+    This helper extracts the iteration number and picks the max.
+    """
+    def _iter_num(p):
+        m = re.search(r'iteration_(\d+)', str(p))
+        return int(m.group(1)) if m else 0
+    return max(ply_files, key=_iter_num)
+
 
 # Spherical Harmonics constant for DC component -> RGB conversion
 SH_C0 = 0.28209479177387814
@@ -103,8 +118,8 @@ def convert_longsplat_to_3dgs(checkpoint_dir: Path, output_ply: Path) -> bool:
         logger.info(f"Found {len(checkpoint_files)} .pth files, {len(ply_files)} .ply files")
         
         if ply_files:
-            # Use the most recent PLY file from training
-            source_ply = sorted(ply_files)[-1]
+            # Use the highest-iteration PLY file from training (numeric sort)
+            source_ply = _pick_latest_ply(ply_files)
             logger.info(f"Using PLY file: {source_ply}")
             
             # Read the source PLY

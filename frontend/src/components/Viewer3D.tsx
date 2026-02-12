@@ -133,6 +133,10 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
   const hasOpacity = opacityIdx !== -1;
   const colorSource: 'rgb' | 'sh' | 'none' = hasSH ? 'sh' : hasRGB ? 'rgb' : 'none';
 
+  // Smart SH color format detection type
+  type SHFormat = 'standard_sh' | 'direct_rgb' | 'uint8_rgb';
+  let detectedSHFormat: SHFormat = 'standard_sh'; // default
+
   console.log(`PLY: ${vertexCount} verts, format=${format}, colorSource=${colorSource}, props=[${propNames.slice(0, 15).join(', ')}${propNames.length > 15 ? '...' : ''}]`);
 
   const positions = new Float32Array(vertexCount * 3);
@@ -170,6 +174,46 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
 
     const maxVerts = Math.min(vertexCount, Math.floor(availableSize / bytesPerVertex));
 
+    // ── Smart SH color format pre-scan (sample up to 1000 evenly-spaced verts) ──
+    if (hasSH && maxVerts > 0) {
+      const sampleCount = Math.min(1000, maxVerts);
+      const step = Math.max(1, Math.floor(maxVerts / sampleCount));
+      let shMin = Infinity, shMax = -Infinity;
+      let shSum = 0, shSumSq = 0, shCount = 0;
+      let shHasNeg = false;
+
+      for (let i = 0; i < maxVerts; i += step) {
+        const vOff = i * bytesPerVertex;
+        for (const fIdx of [f_dc_0_idx, f_dc_1_idx, f_dc_2_idx]) {
+          const val = readFloat(vOff, fIdx);
+          if (!isFinite(val)) continue;
+          if (val < shMin) shMin = val;
+          if (val > shMax) shMax = val;
+          shSum += val;
+          shSumSq += val * val;
+          if (val < 0) shHasNeg = true;
+          shCount++;
+        }
+      }
+
+      if (shCount > 0) {
+        const shMean = shSum / shCount;
+        const shStd = Math.sqrt(Math.max(0, shSumSq / shCount - shMean * shMean));
+        console.log(`SH pre-scan (${Math.ceil(maxVerts / step)} sampled verts): min=${shMin.toFixed(3)}, max=${shMax.toFixed(3)}, mean=${shMean.toFixed(3)}, std=${shStd.toFixed(3)}, hasNeg=${shHasNeg}`);
+
+        if (!shHasNeg && shMax > 1.5) {
+          detectedSHFormat = 'uint8_rgb';
+          console.log('Auto-detected SH format: uint8 RGB (values 0-255 range, dividing by 255)');
+        } else if (!shHasNeg && shMax <= 1.05 && shStd < 0.5) {
+          detectedSHFormat = 'direct_rgb';
+          console.log('Auto-detected SH format: direct RGB (values already in 0-1 range, using as-is)');
+        } else {
+          detectedSHFormat = 'standard_sh';
+          console.log('Auto-detected SH format: standard SH (applying SH_C0 * f + 0.5)');
+        }
+      }
+    }
+
     for (let i = 0; i < maxVerts; i++) {
       const vOff = i * bytesPerVertex;
       const x = readFloat(vOff, xIdx);
@@ -192,9 +236,20 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
         const f0 = readFloat(vOff, f_dc_0_idx);
         const f1 = readFloat(vOff, f_dc_1_idx);
         const f2 = readFloat(vOff, f_dc_2_idx);
-        colors[idx3] = Math.max(0, Math.min(1, SH_C0 * f0 + 0.5));
-        colors[idx3 + 1] = Math.max(0, Math.min(1, SH_C0 * f1 + 0.5));
-        colors[idx3 + 2] = Math.max(0, Math.min(1, SH_C0 * f2 + 0.5));
+        if (detectedSHFormat === 'uint8_rgb') {
+          colors[idx3]     = Math.max(0, Math.min(1, f0 / 255));
+          colors[idx3 + 1] = Math.max(0, Math.min(1, f1 / 255));
+          colors[idx3 + 2] = Math.max(0, Math.min(1, f2 / 255));
+        } else if (detectedSHFormat === 'direct_rgb') {
+          colors[idx3]     = Math.max(0, Math.min(1, f0));
+          colors[idx3 + 1] = Math.max(0, Math.min(1, f1));
+          colors[idx3 + 2] = Math.max(0, Math.min(1, f2));
+        } else {
+          // standard SH: SH_C0 * f + 0.5
+          colors[idx3]     = Math.max(0, Math.min(1, SH_C0 * f0 + 0.5));
+          colors[idx3 + 1] = Math.max(0, Math.min(1, SH_C0 * f1 + 0.5));
+          colors[idx3 + 2] = Math.max(0, Math.min(1, SH_C0 * f2 + 0.5));
+        }
       } else if (hasRGB) {
         const rType = properties[redIdx].type;
         if (rType === 'uchar' || rType === 'uint8') {
@@ -217,6 +272,46 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
     const dataLines = dataText.split('\n').filter(l => l.trim());
     const count = Math.min(vertexCount, dataLines.length);
 
+    // ── ASCII SH pre-scan (sample up to 1000 evenly-spaced lines) ──
+    if (hasSH && count > 0) {
+      const sampleCount = Math.min(1000, count);
+      const step = Math.max(1, Math.floor(count / sampleCount));
+      let shMin = Infinity, shMax = -Infinity;
+      let shSum = 0, shSumSq = 0, shCount = 0;
+      let shHasNeg = false;
+
+      for (let i = 0; i < count; i += step) {
+        const parts = dataLines[i].trim().split(/\s+/).map(parseFloat);
+        for (const fIdx of [f_dc_0_idx, f_dc_1_idx, f_dc_2_idx]) {
+          const val = parts[fIdx];
+          if (!isFinite(val)) continue;
+          if (val < shMin) shMin = val;
+          if (val > shMax) shMax = val;
+          shSum += val;
+          shSumSq += val * val;
+          if (val < 0) shHasNeg = true;
+          shCount++;
+        }
+      }
+
+      if (shCount > 0) {
+        const shMean = shSum / shCount;
+        const shStd = Math.sqrt(Math.max(0, shSumSq / shCount - shMean * shMean));
+        console.log(`ASCII SH pre-scan (${Math.ceil(count / step)} sampled): min=${shMin.toFixed(3)}, max=${shMax.toFixed(3)}, mean=${shMean.toFixed(3)}, std=${shStd.toFixed(3)}, hasNeg=${shHasNeg}`);
+
+        if (!shHasNeg && shMax > 1.5) {
+          detectedSHFormat = 'uint8_rgb';
+          console.log('Auto-detected SH format (ASCII): uint8 RGB');
+        } else if (!shHasNeg && shMax <= 1.05 && shStd < 0.5) {
+          detectedSHFormat = 'direct_rgb';
+          console.log('Auto-detected SH format (ASCII): direct RGB');
+        } else {
+          detectedSHFormat = 'standard_sh';
+          console.log('Auto-detected SH format (ASCII): standard SH');
+        }
+      }
+    }
+
     for (let i = 0; i < count; i++) {
       const parts = dataLines[i].trim().split(/\s+/).map(parseFloat);
       const x = parts[xIdx], y = parts[yIdx], z = parts[zIdx];
@@ -231,9 +326,20 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
       if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
 
       if (hasSH) {
-        colors[idx3] = Math.max(0, Math.min(1, SH_C0 * parts[f_dc_0_idx] + 0.5));
-        colors[idx3 + 1] = Math.max(0, Math.min(1, SH_C0 * parts[f_dc_1_idx] + 0.5));
-        colors[idx3 + 2] = Math.max(0, Math.min(1, SH_C0 * parts[f_dc_2_idx] + 0.5));
+        const f0 = parts[f_dc_0_idx], f1 = parts[f_dc_1_idx], f2 = parts[f_dc_2_idx];
+        if (detectedSHFormat === 'uint8_rgb') {
+          colors[idx3]     = Math.max(0, Math.min(1, f0 / 255));
+          colors[idx3 + 1] = Math.max(0, Math.min(1, f1 / 255));
+          colors[idx3 + 2] = Math.max(0, Math.min(1, f2 / 255));
+        } else if (detectedSHFormat === 'direct_rgb') {
+          colors[idx3]     = Math.max(0, Math.min(1, f0));
+          colors[idx3 + 1] = Math.max(0, Math.min(1, f1));
+          colors[idx3 + 2] = Math.max(0, Math.min(1, f2));
+        } else {
+          colors[idx3]     = Math.max(0, Math.min(1, SH_C0 * f0 + 0.5));
+          colors[idx3 + 1] = Math.max(0, Math.min(1, SH_C0 * f1 + 0.5));
+          colors[idx3 + 2] = Math.max(0, Math.min(1, SH_C0 * f2 + 0.5));
+        }
       } else if (hasRGB) {
         colors[idx3] = parts[redIdx] / 255;
         colors[idx3 + 1] = parts[greenIdx] / 255;
@@ -245,7 +351,7 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
     }
   }
 
-  console.log(`Parsed ${visibleCount} visible points (from ${vertexCount} total), colorSource=${colorSource}`);
+  console.log(`Parsed ${visibleCount} visible points (from ${vertexCount} total), colorSource=${colorSource}, shFormat=${detectedSHFormat}`);
 
   return {
     positions: positions.slice(0, visibleCount * 3),

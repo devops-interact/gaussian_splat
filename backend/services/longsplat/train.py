@@ -175,6 +175,8 @@ async def train_longsplat(
             "-s", str(scene_dir),
             "-m", str(output_dir),
             "--iterations", str(iterations),
+            "--save_iterations", str(iterations),
+            "--checkpoint_iterations", str(iterations),
             "--resolution", str(resolution),
             "--mode", "custom",
             "--port", str(unique_port),

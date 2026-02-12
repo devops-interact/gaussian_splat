@@ -8,10 +8,24 @@ Priority order:
 4. Any *.ply recursive
 """
 import logging
+import re
 import shutil
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def _pick_latest_ply(ply_files):
+    """Pick the PLY file from the highest training iteration (numeric sort).
+    
+    Paths look like .../iteration_12000/point_cloud.ply
+    Alphabetical sort would rank iteration_12000 < iteration_7000 because '1' < '7'.
+    This helper extracts the iteration number and picks the max.
+    """
+    def _iter_num(p):
+        m = re.search(r'iteration_(\d+)', str(p))
+        return int(m.group(1)) if m else 0
+    return max(ply_files, key=_iter_num)
 
 
 async def export_to_ply(
@@ -41,7 +55,7 @@ async def export_to_ply(
     # 2. Any root-level PLY
     ply_files = list(model_dir.glob("*.ply"))
     if ply_files:
-        source_ply = sorted(ply_files)[-1]
+        source_ply = _pick_latest_ply(ply_files)
         logger.info(f"Using root PLY (no model.ply found): {source_ply}")
         shutil.copy2(source_ply, output_ply)
         _log_ply_color_info(output_ply)
@@ -50,7 +64,7 @@ async def export_to_ply(
     # 3. Recursive: point_cloud.ply from training iterations
     ply_files = list(model_dir.rglob("point_cloud.ply"))
     if ply_files:
-        source_ply = sorted(ply_files)[-1]
+        source_ply = _pick_latest_ply(ply_files)
         logger.warning(f"Using raw training PLY (may lack RGB): {source_ply}")
         shutil.copy2(source_ply, output_ply)
         _log_ply_color_info(output_ply)
@@ -59,7 +73,7 @@ async def export_to_ply(
     # 4. Any recursive PLY
     ply_files = list(model_dir.rglob("*.ply"))
     if ply_files:
-        source_ply = sorted(ply_files)[-1]
+        source_ply = _pick_latest_ply(ply_files)
         logger.warning(f"Fallback PLY: {source_ply}")
         shutil.copy2(source_ply, output_ply)
         _log_ply_color_info(output_ply)
