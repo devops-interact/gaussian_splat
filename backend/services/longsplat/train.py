@@ -270,6 +270,19 @@ async def train_longsplat(
             #   3. Trains for additional iterations to learn SH color coefficients
             #   4. Saves standard 3DGS PLY with proper f_dc_* properties
             # The scene directory must still exist (needs images for rendering).
+            # ── FIX: convert_3dgs.py expects cameras_all.json but training
+            #    saves cameras_all_train.json / cameras_all_test.json.
+            #    Create the expected file so the conversion script can load cameras.
+            cameras_train = output_dir / "cameras_all_train.json"
+            cameras_all = output_dir / "cameras_all.json"
+            if cameras_train.exists() and not cameras_all.exists():
+                shutil.copy(str(cameras_train), str(cameras_all))
+                logger.info(f"Copied cameras_all_train.json → cameras_all.json ({cameras_all.stat().st_size} bytes)")
+            elif cameras_all.exists():
+                logger.info(f"cameras_all.json already exists ({cameras_all.stat().st_size} bytes)")
+            else:
+                logger.warning("cameras_all_train.json not found — convert_3dgs.py may fail to load cameras")
+
             convert_script = LONGSPLAT_REPO / "convert_3dgs.py"
             if convert_script.exists():
                 convert_cmd = [
