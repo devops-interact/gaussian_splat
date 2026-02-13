@@ -299,23 +299,12 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         const camDist = Math.max(diagonal * 1.2, 3); // at least 3 units away
         console.log(`[GS3D] BBox diagonal=${diagonal.toFixed(2)}, camDist=${camDist.toFixed(2)}`);
 
-        // Create a custom renderer with preserveDrawingBuffer for snapshot support
-        const container = containerRef.current!;
-        const customRenderer = new THREE.WebGLRenderer({
-          antialias: false,
-          precision: 'highp',
-          preserveDrawingBuffer: true,
-        });
-        customRenderer.setPixelRatio(window.devicePixelRatio);
-        customRenderer.setSize(container.clientWidth, container.clientHeight);
-
         console.log('[GS3D] Creating standalone Viewer...');
         const viewer = new Viewer({
           cameraUp: [0, 1, 0],
           initialCameraPosition: [0, camDist * 0.3, camDist * 0.8],
           initialCameraLookAt: [0, 0, 0],
-          rootElement: container,
-          renderer: customRenderer,
+          rootElement: containerRef.current!,
           threeScene: threeScene,
           selfDrivenMode: true,
           useBuiltInControls: true,
