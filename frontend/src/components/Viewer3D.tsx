@@ -351,12 +351,21 @@ function RaycastPoints({ positions }: { positions: Float32Array }) {
 
 // ── Gaussian Splat Cloud (true splatting via @mkkellogg/gaussian-splats-3d) ──
 
+// #region agent log - debug helper
+const _dbg = (msg: string, data?: Record<string, unknown>) => {
+  console.log(`[GS3D] ${msg}`, data || '');
+  fetch('http://127.0.0.1:7242/ingest/b2b8460e-d7ee-4616-88da-4d108adb3922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Viewer3D.tsx',message:msg,data,timestamp:Date.now()})}).catch(()=>{});
+};
+// #endregion
+
 function GaussianSplatCloud({
   url,
   onMetadata,
+  onError,
 }: {
   url: string;
   onMetadata: (m: ModelMetadata) => void;
+  onError?: (msg: string) => void;
 }) {
   const [viewer, setViewer] = useState<DropInViewer | null>(null);
   const [raycastPos, setRaycastPos] = useState<Float32Array | null>(null);
@@ -374,16 +383,29 @@ function GaussianSplatCloud({
 
     (async () => {
       try {
-        // 1. Fetch the PLY file
+        // #region agent log
+        _dbg('STEP1_FETCH_START', { url, hypothesisId: 'A' });
+        // #endregion
         const response = await fetch(url);
         if (!response.ok) throw new Error(`Fetch failed: HTTP ${response.status}`);
         const buffer = await response.arrayBuffer();
         if (disposed) return;
+        // #region agent log
+        _dbg('STEP1_FETCH_OK', { bytes: buffer.byteLength, hypothesisId: 'A' });
+        // #endregion
 
-        // 2. Parse for metadata + centered positions (raycasting)
+        // #region agent log
+        _dbg('STEP2_PARSE_START', { hypothesisId: 'B' });
+        // #endregion
         const meta = parsePLYForMeta(buffer);
         if (meta.vertexCount === 0) throw new Error('No visible points in PLY');
-        console.log(`PLY parsed: ${meta.vertexCount}/${meta.totalVertices} verts, center=[${meta.center.map(v => v.toFixed(2))}]`);
+        // #region agent log
+        _dbg('STEP2_PARSE_OK', {
+          vertexCount: meta.vertexCount, totalVertices: meta.totalVertices,
+          center: meta.center, propsCount: meta.properties.length,
+          props: meta.properties.slice(0, 20), hypothesisId: 'B',
+        });
+        // #endregion
 
         setRaycastPos(meta.positions);
 
@@ -397,11 +419,15 @@ function GaussianSplatCloud({
           format: 'gaussian_splat',
         });
 
-        // 3. Create blob URL (avoids double-download)
         const blob = new Blob([buffer], { type: 'application/octet-stream' });
         blobUrl = URL.createObjectURL(blob);
+        // #region agent log
+        _dbg('STEP3_BLOB_CREATED', { blobUrl, hypothesisId: 'C' });
+        // #endregion
 
-        // 4. Create DropInViewer for true Gaussian splatting
+        // #region agent log
+        _dbg('STEP4_VIEWER_CREATE', { hypothesisId: 'D' });
+        // #endregion
         viewerInst = new DropInViewer({
           gpuAcceleratedSort: true,
           sharedMemoryForWorkers: false,
@@ -409,10 +435,13 @@ function GaussianSplatCloud({
           freeIntermediateSplatData: true,
           antialiased: false,
         });
+        // #region agent log
+        _dbg('STEP4_VIEWER_CREATED_OK', { hypothesisId: 'D' });
+        // #endregion
 
-        // 5. Load the splat scene
-        // Blob URLs have no file extension → must specify format explicitly
-        // SceneFormat: 0=Ply, 1=Splat, 2=KSplat, 3=Spz
+        // #region agent log
+        _dbg('STEP5_ADD_SCENE_START', { center: meta.center, format: 0, hypothesisId: 'E' });
+        // #endregion
         await viewerInst.addSplatScene(blobUrl, {
           splatAlphaRemovalThreshold: 5,
           showLoadingUI: false,
@@ -423,14 +452,23 @@ function GaussianSplatCloud({
         });
 
         if (disposed) return;
-        console.log(`Gaussian splat scene loaded: ${viewerInst.getSplatCount()} splats`);
+        const splatCount = viewerInst.getSplatCount();
+        // #region agent log
+        _dbg('STEP5_ADD_SCENE_OK', { splatCount, hypothesisId: 'E' });
+        // #endregion
+        console.log(`Gaussian splat scene loaded: ${splatCount} splats`);
         setViewer(viewerInst);
         setLoading(false);
       } catch (err: unknown) {
         if (!disposed) {
           const msg = err instanceof Error ? err.message : String(err);
-          console.error('Gaussian splat load error:', msg);
+          const stack = err instanceof Error ? err.stack?.slice(0, 500) : '';
+          // #region agent log
+          _dbg('ERROR_CAUGHT', { msg, stack, hypothesisId: 'ALL' });
+          // #endregion
+          console.error('Gaussian splat load error:', msg, stack);
           setError(msg);
+          onError?.(msg);
           setLoading(false);
         }
       }
@@ -493,6 +531,7 @@ function SceneSetup({ mode }: { mode: ViewerMode }) {
 export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
   const [mode, setMode] = useState<ViewerMode>('orbit');
   const [showHelp, setShowHelp] = useState(false);
+  const [splatError, setSplatError] = useState<string | null>(null);
 
   // ── Measurement state ───────────────────────────────────────────────────
   const [measurePhase, setMeasurePhase] = useState<MeasurePhase>('calibrate');
@@ -588,8 +627,15 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         <WalkthroughControls active={mode === 'walkthrough'} />
         <MeasureTool active={mode === 'measure'} points={visibleMeasurePoints} onAddPoint={handleAddMeasurePoint} />
 
-        <GaussianSplatCloud url={fullPlyUrl} onMetadata={handleMetadata} />
+        <GaussianSplatCloud url={fullPlyUrl} onMetadata={handleMetadata} onError={setSplatError} />
       </Canvas>
+
+      {/* ── Error Overlay (debug) ─────────────────────────────────────── */}
+      {splatError && (
+        <div className="absolute top-12 left-3 right-3 z-30 bg-red-900/80 backdrop-blur-md text-white text-xs p-3 rounded-lg border border-red-500/40 font-mono break-all">
+          <span className="text-red-300 font-bold">Viewer Error:</span> {splatError}
+        </div>
+      )}
 
       {/* ── Top-Left: Mode Indicator ─────────────────────────────────────── */}
       <div className="absolute top-3 left-3 z-10">
