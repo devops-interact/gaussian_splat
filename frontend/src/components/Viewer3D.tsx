@@ -351,7 +351,7 @@ function RaycastPoints({ positions }: { positions: Float32Array }) {
 
 // ── Gaussian Splat Cloud (true splatting via @mkkellogg/gaussian-splats-3d) ──
 
-// #region agent log - debug helper
+// #region agent log
 const _dbg = (msg: string, data?: Record<string, unknown>) => {
   console.log(`[GS3D] ${msg}`, data || '');
   fetch('http://127.0.0.1:7242/ingest/b2b8460e-d7ee-4616-88da-4d108adb3922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Viewer3D.tsx',message:msg,data,timestamp:Date.now()})}).catch(()=>{});
@@ -381,30 +381,32 @@ function GaussianSplatCloud({
     setLoading(true);
     setError(null);
 
+    // #region agent log
+    _dbg('H4_URL_CHECK', { url, hypothesisId: 'H4' });
+    // #endregion
+
     (async () => {
       try {
+        // 1. Fetch the PLY file
         // #region agent log
-        _dbg('STEP1_FETCH_START', { url, hypothesisId: 'A' });
+        _dbg('H1_FETCH_START', { url, hypothesisId: 'H1' });
         // #endregion
         const response = await fetch(url);
+        // #region agent log
+        _dbg('H2_FETCH_RESPONSE', { status: response.status, ok: response.ok, statusText: response.statusText, contentType: response.headers.get('content-type'), contentLength: response.headers.get('content-length'), cors: response.headers.get('access-control-allow-origin'), hypothesisId: 'H2' });
+        // #endregion
         if (!response.ok) throw new Error(`Fetch failed: HTTP ${response.status}`);
         const buffer = await response.arrayBuffer();
         if (disposed) return;
         // #region agent log
-        _dbg('STEP1_FETCH_OK', { bytes: buffer.byteLength, hypothesisId: 'A' });
+        _dbg('H1_FETCH_OK', { bytes: buffer.byteLength, hypothesisId: 'H1' });
         // #endregion
 
-        // #region agent log
-        _dbg('STEP2_PARSE_START', { hypothesisId: 'B' });
-        // #endregion
+        // 2. Parse for metadata + centered positions (raycasting)
         const meta = parsePLYForMeta(buffer);
         if (meta.vertexCount === 0) throw new Error('No visible points in PLY');
         // #region agent log
-        _dbg('STEP2_PARSE_OK', {
-          vertexCount: meta.vertexCount, totalVertices: meta.totalVertices,
-          center: meta.center, propsCount: meta.properties.length,
-          props: meta.properties.slice(0, 20), hypothesisId: 'B',
-        });
+        _dbg('H3_PARSE_OK', { vertexCount: meta.vertexCount, totalVertices: meta.totalVertices, center: meta.center, propsCount: meta.properties.length, first15props: meta.properties.slice(0, 15), hasColors: meta.hasColors, hasOpacity: meta.hasOpacity, hypothesisId: 'H3' });
         // #endregion
 
         setRaycastPos(meta.positions);
@@ -419,14 +421,16 @@ function GaussianSplatCloud({
           format: 'gaussian_splat',
         });
 
+        // 3. Create blob URL (avoids double-download)
         const blob = new Blob([buffer], { type: 'application/octet-stream' });
         blobUrl = URL.createObjectURL(blob);
         // #region agent log
-        _dbg('STEP3_BLOB_CREATED', { blobUrl, hypothesisId: 'C' });
+        _dbg('H3_BLOB_CREATED', { blobUrl, blobSize: blob.size, hypothesisId: 'H3' });
         // #endregion
 
+        // 4. Create DropInViewer for true Gaussian splatting
         // #region agent log
-        _dbg('STEP4_VIEWER_CREATE', { hypothesisId: 'D' });
+        _dbg('H5_VIEWER_CREATE', { hypothesisId: 'H5' });
         // #endregion
         viewerInst = new DropInViewer({
           gpuAcceleratedSort: true,
@@ -436,11 +440,14 @@ function GaussianSplatCloud({
           antialiased: false,
         });
         // #region agent log
-        _dbg('STEP4_VIEWER_CREATED_OK', { hypothesisId: 'D' });
+        _dbg('H5_VIEWER_CREATED', { hypothesisId: 'H5' });
         // #endregion
 
+        // 5. Load the splat scene
+        // Blob URLs have no file extension → must specify format explicitly
+        // SceneFormat: 0=Ply, 1=Splat, 2=KSplat, 3=Spz
         // #region agent log
-        _dbg('STEP5_ADD_SCENE_START', { center: meta.center, format: 0, hypothesisId: 'E' });
+        _dbg('H3_ADD_SCENE_START', { center: meta.center, format: 0, hypothesisId: 'H3' });
         // #endregion
         await viewerInst.addSplatScene(blobUrl, {
           splatAlphaRemovalThreshold: 5,
@@ -454,7 +461,7 @@ function GaussianSplatCloud({
         if (disposed) return;
         const splatCount = viewerInst.getSplatCount();
         // #region agent log
-        _dbg('STEP5_ADD_SCENE_OK', { splatCount, hypothesisId: 'E' });
+        _dbg('H3_ADD_SCENE_OK', { splatCount, hypothesisId: 'H3' });
         // #endregion
         console.log(`Gaussian splat scene loaded: ${splatCount} splats`);
         setViewer(viewerInst);
@@ -462,11 +469,11 @@ function GaussianSplatCloud({
       } catch (err: unknown) {
         if (!disposed) {
           const msg = err instanceof Error ? err.message : String(err);
-          const stack = err instanceof Error ? err.stack?.slice(0, 500) : '';
+          const stack = err instanceof Error ? err.stack : '';
           // #region agent log
           _dbg('ERROR_CAUGHT', { msg, stack, hypothesisId: 'ALL' });
           // #endregion
-          console.error('Gaussian splat load error:', msg, stack);
+          console.error('Gaussian splat load error:', msg, '\nStack:', stack);
           setError(msg);
           onError?.(msg);
           setLoading(false);
@@ -483,26 +490,28 @@ function GaussianSplatCloud({
     };
   }, [url, onMetadata]);
 
-  if (error) {
-    return (
-      <group>
+  return (
+    <group>
+      {/* Error indicator */}
+      {error && (
         <mesh>
           <boxGeometry args={[0.5, 0.5, 0.5]} />
           <meshStandardMaterial color="#ff3333" wireframe />
         </mesh>
-      </group>
-    );
-  }
+      )}
 
-  return (
-    <group>
+      {/* True Gaussian splat rendering */}
       {viewer && <primitive object={viewer} />}
-      {loading && (
+
+      {/* Loading indicator */}
+      {loading && !error && (
         <mesh>
           <sphereGeometry args={[0.2, 16, 16]} />
           <meshBasicMaterial color="#35c889" wireframe transparent opacity={0.5} />
         </mesh>
       )}
+
+      {/* Hidden points mesh for measurement raycasting */}
       {raycastPos && <RaycastPoints positions={raycastPos} />}
     </group>
   );
@@ -531,7 +540,9 @@ function SceneSetup({ mode }: { mode: ViewerMode }) {
 export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
   const [mode, setMode] = useState<ViewerMode>('orbit');
   const [showHelp, setShowHelp] = useState(false);
+  // #region agent log
   const [splatError, setSplatError] = useState<string | null>(null);
+  // #endregion
 
   // ── Measurement state ───────────────────────────────────────────────────
   const [measurePhase, setMeasurePhase] = useState<MeasurePhase>('calibrate');
@@ -630,12 +641,13 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         <GaussianSplatCloud url={fullPlyUrl} onMetadata={handleMetadata} onError={setSplatError} />
       </Canvas>
 
-      {/* ── Error Overlay (debug) ─────────────────────────────────────── */}
+      {/* #region agent log - Error Overlay */}
       {splatError && (
         <div className="absolute top-12 left-3 right-3 z-30 bg-red-900/80 backdrop-blur-md text-white text-xs p-3 rounded-lg border border-red-500/40 font-mono break-all">
-          <span className="text-red-300 font-bold">Viewer Error:</span> {splatError}
+          <span className="text-red-300 font-bold">Viewer Error: </span>{splatError}
         </div>
       )}
+      {/* #endregion */}
 
       {/* ── Top-Left: Mode Indicator ─────────────────────────────────────── */}
       <div className="absolute top-3 left-3 z-10">
