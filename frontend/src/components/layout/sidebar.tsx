@@ -52,7 +52,7 @@ export function Sidebar({ activeItem = 'projects', onNavigate }: SidebarProps) {
                     transition={{ duration: 0.5 }}
                 >
                     <h2 className="text-2xl font-mono font-bold text-[#35c889] mb-8 tracking-tighter">
-                        Metroa Labs
+                        3D Scanner
                     </h2>
                 </motion.div>
 

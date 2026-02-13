@@ -131,7 +131,7 @@ export default function JobStatus({ jobId, onComplete, embedded }: JobStatusProp
               <div className="p-3 rounded-lg bg-[#060606] border border-white/[0.06]">
                 <span className="text-gray-500 block text-xs mb-1">Quality</span>
                 <span className="font-medium text-white flex items-center">
-                  <Settings className="w-3 h-3 mr-2 text-[#35c889]/40" />
+                  <Settings className="w-2.5 h-2.5 mr-2 text-[#35c889]/40" />
                   {PRESET_LABELS[qualityPreset] || qualityPreset}
                 </span>
               </div>

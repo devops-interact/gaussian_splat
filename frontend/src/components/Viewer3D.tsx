@@ -491,7 +491,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
     scene.traverse((o) => { if (o.userData.__measure) toRemove.push(o); });
     toRemove.forEach(o => { scene.remove(o); });
 
-    const sphereGeo = new THREE.SphereGeometry(0.03, 16, 16);
+    const sphereGeo = new THREE.SphereGeometry(0.012, 12, 12);
     const greenMat = new THREE.MeshBasicMaterial({ color: '#35c889' });
     const purpleMat = new THREE.MeshBasicMaterial({ color: '#a4a4ff' });
 
@@ -680,7 +680,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       }
 
       // 7. Small branding in top-right corner
-      const brand = 'Metroa Labs';
+      const brand = '3D Scanner';
       ctx.font = `bold ${Math.max(10, Math.round(10 * dpr))}px monospace`;
       ctx.fillStyle = 'rgba(53, 200, 137, 0.4)';
       const brandW = ctx.measureText(brand).width;

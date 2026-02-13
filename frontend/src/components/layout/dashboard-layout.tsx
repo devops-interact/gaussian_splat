@@ -12,7 +12,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
                 <div className="max-w-[1600px] mx-auto px-6 h-14 flex items-center justify-between">
                     <div className="flex items-center gap-3">
                         <h1 className="text-lg font-mono font-bold text-[#35c889] tracking-tighter">
-                            Metroa Labs
+                            3D Scanner
                         </h1>
                         <span className="text-[10px] font-mono text-gray-600 border border-[#35c889]/[0.12] rounded px-1.5 py-0.5 text-[#35c889]/50">
                             v0.1
