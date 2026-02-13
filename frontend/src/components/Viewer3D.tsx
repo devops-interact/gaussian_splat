@@ -1,8 +1,6 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { Canvas, useThree, useFrame } from '@react-three/fiber';
-import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import { DropInViewer, SceneRevealMode } from '@mkkellogg/gaussian-splats-3d';
+import { Viewer, SceneRevealMode } from '@mkkellogg/gaussian-splats-3d';
 import {
   Camera,
   Ruler,
@@ -111,7 +109,6 @@ function parsePLYForMeta(buffer: ArrayBuffer): PLYMeta {
   const hasColors = propNames.includes('f_dc_0') || propNames.includes('red');
   const hasOpacity = propNames.includes('opacity');
 
-  // Extract positions only (for raycasting + bounding box)
   const positions = new Float32Array(vertexCount * 3);
   let visibleCount = 0;
   let minX = Infinity, minY = Infinity, minZ = Infinity;
@@ -147,7 +144,6 @@ function parsePLYForMeta(buffer: ArrayBuffer): PLYMeta {
       const z = dataView.getFloat32(vOff + propOffsets[zIdx], isLittleEndian);
       if (!isFinite(x) || !isFinite(y) || !isFinite(z)) continue;
 
-      // Skip very low-opacity points
       if (opOff !== -1) {
         const rawOp = dataView.getFloat32(vOff + opOff, isLittleEndian);
         if (1 / (1 + Math.exp(-rawOp)) < 0.005) continue;
@@ -185,7 +181,6 @@ function parsePLYForMeta(buffer: ArrayBuffer): PLYMeta {
   const cy = (minY + maxY) / 2;
   const cz = (minZ + maxZ) / 2;
 
-  // Center positions at origin (for raycasting alignment with centered splats)
   const centeredPos = positions.slice(0, visibleCount * 3);
   for (let i = 0; i < centeredPos.length; i += 3) {
     centeredPos[i] -= cx;
@@ -206,347 +201,22 @@ function parsePLYForMeta(buffer: ArrayBuffer): PLYMeta {
   };
 }
 
-// ── Walkthrough Controls ─────────────────────────────────────────────────────
-
-function WalkthroughControls({ active }: { active: boolean }) {
-  const { camera, gl } = useThree();
-  const euler = useRef(new THREE.Euler(0, 0, 0, 'YXZ'));
-  const keys = useRef<Set<string>>(new Set());
-  const isLocked = useRef(false);
-
-  useEffect(() => {
-    if (!active) { document.exitPointerLock?.(); isLocked.current = false; return; }
-
-    const onKeyDown = (e: KeyboardEvent) => keys.current.add(e.code);
-    const onKeyUp = (e: KeyboardEvent) => keys.current.delete(e.code);
-    const onClick = () => { if (active && !isLocked.current) gl.domElement.requestPointerLock(); };
-    const onPLC = () => { isLocked.current = document.pointerLockElement === gl.domElement; };
-    const onMM = (e: MouseEvent) => {
-      if (!isLocked.current) return;
-      euler.current.setFromQuaternion(camera.quaternion);
-      euler.current.y -= e.movementX * 0.002;
-      euler.current.x -= e.movementY * 0.002;
-      euler.current.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, euler.current.x));
-      camera.quaternion.setFromEuler(euler.current);
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    gl.domElement.addEventListener('click', onClick);
-    document.addEventListener('pointerlockchange', onPLC);
-    document.addEventListener('mousemove', onMM);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-      gl.domElement.removeEventListener('click', onClick);
-      document.removeEventListener('pointerlockchange', onPLC);
-      document.removeEventListener('mousemove', onMM);
-      document.exitPointerLock?.(); isLocked.current = false;
-    };
-  }, [active, camera, gl]);
-
-  useFrame((_, delta) => {
-    if (!active || !isLocked.current) return;
-    const dir = new THREE.Vector3();
-    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
-    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
-    if (keys.current.has('KeyW') || keys.current.has('ArrowUp')) dir.add(fwd);
-    if (keys.current.has('KeyS') || keys.current.has('ArrowDown')) dir.sub(fwd);
-    if (keys.current.has('KeyA') || keys.current.has('ArrowLeft')) dir.sub(right);
-    if (keys.current.has('KeyD') || keys.current.has('ArrowRight')) dir.add(right);
-    if (keys.current.has('Space')) dir.y += 1;
-    if (keys.current.has('ShiftLeft')) dir.y -= 1;
-    if (dir.lengthSq() > 0) { dir.normalize().multiplyScalar(3 * delta); camera.position.add(dir); }
-  });
-
-  return null;
-}
-
-// ── Measurement Visuals ──────────────────────────────────────────────────────
-
-function MeasurementVisuals({ points }: { points: MeasurePoint[] }) {
-  const sphereGeo = useMemo(() => new THREE.SphereGeometry(0.03, 16, 16), []);
-  const greenMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#35c889' }), []);
-  const orangeMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#a4a4ff' }), []);
-  const lineObj = useMemo(() => {
-    if (points.length < 2) return null;
-    const geo = new THREE.BufferGeometry().setFromPoints(points.map(p => p.position));
-    const mat = new THREE.LineBasicMaterial({ color: '#35c889', linewidth: 2 });
-    return new THREE.Line(geo, mat);
-  }, [points]);
-
-  return (
-    <group>
-      {points.map((pt, i) => (
-        <mesh key={`mpt-${i}`} position={pt.position} geometry={sphereGeo} material={i === 0 ? orangeMat : greenMat} />
-      ))}
-      {lineObj && <primitive object={lineObj} />}
-    </group>
-  );
-}
-
-// ── MeasureTool ──────────────────────────────────────────────────────────────
-
-function MeasureTool({ active, points, onAddPoint }: { active: boolean; points: MeasurePoint[]; onAddPoint: (pt: THREE.Vector3) => void }) {
-  const { camera, scene, gl, raycaster } = useThree();
-
-  useEffect(() => { raycaster.params.Points = { threshold: 0.1 }; }, [raycaster]);
-
-  useEffect(() => {
-    if (!active) return;
-    const onClick = (e: MouseEvent) => {
-      const rect = gl.domElement.getBoundingClientRect();
-      const mouse = new THREE.Vector2(
-        ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -((e.clientY - rect.top) / rect.height) * 2 + 1,
-      );
-      raycaster.setFromCamera(mouse, camera);
-
-      // Raycast against Points objects (including hidden raycasting mesh)
-      const pointObjs: THREE.Object3D[] = [];
-      const meshObjs: THREE.Object3D[] = [];
-      scene.traverse((o) => {
-        if (o instanceof THREE.Points) pointObjs.push(o);
-        else if (o instanceof THREE.Mesh && o.geometry.index) meshObjs.push(o);
-      });
-
-      let intersects = raycaster.intersectObjects(pointObjs, false);
-      if (intersects.length === 0) intersects = raycaster.intersectObjects(meshObjs, false);
-      if (intersects.length > 0) { onAddPoint(intersects[0].point.clone()); return; }
-
-      // Fallback: ground plane
-      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-      const target = new THREE.Vector3();
-      raycaster.ray.intersectPlane(plane, target);
-      if (target) onAddPoint(target.clone());
-    };
-    gl.domElement.addEventListener('click', onClick);
-    return () => gl.domElement.removeEventListener('click', onClick);
-  }, [active, camera, scene, gl, raycaster, onAddPoint]);
-
-  return <MeasurementVisuals points={points} />;
-}
-
-// ── Hidden raycasting mesh (positions only, invisible) ───────────────────────
-
-function RaycastPoints({ positions }: { positions: Float32Array }) {
-  const ref = useRef<THREE.Points>(null);
-
-  useEffect(() => {
-    if (!ref.current || !positions.length) return;
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-    geometry.computeBoundingSphere();
-    ref.current.geometry.dispose();
-    ref.current.geometry = geometry;
-  }, [positions]);
-
-  return (
-    <points ref={ref} visible={false}>
-      <bufferGeometry />
-      <pointsMaterial size={0.01} />
-    </points>
-  );
-}
-
-// ── Gaussian Splat Cloud (true splatting via @mkkellogg/gaussian-splats-3d) ──
-
-// #region agent log
-const _dbg = (msg: string, data?: Record<string, unknown>) => {
-  console.log(`[GS3D] ${msg}`, data || '');
-  fetch('http://127.0.0.1:7242/ingest/b2b8460e-d7ee-4616-88da-4d108adb3922',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'Viewer3D.tsx',message:msg,data,timestamp:Date.now()})}).catch(()=>{});
-};
-// #endregion
-
-function GaussianSplatCloud({
-  url,
-  onMetadata,
-  onError,
-}: {
-  url: string;
-  onMetadata: (m: ModelMetadata) => void;
-  onError?: (msg: string) => void;
-}) {
-  const [viewer, setViewer] = useState<DropInViewer | null>(null);
-  const [raycastPos, setRaycastPos] = useState<Float32Array | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!url) return;
-    let disposed = false;
-    let blobUrl: string | null = null;
-    let viewerInst: DropInViewer | null = null;
-
-    setLoading(true);
-    setError(null);
-
-    // #region agent log
-    _dbg('H4_URL_CHECK', { url, hypothesisId: 'H4' });
-    // #endregion
-
-    (async () => {
-      try {
-        // 1. Fetch the PLY file
-        // #region agent log
-        _dbg('H1_FETCH_START', { url, hypothesisId: 'H1' });
-        // #endregion
-        const response = await fetch(url);
-        // #region agent log
-        _dbg('H2_FETCH_RESPONSE', { status: response.status, ok: response.ok, statusText: response.statusText, contentType: response.headers.get('content-type'), contentLength: response.headers.get('content-length'), cors: response.headers.get('access-control-allow-origin'), hypothesisId: 'H2' });
-        // #endregion
-        if (!response.ok) throw new Error(`Fetch failed: HTTP ${response.status}`);
-        const buffer = await response.arrayBuffer();
-        if (disposed) return;
-        // #region agent log
-        _dbg('H1_FETCH_OK', { bytes: buffer.byteLength, hypothesisId: 'H1' });
-        // #endregion
-
-        // 2. Parse for metadata + centered positions (raycasting)
-        const meta = parsePLYForMeta(buffer);
-        if (meta.vertexCount === 0) throw new Error('No visible points in PLY');
-        // #region agent log
-        _dbg('H3_PARSE_OK', { vertexCount: meta.vertexCount, totalVertices: meta.totalVertices, center: meta.center, propsCount: meta.properties.length, first15props: meta.properties.slice(0, 15), hasColors: meta.hasColors, hasOpacity: meta.hasOpacity, hypothesisId: 'H3' });
-        // #endregion
-
-        setRaycastPos(meta.positions);
-
-        onMetadata({
-          pointCount: meta.vertexCount,
-          fileSize: buffer.byteLength,
-          boundingBox: meta.boundingBox,
-          hasColors: meta.hasColors,
-          hasOpacity: meta.hasOpacity,
-          properties: meta.properties,
-          format: 'gaussian_splat',
-        });
-
-        // 3. Create blob URL (avoids double-download)
-        const blob = new Blob([buffer], { type: 'application/octet-stream' });
-        blobUrl = URL.createObjectURL(blob);
-        // #region agent log
-        _dbg('H3_BLOB_CREATED', { blobUrl, blobSize: blob.size, hypothesisId: 'H3' });
-        // #endregion
-
-        // 4. Create DropInViewer for true Gaussian splatting
-        // #region agent log
-        _dbg('H5_VIEWER_CREATE', { hypothesisId: 'H5' });
-        // #endregion
-        viewerInst = new DropInViewer({
-          gpuAcceleratedSort: true,
-          sharedMemoryForWorkers: false,
-          sceneRevealMode: SceneRevealMode.Instant,
-          freeIntermediateSplatData: true,
-          antialiased: false,
-        });
-        // #region agent log
-        _dbg('H5_VIEWER_CREATED', { hypothesisId: 'H5' });
-        // #endregion
-
-        // 5. Load the splat scene
-        // Blob URLs have no file extension → must specify format explicitly
-        // SceneFormat: 0=Ply, 1=Splat, 2=KSplat, 3=Spz
-        // #region agent log
-        _dbg('H3_ADD_SCENE_START', { center: meta.center, format: 0, hypothesisId: 'H3' });
-        // #endregion
-        await viewerInst.addSplatScene(blobUrl, {
-          splatAlphaRemovalThreshold: 5,
-          showLoadingUI: false,
-          format: 0,
-          position: [-meta.center[0], -meta.center[1], -meta.center[2]],
-          rotation: [0, 0, 0, 1],
-          scale: [1, 1, 1],
-        });
-
-        if (disposed) return;
-        // getSplatCount may not exist on all DropInViewer versions
-        let splatCount = -1;
-        try { splatCount = viewerInst.getSplatCount?.() ?? -1; } catch { /* ignore */ }
-        // #region agent log
-        _dbg('H3_ADD_SCENE_OK', { splatCount, hypothesisId: 'H3' });
-        // #endregion
-        console.log(`Gaussian splat scene loaded (splatCount=${splatCount})`);
-        setViewer(viewerInst);
-        setLoading(false);
-      } catch (err: unknown) {
-        if (!disposed) {
-          const msg = err instanceof Error ? err.message : String(err);
-          const stack = err instanceof Error ? err.stack : '';
-          // #region agent log
-          _dbg('ERROR_CAUGHT', { msg, stack, hypothesisId: 'ALL' });
-          // #endregion
-          console.error('Gaussian splat load error:', msg, '\nStack:', stack);
-          setError(msg);
-          onError?.(msg);
-          setLoading(false);
-        }
-      }
-    })();
-
-    return () => {
-      disposed = true;
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
-      if (viewerInst) {
-        try { viewerInst.dispose(); } catch { /* ignore */ }
-      }
-    };
-  }, [url, onMetadata]);
-
-  return (
-    <group>
-      {/* Error indicator */}
-      {error && (
-        <mesh>
-          <boxGeometry args={[0.5, 0.5, 0.5]} />
-          <meshStandardMaterial color="#ff3333" wireframe />
-        </mesh>
-      )}
-
-      {/* True Gaussian splat rendering */}
-      {viewer && <primitive object={viewer} />}
-
-      {/* Loading indicator */}
-      {loading && !error && (
-        <mesh>
-          <sphereGeometry args={[0.2, 16, 16]} />
-          <meshBasicMaterial color="#35c889" wireframe transparent opacity={0.5} />
-        </mesh>
-      )}
-
-      {/* Hidden points mesh for measurement raycasting */}
-      {raycastPos && <RaycastPoints positions={raycastPos} />}
-    </group>
-  );
-}
-
-// ── Scene Setup ──────────────────────────────────────────────────────────────
-
-function SceneSetup({ mode }: { mode: ViewerMode }) {
-  return (
-    <>
-      <color attach="background" args={['#060606']} />
-      <ambientLight intensity={0.6} />
-      <directionalLight position={[5, 5, 5]} intensity={0.3} />
-      <gridHelper args={[30, 30, 0x0c1f1f, 0x081717]} position={[0, -0.01, 0]} />
-      {mode === 'orbit' && (
-        <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
-          <GizmoViewport axisColors={['#ff4444', '#44ff44', '#4444ff']} labelColor="white" />
-        </GizmoHelper>
-      )}
-    </>
-  );
-}
-
-// ── Main Viewer Component ────────────────────────────────────────────────────
+// ── Main Viewer Component (standalone Viewer — no R3F) ──────────────────────
 
 export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const viewerRef = useRef<Viewer | null>(null);
+  const raycastDataRef = useRef<{ positions: Float32Array; points: THREE.Points | null }>({ positions: new Float32Array(0), points: null });
+  const walkthroughRef = useRef<{ active: boolean; keys: Set<string>; isLocked: boolean; euler: THREE.Euler; rafId: number | null }>({
+    active: false, keys: new Set(), isLocked: false, euler: new THREE.Euler(0, 0, 0, 'YXZ'), rafId: null,
+  });
+
   const [mode, setMode] = useState<ViewerMode>('orbit');
   const [showHelp, setShowHelp] = useState(false);
-  // #region agent log
-  const [splatError, setSplatError] = useState<string | null>(null);
-  // #endregion
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // ── Measurement state ───────────────────────────────────────────────────
+  // ── Measurement state ──────────────────────────────────────────────────
   const [measurePhase, setMeasurePhase] = useState<MeasurePhase>('calibrate');
   const [calibration, setCalibration] = useState<CalibrationState | null>(null);
   const [calibPoints, setCalibPoints] = useState<MeasurePoint[]>([]);
@@ -556,7 +226,283 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
 
   const visibleMeasurePoints = measurePhase === 'calibrate' ? calibPoints : measurePoints;
 
-  const handleMetadata = useCallback((meta: ModelMetadata) => { onModelMetadata?.(meta); }, [onModelMetadata]);
+  // ── Initialize Viewer ──────────────────────────────────────────────────
+  useEffect(() => {
+    if (!containerRef.current || !modelUrl) return;
+    let disposed = false;
+    let blobUrl: string | null = null;
+
+    const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+    const fullUrl = modelUrl.startsWith('http') ? modelUrl : `${apiBase}${modelUrl}`;
+
+    setLoading(true);
+    setError(null);
+
+    (async () => {
+      try {
+        // 1. Fetch PLY
+        console.log('[GS3D] Fetching PLY:', fullUrl);
+        const response = await fetch(fullUrl);
+        if (!response.ok) throw new Error(`Fetch failed: HTTP ${response.status}`);
+        const buffer = await response.arrayBuffer();
+        if (disposed) return;
+        console.log('[GS3D] PLY fetched:', buffer.byteLength, 'bytes');
+
+        // 2. Parse metadata + positions
+        const meta = parsePLYForMeta(buffer);
+        if (meta.vertexCount === 0) throw new Error('No visible points in PLY');
+        console.log(`[GS3D] PLY parsed: ${meta.vertexCount}/${meta.totalVertices} verts, center=[${meta.center.map(v => v.toFixed(2))}]`);
+
+        raycastDataRef.current.positions = meta.positions;
+
+        onModelMetadata?.({
+          pointCount: meta.vertexCount,
+          fileSize: buffer.byteLength,
+          boundingBox: meta.boundingBox,
+          hasColors: meta.hasColors,
+          hasOpacity: meta.hasOpacity,
+          properties: meta.properties,
+          format: 'gaussian_splat',
+        });
+
+        // 3. Create blob URL
+        const blob = new Blob([buffer], { type: 'application/octet-stream' });
+        blobUrl = URL.createObjectURL(blob);
+
+        // 4. Build a Three.js scene with grid + invisible raycast points
+        const threeScene = new THREE.Scene();
+        const grid = new THREE.GridHelper(30, 30, 0x0c1f1f, 0x081717);
+        grid.position.y = -0.01;
+        threeScene.add(grid);
+
+        // Invisible points for measurement raycasting
+        const ptsGeo = new THREE.BufferGeometry();
+        ptsGeo.setAttribute('position', new THREE.Float32BufferAttribute(meta.positions, 3));
+        ptsGeo.computeBoundingSphere();
+        const ptsMesh = new THREE.Points(ptsGeo, new THREE.PointsMaterial({ size: 0.01, visible: false }));
+        threeScene.add(ptsMesh);
+        raycastDataRef.current.points = ptsMesh;
+
+        // 5. Create standalone Viewer (manages its own canvas + render loop)
+        console.log('[GS3D] Creating standalone Viewer...');
+        const viewer = new Viewer({
+          cameraUp: [0, 1, 0],
+          initialCameraPosition: [0, 2, 5],
+          initialCameraLookAt: [0, 0, 0],
+          rootElement: containerRef.current!,
+          threeScene: threeScene,
+          selfDrivenMode: true,
+          useBuiltInControls: true,
+          gpuAcceleratedSort: false,
+          sharedMemoryForWorkers: false,
+          sceneRevealMode: SceneRevealMode.Instant,
+          antialiased: false,
+          freeIntermediateSplatData: true,
+          logLevel: 0,
+          sphericalHarmonicsDegree: 0,
+        } as Record<string, unknown>);
+
+        // 6. Add the splat scene
+        console.log('[GS3D] Adding splat scene...');
+        await viewer.addSplatScene(blobUrl, {
+          splatAlphaRemovalThreshold: 5,
+          showLoadingUI: false,
+          format: 0, // PLY format
+          position: [-meta.center[0], -meta.center[1], -meta.center[2]],
+          rotation: [0, 0, 0, 1],
+          scale: [1, 1, 1],
+        });
+
+        if (disposed) return;
+
+        // 7. Start rendering
+        viewer.start();
+        viewerRef.current = viewer;
+        console.log('[GS3D] Viewer started successfully');
+        setLoading(false);
+      } catch (err: unknown) {
+        if (!disposed) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error('[GS3D] Viewer error:', msg);
+          setError(msg);
+          setLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      disposed = true;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      if (viewerRef.current) {
+        try { viewerRef.current.dispose(); } catch { /* ignore */ }
+        viewerRef.current = null;
+      }
+      // Clear the container (Viewer creates a canvas inside it)
+      if (containerRef.current) {
+        containerRef.current.innerHTML = '';
+      }
+    };
+  }, [modelUrl, onModelMetadata]);
+
+  // ── Walkthrough Mode ───────────────────────────────────────────────────
+  useEffect(() => {
+    const wt = walkthroughRef.current;
+    const viewer = viewerRef.current;
+    const canvas = containerRef.current?.querySelector('canvas');
+
+    wt.active = mode === 'walkthrough';
+
+    if (!wt.active || !viewer || !canvas) {
+      // Disable walkthrough
+      document.exitPointerLock?.();
+      wt.isLocked = false;
+      if (wt.rafId !== null) { cancelAnimationFrame(wt.rafId); wt.rafId = null; }
+      // Re-enable viewer's orbit controls
+      try { const v = viewer as unknown as Record<string, CallableFunction>; v.setOrbitControlsEnabled?.(true); } catch { /* ignore */ }
+      return;
+    }
+
+    // Disable viewer's orbit controls
+    try { const v = viewer as unknown as Record<string, CallableFunction>; v.setOrbitControlsEnabled?.(false); } catch { /* ignore */ }
+
+    const camera = (viewer as unknown as { camera?: THREE.PerspectiveCamera }).camera;
+    if (!camera) return;
+
+    const onKeyDown = (e: KeyboardEvent) => wt.keys.add(e.code);
+    const onKeyUp = (e: KeyboardEvent) => wt.keys.delete(e.code);
+    const onClick = () => { if (wt.active && !wt.isLocked) canvas.requestPointerLock(); };
+    const onPLC = () => { wt.isLocked = document.pointerLockElement === canvas; };
+    const onMM = (e: MouseEvent) => {
+      if (!wt.isLocked) return;
+      wt.euler.setFromQuaternion(camera.quaternion);
+      wt.euler.y -= e.movementX * 0.002;
+      wt.euler.x -= e.movementY * 0.002;
+      wt.euler.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, wt.euler.x));
+      camera.quaternion.setFromEuler(wt.euler);
+    };
+
+    let lastTime = performance.now();
+    const animate = () => {
+      if (!wt.active) return;
+      const now = performance.now();
+      const delta = (now - lastTime) / 1000;
+      lastTime = now;
+
+      if (wt.isLocked) {
+        const dir = new THREE.Vector3();
+        const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+        if (wt.keys.has('KeyW') || wt.keys.has('ArrowUp')) dir.add(fwd);
+        if (wt.keys.has('KeyS') || wt.keys.has('ArrowDown')) dir.sub(fwd);
+        if (wt.keys.has('KeyA') || wt.keys.has('ArrowLeft')) dir.sub(right);
+        if (wt.keys.has('KeyD') || wt.keys.has('ArrowRight')) dir.add(right);
+        if (wt.keys.has('Space')) dir.y += 1;
+        if (wt.keys.has('ShiftLeft')) dir.y -= 1;
+        if (dir.lengthSq() > 0) { dir.normalize().multiplyScalar(3 * delta); camera.position.add(dir); }
+      }
+      wt.rafId = requestAnimationFrame(animate);
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    canvas.addEventListener('click', onClick);
+    document.addEventListener('pointerlockchange', onPLC);
+    document.addEventListener('mousemove', onMM);
+    wt.rafId = requestAnimationFrame(animate);
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      canvas.removeEventListener('click', onClick);
+      document.removeEventListener('pointerlockchange', onPLC);
+      document.removeEventListener('mousemove', onMM);
+      document.exitPointerLock?.();
+      wt.isLocked = false;
+      if (wt.rafId !== null) { cancelAnimationFrame(wt.rafId); wt.rafId = null; }
+    };
+  }, [mode]);
+
+  // ── Measurement Click Handler ──────────────────────────────────────────
+  useEffect(() => {
+    if (mode !== 'measure') return;
+    const viewer = viewerRef.current;
+    const canvas = containerRef.current?.querySelector('canvas');
+    if (!viewer || !canvas) return;
+
+    const camera = (viewer as unknown as { camera?: THREE.PerspectiveCamera }).camera;
+    if (!camera) return;
+
+    const raycaster = new THREE.Raycaster();
+    raycaster.params.Points = { threshold: 0.1 };
+
+    const onClick = (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouse = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      raycaster.setFromCamera(mouse, camera);
+
+      // Raycast against invisible points
+      const ptsMesh = raycastDataRef.current.points;
+      if (ptsMesh) {
+        const intersects = raycaster.intersectObject(ptsMesh, false);
+        if (intersects.length > 0) {
+          handleAddMeasurePoint(intersects[0].point.clone());
+          return;
+        }
+      }
+
+      // Fallback: ground plane
+      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      const target = new THREE.Vector3();
+      raycaster.ray.intersectPlane(plane, target);
+      if (target) handleAddMeasurePoint(target.clone());
+    };
+
+    canvas.addEventListener('click', onClick);
+    return () => canvas.removeEventListener('click', onClick);
+  }, [mode, measurePhase, calibration]);
+
+  // ── Measurement Visuals (add/remove spheres and lines in the threeScene) ──
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    const scene = (viewer as unknown as { threeScene?: THREE.Scene }).threeScene;
+    if (!scene) return;
+
+    // Remove old measurement visuals
+    const toRemove: THREE.Object3D[] = [];
+    scene.traverse((o) => { if (o.userData.__measure) toRemove.push(o); });
+    toRemove.forEach(o => { scene.remove(o); });
+
+    const sphereGeo = new THREE.SphereGeometry(0.03, 16, 16);
+    const greenMat = new THREE.MeshBasicMaterial({ color: '#35c889' });
+    const purpleMat = new THREE.MeshBasicMaterial({ color: '#a4a4ff' });
+
+    visibleMeasurePoints.forEach((pt, i) => {
+      const mesh = new THREE.Mesh(sphereGeo, i === 0 ? purpleMat : greenMat);
+      mesh.position.copy(pt.position);
+      mesh.userData.__measure = true;
+      scene.add(mesh);
+    });
+
+    if (visibleMeasurePoints.length === 2) {
+      const lineGeo = new THREE.BufferGeometry().setFromPoints(visibleMeasurePoints.map(p => p.position));
+      const lineMat = new THREE.LineBasicMaterial({ color: '#35c889', linewidth: 2 });
+      const line = new THREE.Line(lineGeo, lineMat);
+      line.userData.__measure = true;
+      scene.add(line);
+    }
+
+    return () => {
+      const removalList: THREE.Object3D[] = [];
+      scene.traverse((o) => { if (o.userData.__measure) removalList.push(o); });
+      removalList.forEach(o => scene.remove(o));
+    };
+  }, [visibleMeasurePoints]);
+
+  // ── Measurement Callbacks ──────────────────────────────────────────────
 
   const handleAddMeasurePoint = useCallback((point: THREE.Vector3) => {
     if (measurePhase === 'calibrate') {
@@ -601,14 +547,20 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
   const handleClearMeasure = useCallback(() => { setMeasurePoints([]); setMeasuredDistance(null); }, []);
 
   const handleSnapshot = useCallback(() => {
-    const canvas = document.querySelector('canvas');
+    const canvas = containerRef.current?.querySelector('canvas');
     if (!canvas) return;
-    requestAnimationFrame(() => {
+    // The Viewer's renderer may not have preserveDrawingBuffer.
+    // We request a render and capture immediately.
+    try {
       const a = document.createElement('a');
-      a.href = canvas.toDataURL('image/png');
+      a.href = (canvas as HTMLCanvasElement).toDataURL('image/png');
       a.download = `gaussian-splat-snapshot-${Date.now()}.png`;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    });
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch {
+      console.warn('Snapshot failed — renderer may lack preserveDrawingBuffer');
+    }
   }, []);
 
   const handleReset = useCallback(() => {
@@ -616,40 +568,31 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
     handleResetCalibration();
   }, [handleResetCalibration]);
 
-  useEffect(() => { if (mode !== 'measure') { handleResetCalibration(); } }, [mode]);
+  useEffect(() => { if (mode !== 'measure') { handleResetCalibration(); } }, [mode, handleResetCalibration]);
 
   if (!modelUrl) return null;
 
-  const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-  const fullPlyUrl = modelUrl.startsWith('http') ? modelUrl : `${apiBase}${modelUrl}`;
-
   return (
     <div className="w-full h-full relative group bg-[#060606] rounded-xl overflow-hidden">
-      {/* 3D Canvas */}
-      <Canvas
-        camera={{ position: [0, 2, 5], fov: 60, near: 0.01, far: 1000 }}
-        style={{ width: '100%', height: '100%' }}
-        gl={{ preserveDrawingBuffer: true, antialias: true }}
-      >
-        <SceneSetup mode={mode} />
+      {/* Viewer container — the Viewer class creates its own <canvas> inside */}
+      <div ref={containerRef} className="w-full h-full" />
 
-        {mode === 'orbit' && (
-          <OrbitControls makeDefault enableDamping dampingFactor={0.05} rotateSpeed={0.8} zoomSpeed={0.8} panSpeed={0.8} target={[0, 0, 0]} />
-        )}
-
-        <WalkthroughControls active={mode === 'walkthrough'} />
-        <MeasureTool active={mode === 'measure'} points={visibleMeasurePoints} onAddPoint={handleAddMeasurePoint} />
-
-        <GaussianSplatCloud url={fullPlyUrl} onMetadata={handleMetadata} onError={setSplatError} />
-      </Canvas>
-
-      {/* #region agent log - Error Overlay */}
-      {splatError && (
-        <div className="absolute top-12 left-3 right-3 z-30 bg-red-900/80 backdrop-blur-md text-white text-xs p-3 rounded-lg border border-red-500/40 font-mono break-all">
-          <span className="text-red-300 font-bold">Viewer Error: </span>{splatError}
+      {/* Loading overlay */}
+      {loading && !error && (
+        <div className="absolute inset-0 flex items-center justify-center z-20 bg-[#060606]/80">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-8 h-8 border-2 border-[#35c889]/30 border-t-[#35c889] rounded-full animate-spin" />
+            <span className="text-[#35c889]/70 font-mono text-xs">Loading Gaussian Splats...</span>
+          </div>
         </div>
       )}
-      {/* #endregion */}
+
+      {/* Error overlay */}
+      {error && (
+        <div className="absolute top-12 left-3 right-3 z-30 bg-red-900/80 backdrop-blur-md text-white text-xs p-3 rounded-lg border border-red-500/40 font-mono break-all">
+          <span className="text-red-300 font-bold">Viewer Error: </span>{error}
+        </div>
+      )}
 
       {/* ── Top-Left: Mode Indicator ─────────────────────────────────────── */}
       <div className="absolute top-3 left-3 z-10">

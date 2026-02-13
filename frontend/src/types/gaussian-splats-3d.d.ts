@@ -21,19 +21,6 @@ declare module '@mkkellogg/gaussian-splats-3d' {
     Instant = 2,
   }
 
-  export interface DropInViewerOptions {
-    gpuAcceleratedSort?: boolean;
-    sharedMemoryForWorkers?: boolean;
-    logLevel?: LogLevel;
-    renderMode?: RenderMode;
-    sceneRevealMode?: SceneRevealMode;
-    dynamicScene?: boolean;
-    freeIntermediateSplatData?: boolean;
-    inMemoryCompressionLevel?: number;
-    antialiased?: boolean;
-    maxScreenSpaceSplatSize?: number;
-  }
-
   export interface SplatSceneOptions {
     splatAlphaRemovalThreshold?: number;
     showLoadingUI?: boolean;
@@ -45,25 +32,45 @@ declare module '@mkkellogg/gaussian-splats-3d' {
     streamView?: boolean;
   }
 
-  export class DropInViewer extends THREE.Group {
-    constructor(options?: DropInViewerOptions);
+  /**
+   * Standalone Viewer — creates its own canvas, renderer, camera,
+   * orbit controls, and render loop inside the given rootElement.
+   */
+  export class Viewer {
+    constructor(options?: Record<string, unknown>);
     addSplatScene(url: string, options?: SplatSceneOptions): Promise<void>;
     addSplatScenes(
       scenes: Array<{ path: string; options?: SplatSceneOptions }>,
       showLoadingUI?: boolean,
     ): Promise<void>;
-    getSplatCount?(): number;
-    dispose(): void;
     start(): void;
     stop(): void;
+    update(): void;
+    render(): void;
+    dispose(): void;
+
+    // Internal properties (accessible at runtime)
+    camera: THREE.PerspectiveCamera;
+    renderer: THREE.WebGLRenderer;
+    threeScene: THREE.Scene;
+    controls: unknown;
+    rootElement: HTMLElement;
+    splatMesh: THREE.Object3D;
   }
 
-  export class Viewer {
+  /**
+   * Drop-in viewer that can be added to an existing Three.js scene.
+   * Extends THREE.Group. Less reliable inside React Three Fiber.
+   */
+  export class DropInViewer extends THREE.Group {
     constructor(options?: Record<string, unknown>);
     addSplatScene(url: string, options?: SplatSceneOptions): Promise<void>;
+    addSplatScenes(
+      scenes: Array<{ path: string; options?: SplatSceneOptions }>,
+      showLoadingUI?: boolean,
+    ): Promise<void>;
+    dispose(): void;
     start(): void;
     stop(): void;
-    dispose(): void;
-    getSplatCount?(): number;
   }
 }
