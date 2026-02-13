@@ -455,6 +455,9 @@ function GaussianSplatCloud({
         await viewerInst.addSplatScene(blobUrl, {
           splatAlphaRemovalThreshold: 5,
           showLoadingUI: false,
+          // Blob URLs have no file extension, so the library can't auto-detect
+          // the format. SceneFormat: 0 = Ply, 1 = Splat, 2 = KSplat, 3 = Spz
+          format: 0,
           position: [-meta.center[0], -meta.center[1], -meta.center[2]],
           rotation: [0, 0, 0, 1],
           scale: [1, 1, 1],
