@@ -52,7 +52,7 @@ declare module '@mkkellogg/gaussian-splats-3d' {
       scenes: Array<{ path: string; options?: SplatSceneOptions }>,
       showLoadingUI?: boolean,
     ): Promise<void>;
-    getSplatCount(): number;
+    getSplatCount?(): number;
     dispose(): void;
     start(): void;
     stop(): void;
@@ -64,6 +64,6 @@ declare module '@mkkellogg/gaussian-splats-3d' {
     start(): void;
     stop(): void;
     dispose(): void;
-    getSplatCount(): number;
+    getSplatCount?(): number;
   }
 }

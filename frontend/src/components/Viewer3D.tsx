@@ -459,11 +459,13 @@ function GaussianSplatCloud({
         });
 
         if (disposed) return;
-        const splatCount = viewerInst.getSplatCount();
+        // getSplatCount may not exist on all DropInViewer versions
+        let splatCount = -1;
+        try { splatCount = viewerInst.getSplatCount?.() ?? -1; } catch { /* ignore */ }
         // #region agent log
         _dbg('H3_ADD_SCENE_OK', { splatCount, hypothesisId: 'H3' });
         // #endregion
-        console.log(`Gaussian splat scene loaded: ${splatCount} splats`);
+        console.log(`Gaussian splat scene loaded (splatCount=${splatCount})`);
         setViewer(viewerInst);
         setLoading(false);
       } catch (err: unknown) {
