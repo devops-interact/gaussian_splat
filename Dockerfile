@@ -133,9 +133,12 @@ RUN cd submodules/mast3r/dust3r/croco/models/curope/ && \
 
 # Pre-download MASt3R checkpoint (required for pose estimation in free mode)
 # Reference: https://learnopencv.com/mast3r-sfm-grounding-image-matching-3d/
+# Use retries and long timeouts: large file (~2.6GB) often hits SSL/connection drops (curl 56).
 RUN mkdir -p checkpoints && \
-    curl -fsSL -o checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth \
-    https://download.europe.naverlabs.com/ComputerVision/MASt3R/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth && \
+    curl -fsSL --retry 5 --retry-delay 30 --retry-max-time 3600 \
+        --connect-timeout 60 --max-time 7200 \
+        -o checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth \
+        https://download.europe.naverlabs.com/ComputerVision/MASt3R/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth && \
     ls -lh checkpoints/ && \
     echo "MASt3R checkpoint downloaded successfully"
 

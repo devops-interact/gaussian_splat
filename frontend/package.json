@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mkkellogg/gaussian-splats-3d": "^0.4.7",
     "@radix-ui/react-slot": "^1.2.4",
     "@react-three/drei": "^9.99.0",
     "@react-three/fiber": "^8.15.19",

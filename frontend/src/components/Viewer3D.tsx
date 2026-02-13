@@ -2,12 +2,11 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import * as THREE from 'three';
+import { DropInViewer, SceneRevealMode } from '@mkkellogg/gaussian-splats-3d';
 import {
   Camera,
   Ruler,
   RotateCcw,
-  ZoomIn,
-  ZoomOut,
   Footprints,
   MousePointer,
   X,
@@ -42,39 +41,31 @@ interface MeasurePoint {
 type MeasurePhase = 'calibrate' | 'measure';
 
 interface CalibrationState {
-  points: MeasurePoint[];          // 2 reference points
-  rawDistance: number;             // 3D distance between them
-  realMeters: number;             // user-entered real distance in meters
-  scaleFactor: number;            // realMeters / rawDistance
+  points: MeasurePoint[];
+  rawDistance: number;
+  realMeters: number;
+  scaleFactor: number;
 }
 
+// ── Lightweight PLY header parser (metadata + positions only) ────────────────
 
-// ── Constants ────────────────────────────────────────────────────────────────
-
-const SH_C0 = 0.28209479177387814;
-
-// ── PLY Parser ───────────────────────────────────────────────────────────────
-
-interface ParseResult {
+interface PLYMeta {
   positions: Float32Array;
-  colors: Float32Array;
   vertexCount: number;
-  metadata: {
-    totalVertices: number;
-    visibleVertices: number;
-    hasColors: boolean;
-    hasOpacity: boolean;
-    properties: string[];
-    format: string;
-    colorSource: 'rgb' | 'sh' | 'none';
-    boundingBox: { min: [number, number, number]; max: [number, number, number] };
-  };
+  totalVertices: number;
+  properties: string[];
+  format: string;
+  hasColors: boolean;
+  hasOpacity: boolean;
+  boundingBox: { min: [number, number, number]; max: [number, number, number] };
+  center: [number, number, number];
 }
 
-function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
+function parsePLYForMeta(buffer: ArrayBuffer): PLYMeta {
   const bytes = new Uint8Array(buffer);
   const decoder = new TextDecoder('utf-8');
 
+  // Find end_header
   let headerEnd = -1;
   const searchLimit = Math.min(bytes.length, 20000);
   for (let i = 0; i < searchLimit; i++) {
@@ -89,8 +80,7 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
       break;
     }
   }
-
-  if (headerEnd === -1) throw new Error('Invalid PLY: no end_header found');
+  if (headerEnd === -1) throw new Error('Invalid PLY: no end_header');
 
   const headerText = decoder.decode(bytes.slice(0, headerEnd));
   const headerLines = headerText.split('\n').map(l => l.trim());
@@ -111,38 +101,19 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
     }
   }
 
-  if (vertexCount === 0) throw new Error('No vertices in PLY file');
+  if (vertexCount === 0) throw new Error('No vertices in PLY');
 
   const propNames = properties.map(p => p.name);
   const format = isBinary ? (isLittleEndian ? 'binary_little_endian' : 'binary_big_endian') : 'ascii';
-
   const xIdx = propNames.indexOf('x');
   const yIdx = propNames.indexOf('y');
   const zIdx = propNames.indexOf('z');
-  const f_dc_0_idx = propNames.indexOf('f_dc_0');
-  const f_dc_1_idx = propNames.indexOf('f_dc_1');
-  const f_dc_2_idx = propNames.indexOf('f_dc_2');
-  const redIdx = propNames.indexOf('red');
-  const greenIdx = propNames.indexOf('green');
-  const blueIdx = propNames.indexOf('blue');
-  const opacityIdx = propNames.indexOf('opacity');
+  const hasColors = propNames.includes('f_dc_0') || propNames.includes('red');
+  const hasOpacity = propNames.includes('opacity');
 
-  const hasRGB = redIdx !== -1 && greenIdx !== -1 && blueIdx !== -1;
-  const hasSH = f_dc_0_idx !== -1 && f_dc_1_idx !== -1 && f_dc_2_idx !== -1;
-  const hasColors = hasRGB || hasSH;
-  const hasOpacity = opacityIdx !== -1;
-  const colorSource: 'rgb' | 'sh' | 'none' = hasSH ? 'sh' : hasRGB ? 'rgb' : 'none';
-
-  // Smart SH color format detection type
-  type SHFormat = 'standard_sh' | 'direct_rgb' | 'uint8_rgb';
-  let detectedSHFormat: SHFormat = 'standard_sh'; // default
-
-  console.log(`PLY: ${vertexCount} verts, format=${format}, colorSource=${colorSource}, props=[${propNames.slice(0, 15).join(', ')}${propNames.length > 15 ? '...' : ''}]`);
-
+  // Extract positions only (for raycasting + bounding box)
   const positions = new Float32Array(vertexCount * 3);
-  const colors = new Float32Array(vertexCount * 3);
   let visibleCount = 0;
-
   let minX = Infinity, minY = Infinity, minZ = Infinity;
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
 
@@ -164,65 +135,21 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
     }
     const bytesPerVertex = currentOffset;
     const availableSize = buffer.byteLength - headerEnd;
-
-    const readFloat = (offset: number, idx: number): number => {
-      const type = properties[idx].type;
-      if (type === 'double' || type === 'float64') return dataView.getFloat64(offset + propOffsets[idx], isLittleEndian);
-      return dataView.getFloat32(offset + propOffsets[idx], isLittleEndian);
-    };
-    const readUchar = (offset: number, idx: number): number => dataView.getUint8(offset + propOffsets[idx]);
-
     const maxVerts = Math.min(vertexCount, Math.floor(availableSize / bytesPerVertex));
 
-    // ── Smart SH color format pre-scan (sample up to 1000 evenly-spaced verts) ──
-    if (hasSH && maxVerts > 0) {
-      const sampleCount = Math.min(1000, maxVerts);
-      const step = Math.max(1, Math.floor(maxVerts / sampleCount));
-      let shMin = Infinity, shMax = -Infinity;
-      let shSum = 0, shSumSq = 0, shCount = 0;
-      let shHasNeg = false;
-
-      for (let i = 0; i < maxVerts; i += step) {
-        const vOff = i * bytesPerVertex;
-        for (const fIdx of [f_dc_0_idx, f_dc_1_idx, f_dc_2_idx]) {
-          const val = readFloat(vOff, fIdx);
-          if (!isFinite(val)) continue;
-          if (val < shMin) shMin = val;
-          if (val > shMax) shMax = val;
-          shSum += val;
-          shSumSq += val * val;
-          if (val < 0) shHasNeg = true;
-          shCount++;
-        }
-      }
-
-      if (shCount > 0) {
-        const shMean = shSum / shCount;
-        const shStd = Math.sqrt(Math.max(0, shSumSq / shCount - shMean * shMean));
-        console.log(`SH pre-scan (${Math.ceil(maxVerts / step)} sampled verts): min=${shMin.toFixed(3)}, max=${shMax.toFixed(3)}, mean=${shMean.toFixed(3)}, std=${shStd.toFixed(3)}, hasNeg=${shHasNeg}`);
-
-        if (!shHasNeg && shMax > 1.5) {
-          detectedSHFormat = 'uint8_rgb';
-          console.log('Auto-detected SH format: uint8 RGB (values 0-255 range, dividing by 255)');
-        } else if (!shHasNeg && shMax <= 1.05 && shStd < 0.5) {
-          detectedSHFormat = 'direct_rgb';
-          console.log('Auto-detected SH format: direct RGB (values already in 0-1 range, using as-is)');
-        } else {
-          detectedSHFormat = 'standard_sh';
-          console.log('Auto-detected SH format: standard SH (applying SH_C0 * f + 0.5)');
-        }
-      }
-    }
+    const opacityIdx = propNames.indexOf('opacity');
+    const opOff = opacityIdx !== -1 ? propOffsets[opacityIdx] : -1;
 
     for (let i = 0; i < maxVerts; i++) {
       const vOff = i * bytesPerVertex;
-      const x = readFloat(vOff, xIdx);
-      const y = readFloat(vOff, yIdx);
-      const z = readFloat(vOff, zIdx);
+      const x = dataView.getFloat32(vOff + propOffsets[xIdx], isLittleEndian);
+      const y = dataView.getFloat32(vOff + propOffsets[yIdx], isLittleEndian);
+      const z = dataView.getFloat32(vOff + propOffsets[zIdx], isLittleEndian);
       if (!isFinite(x) || !isFinite(y) || !isFinite(z)) continue;
 
-      if (opacityIdx !== -1) {
-        const rawOp = readFloat(vOff, opacityIdx);
+      // Skip very low-opacity points
+      if (opOff !== -1) {
+        const rawOp = dataView.getFloat32(vOff + opOff, isLittleEndian);
         if (1 / (1 + Math.exp(-rawOp)) < 0.005) continue;
       }
 
@@ -231,92 +158,18 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
       if (x < minX) minX = x; if (x > maxX) maxX = x;
       if (y < minY) minY = y; if (y > maxY) maxY = y;
       if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
-
-      if (hasSH) {
-        const f0 = readFloat(vOff, f_dc_0_idx);
-        const f1 = readFloat(vOff, f_dc_1_idx);
-        const f2 = readFloat(vOff, f_dc_2_idx);
-        if (detectedSHFormat === 'uint8_rgb') {
-          colors[idx3]     = Math.max(0, Math.min(1, f0 / 255));
-          colors[idx3 + 1] = Math.max(0, Math.min(1, f1 / 255));
-          colors[idx3 + 2] = Math.max(0, Math.min(1, f2 / 255));
-        } else if (detectedSHFormat === 'direct_rgb') {
-          colors[idx3]     = Math.max(0, Math.min(1, f0));
-          colors[idx3 + 1] = Math.max(0, Math.min(1, f1));
-          colors[idx3 + 2] = Math.max(0, Math.min(1, f2));
-        } else {
-          // standard SH: SH_C0 * f + 0.5
-          colors[idx3]     = Math.max(0, Math.min(1, SH_C0 * f0 + 0.5));
-          colors[idx3 + 1] = Math.max(0, Math.min(1, SH_C0 * f1 + 0.5));
-          colors[idx3 + 2] = Math.max(0, Math.min(1, SH_C0 * f2 + 0.5));
-        }
-      } else if (hasRGB) {
-        const rType = properties[redIdx].type;
-        if (rType === 'uchar' || rType === 'uint8') {
-          colors[idx3] = readUchar(vOff, redIdx) / 255;
-          colors[idx3 + 1] = readUchar(vOff, greenIdx) / 255;
-          colors[idx3 + 2] = readUchar(vOff, blueIdx) / 255;
-        } else {
-          colors[idx3] = Math.max(0, Math.min(1, readFloat(vOff, redIdx)));
-          colors[idx3 + 1] = Math.max(0, Math.min(1, readFloat(vOff, greenIdx)));
-          colors[idx3 + 2] = Math.max(0, Math.min(1, readFloat(vOff, blueIdx)));
-        }
-      } else {
-        colors[idx3] = 0.7; colors[idx3 + 1] = 0.7; colors[idx3 + 2] = 0.7;
-      }
-
       visibleCount++;
     }
   } else {
     const dataText = decoder.decode(bytes.slice(headerEnd));
     const dataLines = dataText.split('\n').filter(l => l.trim());
     const count = Math.min(vertexCount, dataLines.length);
-
-    // ── ASCII SH pre-scan (sample up to 1000 evenly-spaced lines) ──
-    if (hasSH && count > 0) {
-      const sampleCount = Math.min(1000, count);
-      const step = Math.max(1, Math.floor(count / sampleCount));
-      let shMin = Infinity, shMax = -Infinity;
-      let shSum = 0, shSumSq = 0, shCount = 0;
-      let shHasNeg = false;
-
-      for (let i = 0; i < count; i += step) {
-        const parts = dataLines[i].trim().split(/\s+/).map(parseFloat);
-        for (const fIdx of [f_dc_0_idx, f_dc_1_idx, f_dc_2_idx]) {
-          const val = parts[fIdx];
-          if (!isFinite(val)) continue;
-          if (val < shMin) shMin = val;
-          if (val > shMax) shMax = val;
-          shSum += val;
-          shSumSq += val * val;
-          if (val < 0) shHasNeg = true;
-          shCount++;
-        }
-      }
-
-      if (shCount > 0) {
-        const shMean = shSum / shCount;
-        const shStd = Math.sqrt(Math.max(0, shSumSq / shCount - shMean * shMean));
-        console.log(`ASCII SH pre-scan (${Math.ceil(count / step)} sampled): min=${shMin.toFixed(3)}, max=${shMax.toFixed(3)}, mean=${shMean.toFixed(3)}, std=${shStd.toFixed(3)}, hasNeg=${shHasNeg}`);
-
-        if (!shHasNeg && shMax > 1.5) {
-          detectedSHFormat = 'uint8_rgb';
-          console.log('Auto-detected SH format (ASCII): uint8 RGB');
-        } else if (!shHasNeg && shMax <= 1.05 && shStd < 0.5) {
-          detectedSHFormat = 'direct_rgb';
-          console.log('Auto-detected SH format (ASCII): direct RGB');
-        } else {
-          detectedSHFormat = 'standard_sh';
-          console.log('Auto-detected SH format (ASCII): standard SH');
-        }
-      }
-    }
+    const opacityIdx = propNames.indexOf('opacity');
 
     for (let i = 0; i < count; i++) {
       const parts = dataLines[i].trim().split(/\s+/).map(parseFloat);
       const x = parts[xIdx], y = parts[yIdx], z = parts[zIdx];
       if (!isFinite(x) || !isFinite(y) || !isFinite(z)) continue;
-
       if (opacityIdx !== -1 && 1 / (1 + Math.exp(-parts[opacityIdx])) < 0.005) continue;
 
       const idx3 = visibleCount * 3;
@@ -324,46 +177,32 @@ function parseGaussianPLY(buffer: ArrayBuffer): ParseResult {
       if (x < minX) minX = x; if (x > maxX) maxX = x;
       if (y < minY) minY = y; if (y > maxY) maxY = y;
       if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
-
-      if (hasSH) {
-        const f0 = parts[f_dc_0_idx], f1 = parts[f_dc_1_idx], f2 = parts[f_dc_2_idx];
-        if (detectedSHFormat === 'uint8_rgb') {
-          colors[idx3]     = Math.max(0, Math.min(1, f0 / 255));
-          colors[idx3 + 1] = Math.max(0, Math.min(1, f1 / 255));
-          colors[idx3 + 2] = Math.max(0, Math.min(1, f2 / 255));
-        } else if (detectedSHFormat === 'direct_rgb') {
-          colors[idx3]     = Math.max(0, Math.min(1, f0));
-          colors[idx3 + 1] = Math.max(0, Math.min(1, f1));
-          colors[idx3 + 2] = Math.max(0, Math.min(1, f2));
-        } else {
-          colors[idx3]     = Math.max(0, Math.min(1, SH_C0 * f0 + 0.5));
-          colors[idx3 + 1] = Math.max(0, Math.min(1, SH_C0 * f1 + 0.5));
-          colors[idx3 + 2] = Math.max(0, Math.min(1, SH_C0 * f2 + 0.5));
-        }
-      } else if (hasRGB) {
-        colors[idx3] = parts[redIdx] / 255;
-        colors[idx3 + 1] = parts[greenIdx] / 255;
-        colors[idx3 + 2] = parts[blueIdx] / 255;
-      } else {
-        colors[idx3] = 0.7; colors[idx3 + 1] = 0.7; colors[idx3 + 2] = 0.7;
-      }
       visibleCount++;
     }
   }
 
-  console.log(`Parsed ${visibleCount} visible points (from ${vertexCount} total), colorSource=${colorSource}, shFormat=${detectedSHFormat}`);
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const cz = (minZ + maxZ) / 2;
+
+  // Center positions at origin (for raycasting alignment with centered splats)
+  const centeredPos = positions.slice(0, visibleCount * 3);
+  for (let i = 0; i < centeredPos.length; i += 3) {
+    centeredPos[i] -= cx;
+    centeredPos[i + 1] -= cy;
+    centeredPos[i + 2] -= cz;
+  }
 
   return {
-    positions: positions.slice(0, visibleCount * 3),
-    colors: colors.slice(0, visibleCount * 3),
+    positions: centeredPos,
     vertexCount: visibleCount,
-    metadata: {
-      totalVertices: vertexCount,
-      visibleVertices: visibleCount,
-      hasColors, hasOpacity,
-      properties: propNames, format, colorSource,
-      boundingBox: { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] },
-    },
+    totalVertices: vertexCount,
+    properties: propNames,
+    format,
+    hasColors,
+    hasOpacity,
+    boundingBox: { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] },
+    center: [cx, cy, cz],
   };
 }
 
@@ -463,7 +302,7 @@ function MeasureTool({ active, points, onAddPoint }: { active: boolean; points: 
       );
       raycaster.setFromCamera(mouse, camera);
 
-      // Try points first, then meshes
+      // Raycast against Points objects (including hidden raycasting mesh)
       const pointObjs: THREE.Object3D[] = [];
       const meshObjs: THREE.Object3D[] = [];
       scene.traverse((o) => {
@@ -488,66 +327,150 @@ function MeasureTool({ active, points, onAddPoint }: { active: boolean; points: 
   return <MeasurementVisuals points={points} />;
 }
 
-// ── PointCloud Component ─────────────────────────────────────────────────────
+// ── Hidden raycasting mesh (positions only, invisible) ───────────────────────
 
-function PointCloud({ url, onMetadata, pointSize }: { url: string; onMetadata: (m: ModelMetadata) => void; pointSize: number }) {
-  const meshRef = useRef<THREE.Points | null>(null);
+function RaycastPoints({ positions }: { positions: Float32Array }) {
+  const ref = useRef<THREE.Points>(null);
+
+  useEffect(() => {
+    if (!ref.current || !positions.length) return;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+    geometry.computeBoundingSphere();
+    ref.current.geometry.dispose();
+    ref.current.geometry = geometry;
+  }, [positions]);
+
+  return (
+    <points ref={ref} visible={false}>
+      <bufferGeometry />
+      <pointsMaterial size={0.01} />
+    </points>
+  );
+}
+
+// ── Gaussian Splat Cloud (true splatting via @mkkellogg/gaussian-splats-3d) ──
+
+function GaussianSplatCloud({
+  url,
+  onMetadata,
+}: {
+  url: string;
+  onMetadata: (m: ModelMetadata) => void;
+}) {
+  const [viewer, setViewer] = useState<DropInViewer | null>(null);
+  const [raycastPos, setRaycastPos] = useState<Float32Array | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!url) return;
+    let disposed = false;
+    let blobUrl: string | null = null;
+    let viewerInst: DropInViewer | null = null;
+
+    setLoading(true);
     setError(null);
-    fetch(url)
-      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer(); })
-      .then(buffer => {
-        const result = parseGaussianPLY(buffer);
-        if (result.vertexCount === 0) throw new Error('No visible points');
-        if (!meshRef.current) return;
 
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.Float32BufferAttribute(result.positions, 3));
-        geometry.setAttribute('color', new THREE.Float32BufferAttribute(result.colors, 3));
-        geometry.computeBoundingBox();
+    (async () => {
+      try {
+        // 1. Fetch the PLY file
+        const response = await fetch(url);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const buffer = await response.arrayBuffer();
+        if (disposed) return;
 
-        const bbox = geometry.boundingBox;
-        if (bbox) {
-          const center = new THREE.Vector3();
-          bbox.getCenter(center);
-          geometry.translate(-center.x, -center.y, -center.z);
-        }
-        geometry.computeBoundingSphere();
+        // 2. Parse for metadata + centered positions (raycasting)
+        const meta = parsePLYForMeta(buffer);
+        if (meta.vertexCount === 0) throw new Error('No visible points in PLY');
+        console.log(`PLY parsed: ${meta.vertexCount} visible / ${meta.totalVertices} total, center=[${meta.center.map(v => v.toFixed(2)).join(', ')}]`);
 
-        const bsRadius = geometry.boundingSphere?.radius || 1;
-        // Tighter, smaller points for denser visual appearance
-        const adaptiveSize = Math.max(0.001, Math.min(0.015, bsRadius / Math.sqrt(result.vertexCount) * 1.5));
-        console.log(`Adaptive point size: radius=${bsRadius.toFixed(3)}, count=${result.vertexCount}, size=${adaptiveSize.toFixed(4)}`);
-        const material = new THREE.PointsMaterial({
-          size: pointSize > 0 ? pointSize : adaptiveSize,
-          vertexColors: true, sizeAttenuation: true, transparent: true, opacity: 0.92, depthWrite: true,
-        });
+        setRaycastPos(meta.positions);
 
-        meshRef.current.geometry.dispose();
-        if (meshRef.current.material instanceof THREE.Material) meshRef.current.material.dispose();
-        meshRef.current.geometry = geometry;
-        meshRef.current.material = material;
-
+        // Report metadata
         onMetadata({
-          pointCount: result.vertexCount, fileSize: buffer.byteLength,
-          boundingBox: result.metadata.boundingBox, hasColors: result.metadata.hasColors,
-          hasOpacity: result.metadata.hasOpacity, properties: result.metadata.properties,
-          format: result.metadata.format,
+          pointCount: meta.vertexCount,
+          fileSize: buffer.byteLength,
+          boundingBox: meta.boundingBox,
+          hasColors: meta.hasColors,
+          hasOpacity: meta.hasOpacity,
+          properties: meta.properties,
+          format: 'gaussian_splat',
         });
-      })
-      .catch(err => { console.error('PLY error:', err); setError(err.message); });
-  }, [url, onMetadata, pointSize]);
 
-  if (error) return <group><mesh><boxGeometry args={[0.5, 0.5, 0.5]} /><meshStandardMaterial color="#ff3333" wireframe /></mesh></group>;
+        // 3. Create blob URL for the viewer (avoids double-download)
+        const blob = new Blob([buffer], { type: 'application/octet-stream' });
+        blobUrl = URL.createObjectURL(blob);
+
+        // 4. Create DropInViewer for true Gaussian splatting
+        viewerInst = new DropInViewer({
+          gpuAcceleratedSort: true,
+          sharedMemoryForWorkers: false,
+          sceneRevealMode: SceneRevealMode.Instant,
+          freeIntermediateSplatData: true,
+          antialiased: false,
+        });
+
+        await viewerInst.addSplatScene(blobUrl, {
+          splatAlphaRemovalThreshold: 5,
+          showLoadingUI: false,
+          // Center the splats at origin (same offset as raycasting positions)
+          position: [-meta.center[0], -meta.center[1], -meta.center[2]],
+          rotation: [0, 0, 0, 1],
+          scale: [1, 1, 1],
+        });
+
+        if (disposed) return;
+
+        console.log(`Gaussian splat scene loaded: ${viewerInst.getSplatCount()} splats`);
+        setViewer(viewerInst);
+        setLoading(false);
+      } catch (err: unknown) {
+        if (!disposed) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error('Gaussian splat load error:', msg);
+          setError(msg);
+          setLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      disposed = true;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
+      if (viewerInst) {
+        try { viewerInst.dispose(); } catch { /* ignore dispose errors */ }
+      }
+    };
+  }, [url, onMetadata]);
+
+  if (error) {
+    return (
+      <group>
+        <mesh>
+          <boxGeometry args={[0.5, 0.5, 0.5]} />
+          <meshStandardMaterial color="#ff3333" wireframe />
+        </mesh>
+      </group>
+    );
+  }
 
   return (
-    <points ref={meshRef}>
-      <bufferGeometry />
-      <pointsMaterial size={0.01} vertexColors sizeAttenuation transparent opacity={0.95} />
-    </points>
+    <group>
+      {/* True Gaussian splat rendering */}
+      {viewer && <primitive object={viewer} />}
+
+      {/* Loading indicator */}
+      {loading && (
+        <mesh>
+          <sphereGeometry args={[0.2, 16, 16]} />
+          <meshBasicMaterial color="#35c889" wireframe transparent opacity={0.5} />
+        </mesh>
+      )}
+
+      {/* Hidden points mesh for measurement raycasting */}
+      {raycastPos && <RaycastPoints positions={raycastPos} />}
+    </group>
   );
 }
 
@@ -573,9 +496,7 @@ function SceneSetup({ mode }: { mode: ViewerMode }) {
 
 export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
   const [mode, setMode] = useState<ViewerMode>('orbit');
-  const [pointSize, setPointSize] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // ── Measurement state ───────────────────────────────────────────────────
   const [measurePhase, setMeasurePhase] = useState<MeasurePhase>('calibrate');
@@ -585,7 +506,6 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
   const [measurePoints, setMeasurePoints] = useState<MeasurePoint[]>([]);
   const [measuredDistance, setMeasuredDistance] = useState<number | null>(null);
 
-  // All visible points for measurement visuals (both calib and measure)
   const visibleMeasurePoints = measurePhase === 'calibrate' ? calibPoints : measurePoints;
 
   const handleMetadata = useCallback((meta: ModelMetadata) => { onModelMetadata?.(meta); }, [onModelMetadata]);
@@ -597,7 +517,6 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         return [...prev, { position: point }];
       });
     } else {
-      // Measure mode
       setMeasurePoints(prev => {
         const next = prev.length >= 2 ? [{ position: point }] : [...prev, { position: point }];
         if (next.length === 2 && calibration) {
@@ -645,7 +564,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
   }, []);
 
   const handleReset = useCallback(() => {
-    setMode('orbit'); setPointSize(0);
+    setMode('orbit');
     handleResetCalibration();
   }, [handleResetCalibration]);
 
@@ -663,7 +582,6 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         camera={{ position: [0, 2, 5], fov: 60, near: 0.01, far: 1000 }}
         style={{ width: '100%', height: '100%' }}
         gl={{ preserveDrawingBuffer: true, antialias: true }}
-        ref={canvasRef as any}
       >
         <SceneSetup mode={mode} />
 
@@ -674,7 +592,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         <WalkthroughControls active={mode === 'walkthrough'} />
         <MeasureTool active={mode === 'measure'} points={visibleMeasurePoints} onAddPoint={handleAddMeasurePoint} />
 
-        <PointCloud url={fullPlyUrl} onMetadata={handleMetadata} pointSize={pointSize} />
+        <GaussianSplatCloud url={fullPlyUrl} onMetadata={handleMetadata} />
       </Canvas>
 
       {/* ── Top-Left: Mode Indicator ─────────────────────────────────────── */}
@@ -703,7 +621,6 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       {mode === 'measure' && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10">
           <div className="bg-black/80 backdrop-blur-md border border-white/[0.06] rounded-xl px-4 py-2.5 flex items-center gap-3 font-mono text-xs">
-            {/* Phase indicator */}
             <span className={`text-[10px] px-1.5 py-0.5 rounded ${measurePhase === 'calibrate' ? 'bg-[#a4a4ff]/15 text-[#a4a4ff]' : 'bg-[#35c889]/15 text-[#35c889]'}`}>
               {measurePhase === 'calibrate' ? 'STEP 1: Calibrate' : 'STEP 2: Measure'}
             </span>
@@ -711,7 +628,6 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
 
             {measurePhase === 'calibrate' ? (
               <>
-                {/* Calibration: pick 2 reference points, then enter real distance */}
                 <div className="flex items-center gap-2">
                   <span className={`flex items-center gap-1 ${calibPoints.length >= 1 ? 'text-[#a4a4ff]' : 'text-white/30'}`}>
                     <CircleDot className="w-3 h-3" /> A {calibPoints.length >= 1 ? '✓' : ''}
@@ -747,7 +663,6 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
               </>
             ) : (
               <>
-                {/* Measure mode: pick points, show calibrated distance */}
                 <div className="flex items-center gap-2">
                   <span className={`flex items-center gap-1 ${measurePoints.length >= 1 ? 'text-[#a4a4ff]' : 'text-white/30'}`}>
                     <CircleDot className="w-3 h-3" /> A {measurePoints.length >= 1 ? '✓' : ''}
@@ -790,17 +705,6 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         </div>
       )}
 
-      {/* ── Bottom-Left: Point Size Controls ──────────────────────────────── */}
-      <div className="absolute bottom-3 left-3 z-10 flex items-center gap-2">
-        <div className="bg-black/70 backdrop-blur-md rounded-lg border border-white/[0.06] flex items-center px-2 py-1 gap-1">
-          <span className="text-[10px] text-white/40 font-mono mr-1">Size</span>
-          <button onClick={() => setPointSize(p => Math.max(0.001, (p || 0.01) / 1.5))} className="text-white/50 hover:text-[#35c889] p-0.5 transition-colors"><ZoomOut className="w-3 h-3" /></button>
-          <span className="text-[10px] text-[#35c889]/60 font-mono w-10 text-center">{pointSize > 0 ? pointSize.toFixed(3) : 'Auto'}</span>
-          <button onClick={() => setPointSize(p => Math.min(0.1, (p || 0.01) * 1.5))} className="text-white/50 hover:text-[#35c889] p-0.5 transition-colors"><ZoomIn className="w-3 h-3" /></button>
-          <button onClick={() => setPointSize(0)} className="text-white/30 hover:text-[#35c889] p-0.5 ml-1 transition-colors text-[9px] font-mono">Auto</button>
-        </div>
-      </div>
-
       {/* ── Bottom-Center: Context Help ───────────────────────────────────── */}
       <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-10">
         <div className="bg-black/70 backdrop-blur-md text-white/50 text-[10px] px-3 py-1.5 rounded-lg border border-white/[0.06] font-mono">
@@ -833,12 +737,12 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
 
 // ── Toolbar Button ───────────────────────────────────────────────────────────
 
-function ToolbarButton({ icon, label, active, onClick, accent }: {
-  icon: React.ReactNode; label: string; active?: boolean; onClick: () => void; accent?: 'green' | 'lavender';
+function ToolbarButton({ icon, label, active, onClick }: {
+  icon: React.ReactNode; label: string; active?: boolean; onClick: () => void;
 }) {
-  const color = accent === 'lavender'
-    ? (active ? 'bg-[#a4a4ff]/15 text-[#a4a4ff] border-[#a4a4ff]/20' : 'bg-black/70 text-white/50 border-white/[0.06] hover:text-white hover:bg-[#081717]')
-    : (active ? 'bg-[#35c889]/15 text-[#35c889] border-[#35c889]/20' : 'bg-black/70 text-white/50 border-white/[0.06] hover:text-white hover:bg-[#081717]');
+  const color = active
+    ? 'bg-[#35c889]/15 text-[#35c889] border-[#35c889]/20'
+    : 'bg-black/70 text-white/50 border-white/[0.06] hover:text-white hover:bg-[#081717]';
   return (
     <button
       onClick={onClick}
