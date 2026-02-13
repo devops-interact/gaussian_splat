@@ -211,6 +211,8 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
     active: false, keys: new Set(), isLocked: false, euler: new THREE.Euler(0, 0, 0, 'YXZ'), rafId: null,
   });
 
+  const metadataRef = useRef<ModelMetadata | null>(null);
+
   const [mode, setMode] = useState<ViewerMode>('orbit');
   const [showHelp, setShowHelp] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -255,7 +257,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
 
         raycastDataRef.current.positions = meta.positions;
 
-        onModelMetadata?.({
+        const modelMeta: ModelMetadata = {
           pointCount: meta.vertexCount,
           fileSize: buffer.byteLength,
           boundingBox: meta.boundingBox,
@@ -263,7 +265,9 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
           hasOpacity: meta.hasOpacity,
           properties: meta.properties,
           format: 'gaussian_splat',
-        });
+        };
+        metadataRef.current = modelMeta;
+        onModelMetadata?.(modelMeta);
 
         // 3. Create blob URL
         const blob = new Blob([buffer], { type: 'application/octet-stream' });
@@ -284,12 +288,34 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         raycastDataRef.current.points = ptsMesh;
 
         // 5. Create standalone Viewer (manages its own canvas + render loop)
+        // Auto-position camera based on bounding box diagonal
+        const bbMin = meta.boundingBox.min;
+        const bbMax = meta.boundingBox.max;
+        const diagonal = Math.sqrt(
+          (bbMax[0] - bbMin[0]) ** 2 +
+          (bbMax[1] - bbMin[1]) ** 2 +
+          (bbMax[2] - bbMin[2]) ** 2,
+        );
+        const camDist = Math.max(diagonal * 1.2, 3); // at least 3 units away
+        console.log(`[GS3D] BBox diagonal=${diagonal.toFixed(2)}, camDist=${camDist.toFixed(2)}`);
+
+        // Create a custom renderer with preserveDrawingBuffer for snapshot support
+        const container = containerRef.current!;
+        const customRenderer = new THREE.WebGLRenderer({
+          antialias: false,
+          precision: 'highp',
+          preserveDrawingBuffer: true,
+        });
+        customRenderer.setPixelRatio(window.devicePixelRatio);
+        customRenderer.setSize(container.clientWidth, container.clientHeight);
+
         console.log('[GS3D] Creating standalone Viewer...');
         const viewer = new Viewer({
           cameraUp: [0, 1, 0],
-          initialCameraPosition: [0, 2, 5],
+          initialCameraPosition: [0, camDist * 0.3, camDist * 0.8],
           initialCameraLookAt: [0, 0, 0],
-          rootElement: containerRef.current!,
+          rootElement: container,
+          renderer: customRenderer,
           threeScene: threeScene,
           selfDrivenMode: true,
           useBuiltInControls: true,
@@ -307,7 +333,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         await viewer.addSplatScene(blobUrl, {
           splatAlphaRemovalThreshold: 5,
           showLoadingUI: false,
-          format: 0, // PLY format
+          format: 2, // SceneFormat.Ply (0=Splat, 1=KSplat, 2=Ply, 3=Spz)
           position: [-meta.center[0], -meta.center[1], -meta.center[2]],
           rotation: [0, 0, 0, 1],
           scale: [1, 1, 1],
@@ -547,21 +573,141 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
   const handleClearMeasure = useCallback(() => { setMeasurePoints([]); setMeasuredDistance(null); }, []);
 
   const handleSnapshot = useCallback(() => {
-    const canvas = containerRef.current?.querySelector('canvas');
-    if (!canvas) return;
-    // The Viewer's renderer may not have preserveDrawingBuffer.
-    // We request a render and capture immediately.
+    const glCanvas = containerRef.current?.querySelector('canvas') as HTMLCanvasElement | null;
+    if (!glCanvas) return;
+
+    // Force a render pass so the draw buffer is fresh (safety for preserveDrawingBuffer edge cases)
     try {
+      const v = viewerRef.current;
+      if (v) { v.update(); v.render(); }
+    } catch { /* ignore */ }
+
+    try {
+      const w = glCanvas.width;
+      const h = glCanvas.height;
+      const dpr = window.devicePixelRatio || 1;
+
+      // Create offscreen canvas at same resolution
+      const offscreen = document.createElement('canvas');
+      offscreen.width = w;
+      offscreen.height = h;
+      const ctx = offscreen.getContext('2d');
+      if (!ctx) return;
+
+      // 1. Draw the 3D render
+      ctx.drawImage(glCanvas, 0, 0);
+
+      // 2. Build watermark lines
+      const meta = metadataRef.current;
+      const lines: string[] = [];
+
+      if (meta) {
+        lines.push(`Points: ${meta.pointCount.toLocaleString()}`);
+        lines.push(`Size: ${(meta.fileSize / 1e6).toFixed(1)} MB`);
+        lines.push(`Colors: ${meta.hasColors ? 'Yes' : 'No'}  |  Opacity: ${meta.hasOpacity ? 'Yes' : 'No'}`);
+      }
+
+      if (measuredDistance !== null) {
+        lines.push(`Measurement: ${measuredDistance.toFixed(3)} m`);
+      }
+      if (calibration) {
+        lines.push(`Scale: 1 unit = ${calibration.scaleFactor.toFixed(3)} m`);
+      }
+
+      const now = new Date();
+      lines.push(now.toISOString().replace('T', '  ').slice(0, 21));
+
+      // 3. Compute panel dimensions (scale font to canvas resolution)
+      const baseFontSize = Math.max(11, Math.round(12 * dpr));
+      const titleFontSize = Math.max(12, Math.round(13 * dpr));
+      const lineHeight = Math.round(baseFontSize * 1.7);
+      const padX = Math.round(14 * dpr);
+      const padY = Math.round(12 * dpr);
+      const margin = Math.round(16 * dpr);
+
+      ctx.font = `${baseFontSize}px monospace`;
+      let maxTextWidth = 0;
+      for (const line of lines) {
+        const tw = ctx.measureText(line).width;
+        if (tw > maxTextWidth) maxTextWidth = tw;
+      }
+
+      const title = 'Gaussian Splat Snapshot';
+      ctx.font = `bold ${titleFontSize}px monospace`;
+      const titleWidth = ctx.measureText(title).width;
+      if (titleWidth > maxTextWidth) maxTextWidth = titleWidth;
+
+      const panelW = maxTextWidth + padX * 2;
+      const panelH = titleFontSize + lineHeight * lines.length + padY * 2 + Math.round(6 * dpr);
+      const panelX = margin;
+      const panelY = h - panelH - margin;
+
+      // 4. Draw semi-transparent panel background
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
+      ctx.beginPath();
+      const r = Math.round(8 * dpr);
+      ctx.moveTo(panelX + r, panelY);
+      ctx.lineTo(panelX + panelW - r, panelY);
+      ctx.quadraticCurveTo(panelX + panelW, panelY, panelX + panelW, panelY + r);
+      ctx.lineTo(panelX + panelW, panelY + panelH - r);
+      ctx.quadraticCurveTo(panelX + panelW, panelY + panelH, panelX + panelW - r, panelY + panelH);
+      ctx.lineTo(panelX + r, panelY + panelH);
+      ctx.quadraticCurveTo(panelX, panelY + panelH, panelX, panelY + panelH - r);
+      ctx.lineTo(panelX, panelY + r);
+      ctx.quadraticCurveTo(panelX, panelY, panelX + r, panelY);
+      ctx.closePath();
+      ctx.fill();
+
+      // Subtle border
+      ctx.strokeStyle = 'rgba(53, 200, 137, 0.25)';
+      ctx.lineWidth = Math.max(1, dpr);
+      ctx.stroke();
+
+      // 5. Draw title
+      let textY = panelY + padY + titleFontSize;
+      ctx.font = `bold ${titleFontSize}px monospace`;
+      ctx.fillStyle = '#35c889';
+      ctx.fillText(title, panelX + padX, textY);
+
+      // 6. Draw info lines
+      textY += Math.round(6 * dpr);
+      ctx.font = `${baseFontSize}px monospace`;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+
+      for (const line of lines) {
+        textY += lineHeight;
+        // Highlight measurement value in accent color
+        if (line.startsWith('Measurement:')) {
+          ctx.fillStyle = '#35c889';
+          ctx.fillText(line, panelX + padX, textY);
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+        } else if (line.startsWith('Scale:')) {
+          ctx.fillStyle = '#a4a4ff';
+          ctx.fillText(line, panelX + padX, textY);
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+        } else {
+          ctx.fillText(line, panelX + padX, textY);
+        }
+      }
+
+      // 7. Small branding in top-right corner
+      const brand = 'Metroa Labs';
+      ctx.font = `bold ${Math.max(10, Math.round(10 * dpr))}px monospace`;
+      ctx.fillStyle = 'rgba(53, 200, 137, 0.4)';
+      const brandW = ctx.measureText(brand).width;
+      ctx.fillText(brand, w - brandW - margin, margin + Math.round(10 * dpr));
+
+      // 8. Download
       const a = document.createElement('a');
-      a.href = (canvas as HTMLCanvasElement).toDataURL('image/png');
+      a.href = offscreen.toDataURL('image/png');
       a.download = `gaussian-splat-snapshot-${Date.now()}.png`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-    } catch {
-      console.warn('Snapshot failed — renderer may lack preserveDrawingBuffer');
+    } catch (err) {
+      console.warn('Snapshot failed:', err);
     }
-  }, []);
+  }, [measuredDistance, calibration]);
 
   const handleReset = useCallback(() => {
     setMode('orbit');
