@@ -70,6 +70,14 @@ class Settings(BaseSettings):
     MIN_VIDEO_RESOLUTION: int = 480  # Minimum height
     MAX_VIDEO_RESOLUTION: int = 4096  # Maximum dimension
     
+    # Database (SQLite in storage dir)
+    DATABASE_URL: str = ""
+    
+    # Auth (JWT)
+    JWT_SECRET_KEY: str = "gaussian-splat-demo-secret-change-in-production"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    
     # API settings
     MAX_UPLOAD_SIZE: int = 500 * 1024 * 1024  # 500MB
     ALLOWED_EXTENSIONS: List[str] = [".mp4", ".mov", ".avi", ".webm"]
@@ -91,7 +99,11 @@ def get_preset_config(preset: QualityPreset) -> PresetConfig:
 def get_settings() -> Settings:
     settings = Settings()
     # Create directories
-    for dir_path in [settings.UPLOADS_DIR, settings.FRAMES_DIR, 
+    for dir_path in [settings.UPLOADS_DIR, settings.FRAMES_DIR,
                      settings.MODELS_DIR, settings.LOGS_DIR]:
         dir_path.mkdir(parents=True, exist_ok=True)
+    # Set database URL if not provided (SQLite in storage)
+    if not settings.DATABASE_URL:
+        db_path = settings.STORAGE_DIR / "data.db"
+        settings.DATABASE_URL = f"sqlite:///{db_path}"
     return settings

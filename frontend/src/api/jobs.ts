@@ -7,6 +7,8 @@ const API_JOBS_URL = `${API_BASE_URL}/api/jobs`;
 
 export interface UploadResponse {
   job_id: string;
+  scan_id?: number;
+  project_id?: number;
   status: string;
   quality_preset: string;
   estimated_minutes: number;
@@ -19,14 +21,27 @@ export interface UploadResponse {
   };
 }
 
-export const uploadVideo = async (file: File, qualityPreset: string = 'balanced'): Promise<UploadResponse> => {
+const getAuthHeaders = () => {
+  const token = localStorage.getItem('token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
+export const uploadVideo = async (
+  file: File,
+  qualityPreset: string = 'balanced',
+  projectId?: number,
+  scanId?: number
+): Promise<UploadResponse> => {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('quality_preset', qualityPreset);
+  if (projectId != null) formData.append('project_id', String(projectId));
+  if (scanId != null) formData.append('scan_id', String(scanId));
 
   const response = await axios.post(`${API_JOBS_URL}/upload`, formData, {
     headers: {
       'Content-Type': 'multipart/form-data',
+      ...getAuthHeaders(),
     },
   });
 

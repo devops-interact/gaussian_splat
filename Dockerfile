@@ -77,6 +77,11 @@ RUN python3.10 -c "import torch; print(f'PyTorch {torch.__version__} available, 
 # Clone LongSplat for unposed 3D reconstruction from casual long videos
 ARG LONGSPLAT_REPO=https://github.com/NVlabs/LongSplat.git
 RUN git clone --recursive ${LONGSPLAT_REPO} /opt/LongSplat
+
+# Patch LongSplat train.py: guard solvePnPRansac when < 4 point correspondences (OpenCV assertion)
+COPY patches/longsplat-solvepnp-guard.patch /tmp/
+RUN patch -p1 -d /opt/LongSplat < /tmp/longsplat-solvepnp-guard.patch
+
 WORKDIR /opt/LongSplat
 
 # Install LongSplat dependencies explicitly from its requirements.txt
@@ -209,6 +214,9 @@ RUN echo "=== COMPREHENSIVE DEPENDENCY VERIFICATION ===" && \
     echo "5. Backend API dependencies..." && \
     python3.10 -c "import aiofiles; print('✓ aiofiles: OK')" && \
     python3.10 -c "import uvicorn; print('✓ uvicorn: OK')" && \
+    python3.10 -c "import sqlalchemy; print('✓ sqlalchemy: OK')" && \
+    python3.10 -c "import passlib; print('✓ passlib: OK')" && \
+    python3.10 -c "from jose import jwt; print('✓ python-jose: OK')" && \
     echo "6. LongSplat scripts and structure..." && \
     ls -la /opt/LongSplat/train.py && \
     ls -la /opt/LongSplat/convert_3dgs.py && \

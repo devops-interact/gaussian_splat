@@ -206,7 +206,7 @@ function parsePLYForMeta(buffer: ArrayBuffer): PLYMeta {
 export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
-  const raycastDataRef = useRef<{ positions: Float32Array; points: THREE.Points | null }>({ positions: new Float32Array(0), points: null });
+
   const walkthroughRef = useRef<{ active: boolean; keys: Set<string>; isLocked: boolean; euler: THREE.Euler; rafId: number | null }>({
     active: false, keys: new Set(), isLocked: false, euler: new THREE.Euler(0, 0, 0, 'YXZ'), rafId: null,
   });
@@ -255,7 +255,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         if (meta.vertexCount === 0) throw new Error('No visible points in PLY');
         console.log(`[GS3D] PLY parsed: ${meta.vertexCount}/${meta.totalVertices} verts, center=[${meta.center.map(v => v.toFixed(2))}]`);
 
-        raycastDataRef.current.positions = meta.positions;
+
 
         const modelMeta: ModelMetadata = {
           pointCount: meta.vertexCount,
@@ -279,13 +279,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         grid.position.y = -0.01;
         threeScene.add(grid);
 
-        // Invisible points for measurement raycasting
-        const ptsGeo = new THREE.BufferGeometry();
-        ptsGeo.setAttribute('position', new THREE.Float32BufferAttribute(meta.positions, 3));
-        ptsGeo.computeBoundingSphere();
-        const ptsMesh = new THREE.Points(ptsGeo, new THREE.PointsMaterial({ size: 0.01, visible: false }));
-        threeScene.add(ptsMesh);
-        raycastDataRef.current.points = ptsMesh;
+
 
         // 5. Create standalone Viewer (manages its own canvas + render loop)
         // Auto-position camera based on bounding box diagonal
@@ -444,35 +438,43 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
     const canvas = containerRef.current?.querySelector('canvas');
     if (!viewer || !canvas) return;
 
-    const camera = (viewer as unknown as { camera?: THREE.PerspectiveCamera }).camera;
-    if (!camera) return;
+    // Access the library's built-in raycaster and splatMesh
+    // These operate in the correct coordinate space matching the rendered scene
+    const viewerAny = viewer as unknown as {
+      camera?: THREE.PerspectiveCamera;
+      raycaster?: {
+        setFromCameraAndScreenPosition: (camera: THREE.Camera, screenPos: THREE.Vector2, screenDims: THREE.Vector2) => void;
+        intersectSplatMesh: (splatMesh: THREE.Object3D, outHits?: { origin: THREE.Vector3; distance: number; splatIndex: number }[]) => { origin: THREE.Vector3; distance: number; splatIndex: number }[];
+      };
+      splatMesh?: THREE.Object3D;
+      getRenderDimensions?: (out: THREE.Vector2) => void;
+    };
 
-    const raycaster = new THREE.Raycaster();
-    raycaster.params.Points = { threshold: 0.1 };
+    const camera = viewerAny.camera;
+    const gsRaycaster = viewerAny.raycaster;
+    const splatMesh = viewerAny.splatMesh;
+    if (!camera || !gsRaycaster || !splatMesh) return;
 
     const onClick = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      const mouse = new THREE.Vector2(
-        ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -((e.clientY - rect.top) / rect.height) * 2 + 1,
-      );
-      raycaster.setFromCamera(mouse, camera);
+      // Use screen-space pixel coordinates — the library handles NDC conversion internally
+      const mousePos = new THREE.Vector2(e.offsetX, e.offsetY);
+      const renderDims = new THREE.Vector2();
 
-      // Raycast against invisible points
-      const ptsMesh = raycastDataRef.current.points;
-      if (ptsMesh) {
-        const intersects = raycaster.intersectObject(ptsMesh, false);
-        if (intersects.length > 0) {
-          handleAddMeasurePoint(intersects[0].point.clone());
-          return;
-        }
+      if (viewerAny.getRenderDimensions) {
+        viewerAny.getRenderDimensions(renderDims);
+      } else {
+        // Fallback to canvas size
+        renderDims.set(canvas.clientWidth, canvas.clientHeight);
       }
 
-      // Fallback: ground plane
-      const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
-      const target = new THREE.Vector3();
-      raycaster.ray.intersectPlane(plane, target);
-      if (target) handleAddMeasurePoint(target.clone());
+      gsRaycaster.setFromCameraAndScreenPosition(camera, mousePos, renderDims);
+
+      const hits: { origin: THREE.Vector3; distance: number; splatIndex: number }[] = [];
+      gsRaycaster.intersectSplatMesh(splatMesh, hits);
+
+      if (hits.length > 0) {
+        handleAddMeasurePoint(hits[0].origin.clone());
+      }
     };
 
     canvas.addEventListener('click', onClick);

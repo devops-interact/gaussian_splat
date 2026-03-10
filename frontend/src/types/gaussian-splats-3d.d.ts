@@ -56,6 +56,13 @@ declare module '@mkkellogg/gaussian-splats-3d' {
     controls: unknown;
     rootElement: HTMLElement;
     splatMesh: THREE.Object3D;
+
+    // Built-in raycaster for splat intersection
+    raycaster: {
+      setFromCameraAndScreenPosition(camera: THREE.Camera, screenPosition: THREE.Vector2, screenDimensions: THREE.Vector2): void;
+      intersectSplatMesh(splatMesh: THREE.Object3D, outHits?: Array<{ origin: THREE.Vector3; distance: number; splatIndex: number }>): Array<{ origin: THREE.Vector3; distance: number; splatIndex: number }>;
+    };
+    getRenderDimensions(outDimensions: THREE.Vector2): void;
   }
 
   /**

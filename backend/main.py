@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import List
 
 from api.jobs import router as jobs_router
+from api.auth import router as auth_router
+from api.projects import router as projects_router
+from api.scans import router as scans_router
 from core.config import get_settings, QUALITY_PRESETS, QualityPreset
 from core.models import PresetInfo
 from core.logging_config import setup_logging
@@ -20,6 +23,10 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
+
+# Initialize database and seed demo user
+from database import init_db
+init_db()
 
 app = FastAPI(title="Gaussian Splatting Room Reconstruction API")
 
@@ -59,6 +66,9 @@ async def ensure_cors_headers(request: Request, call_next):
     return response
 
 # Include routers
+app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+app.include_router(projects_router, prefix="/api/projects", tags=["projects"])
+app.include_router(scans_router, prefix="/api/projects", tags=["scans"])
 app.include_router(jobs_router, prefix="/api/jobs", tags=["jobs"])
 
 # Serve static files (generated 3D models)

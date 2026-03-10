@@ -47,3 +47,5 @@ gaussian-splatting/
 
 # Debug artifacts
 temp_debug/
+*.db
+

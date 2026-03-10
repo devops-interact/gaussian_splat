@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+# Ensure we run from project root (where Dockerfile lives)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}"
+
 # Colors for output
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -25,6 +29,38 @@ if ! docker info > /dev/null 2>&1; then
 fi
 
 echo -e "${GREEN}✓ Docker is running${NC}"
+
+# ============================================
+# STEP 0: PRE-BUILD VALIDATION
+# ============================================
+echo ""
+echo -e "${YELLOW}=== STEP 0: PRE-BUILD VALIDATION ===${NC}"
+
+# Ensure frontend deps are installed (react-router-dom, etc.)
+echo -e "${BLUE}Installing frontend dependencies...${NC}"
+cd frontend && npm ci 2>/dev/null || npm install
+cd ..
+echo -e "${GREEN}✓ Frontend deps ready${NC}"
+
+# Verify key backend files exist (auth, projects, scans, database)
+for f in backend/database.py backend/models/db_models.py backend/api/auth.py backend/api/projects.py backend/api/scans.py; do
+    if [ ! -f "$f" ]; then
+        echo -e "${RED}❌ Missing required file: $f${NC}"
+        exit 1
+    fi
+done
+echo -e "${GREEN}✓ Backend structure OK${NC}"
+
+# Verify requirements.txt has auth/db deps
+grep -q "sqlalchemy" backend/requirements.txt || { echo -e "${RED}❌ sqlalchemy missing from requirements.txt${NC}"; exit 1; }
+grep -q "passlib" backend/requirements.txt || { echo -e "${RED}❌ passlib missing from requirements.txt${NC}"; exit 1; }
+grep -q "python-jose" backend/requirements.txt || { echo -e "${RED}❌ python-jose missing from requirements.txt${NC}"; exit 1; }
+echo -e "${GREEN}✓ Backend requirements OK${NC}"
+
+# Verify frontend has react-router-dom
+grep -q "react-router-dom" frontend/package.json || { echo -e "${RED}❌ react-router-dom missing from frontend/package.json${NC}"; exit 1; }
+echo -e "${GREEN}✓ Frontend deps OK${NC}"
+echo ""
 
 # ============================================
 # STEP 1: PRUNE LOCAL DOCKER (ALWAYS!)
@@ -115,11 +151,13 @@ if [ ${PIPESTATUS[0]} -eq 0 ]; then
     echo -e "  │ Container Image    │ ${FULL_IMAGE}              │"
     echo -e "  │ GPU Type           │ A40 (48GB VRAM) ⭐ REQUIRED                  │"
     echo -e "  │ Container Disk     │ 20 GB                                        │"
-    echo -e "  │ Volume Disk        │ 150 GB (frames + 3D models)                  │"
-    echo -e "  │ Volume Mount Path  │ /app/storage                                 │"
+    echo -e "  │ Volume Disk        │ 150 GB (frames + 3D models + SQLite DB)      │"
+    echo -e "  │ Volume Mount Path  │ /app/storage (REQUIRED for DB + jobs)         │"
     echo -e "  │ Expose HTTP Ports  │ 8000                                         │"
     echo -e "  │ Expose TCP Ports   │ 22                                           │"
     echo -e "  └────────────────────┴──────────────────────────────────────────────┘"
+    echo ""
+    echo -e "${BLUE}Features: Auth (demo user), Projects, Scans CRUD, 3D reconstruction${NC}"
     echo ""
     echo -e "${GREEN}Next Steps:${NC}"
     echo -e "1. Go to RunPod.io → Pods → Deploy"

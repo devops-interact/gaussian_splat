@@ -51,37 +51,42 @@ export default function JobStatus({ jobId, onComplete, embedded }: JobStatusProp
     return () => clearInterval(timer);
   }, [startTime, status]);
 
-  // Poll job status
+  // Poll job status (initial fetch + interval)
   useEffect(() => {
-    if (status === JobStatusEnum.COMPLETED || status === JobStatusEnum.ERROR) {
-      return;
-    }
-
-    const interval = setInterval(async () => {
+    let cancelled = false;
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    const fetchStatus = async (): Promise<boolean> => {
       try {
         const response: JobStatusResponse = await getJobStatus(jobId);
+        if (cancelled) return true;
         setStatus(response.status);
         setProgress(response.progress);
         setError(response.error_message || null);
-
-        if (response.quality_preset) {
-          setQualityPreset(response.quality_preset);
-        }
-        if (response.estimated_minutes) {
-          setEstimatedMinutes(response.estimated_minutes);
-        }
-
+        if (response.quality_preset) setQualityPreset(response.quality_preset);
+        if (response.estimated_minutes) setEstimatedMinutes(response.estimated_minutes);
         if (response.status === JobStatusEnum.COMPLETED && response.model_url) {
           onComplete(response.model_url, response.model_url_obj ?? undefined);
-          clearInterval(interval);
+          return true;
         }
       } catch (err) {
-        console.error('Error fetching job status:', err);
+        if (!cancelled) console.error('Error fetching job status:', err);
       }
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [jobId, status, onComplete]);
+      return false;
+    };
+    fetchStatus().then((done) => {
+      if (!done && !cancelled) {
+        intervalId = setInterval(() => {
+          fetchStatus().then((completed) => {
+            if (completed && intervalId) clearInterval(intervalId);
+          });
+        }, 2000);
+      }
+    });
+    return () => {
+      cancelled = true;
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [jobId, onComplete]);
 
   const isComplete = status === JobStatusEnum.COMPLETED;
   const isError = status === JobStatusEnum.ERROR;

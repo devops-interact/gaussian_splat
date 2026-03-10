@@ -2,17 +2,23 @@
 API endpoints for job management
 """
 import logging
-from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Form
+from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Form, Depends
 from fastapi.responses import FileResponse
 from pathlib import Path
 from typing import Optional
+from sqlalchemy.orm import Session
+
 from core.models import Job, JobStatus, VideoValidation
 from core.config import get_settings, QualityPreset, QUALITY_PRESETS
 from core.pipeline import process_job
 from jobs.job_manager import get_job_manager
 from services.video.validate import validate_video, get_video_info
+from database import get_db
+from models.db_models import Project, Scan
+from api.auth import get_current_user_optional
+from models.db_models import User
+
 import aiofiles
-import uuid
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -23,14 +29,15 @@ settings = get_settings()
 async def upload_video(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    quality_preset: str = Form(default="balanced")
+    quality_preset: str = Form(default="balanced"),
+    project_id: Optional[int] = Form(default=None),
+    scan_id: Optional[int] = Form(default=None),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: Session = Depends(get_db),
 ):
     """
-    Upload a video file and start processing
-    
-    Args:
-        file: Video file to upload
-        quality_preset: Quality preset (fast, balanced, quality)
+    Upload a video file and start processing.
+    Optionally link to a project/scan: pass project_id and scan_id (or project_id only to create scan on the fly).
     """
     # Validate preset
     try:
@@ -102,11 +109,34 @@ async def upload_video(
         job.status = JobStatus.UPLOADED
         await job_manager.update_job(job)
         
+        # Link job to scan if project/scan provided (requires auth)
+        scan = None
+        if project_id:
+            if not current_user:
+                raise HTTPException(status_code=401, detail="Authentication required to link to project")
+            project = db.query(Project).filter(Project.id == project_id, Project.user_id == current_user.id).first()
+            if not project:
+                raise HTTPException(status_code=404, detail="Project not found")
+            if scan_id:
+                scan = db.query(Scan).filter(Scan.id == scan_id, Scan.project_id == project_id).first()
+                if not scan:
+                    raise HTTPException(status_code=404, detail="Scan not found")
+            else:
+                scan = Scan(project_id=project_id, job_id=job.job_id, name="")
+                db.add(scan)
+                db.commit()
+                db.refresh(scan)
+            if scan:
+                scan.job_id = job.job_id
+                db.commit()
+        
         # Start background processing
         background_tasks.add_task(process_job, job)
         
         response = {
             "job_id": job.job_id,
+            "scan_id": scan.id if scan else None,
+            "project_id": project_id if scan else None,
             "status": job.status,
             "quality_preset": preset.value,
             "estimated_minutes": preset_config.estimated_minutes,

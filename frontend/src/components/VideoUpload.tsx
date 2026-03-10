@@ -22,8 +22,10 @@ const PRESETS = [
 ];
 
 interface VideoUploadProps {
-  onUploadSuccess: (jobId: string) => void;
+  onUploadSuccess: (jobId: string, scanId?: number) => void;
   disabled?: boolean;
+  projectId?: number;
+  scanId?: number;
 }
 
 interface UploadResult {
@@ -36,7 +38,7 @@ interface UploadResult {
   };
 }
 
-export default function VideoUpload({ onUploadSuccess, disabled }: VideoUploadProps) {
+export default function VideoUpload({ onUploadSuccess, disabled, projectId, scanId }: VideoUploadProps) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -62,7 +64,7 @@ export default function VideoUpload({ onUploadSuccess, disabled }: VideoUploadPr
     setUploading(true);
 
     try {
-      const result = await uploadVideo(file, selectedPreset) as UploadResult;
+      const result = await uploadVideo(file, selectedPreset, projectId, scanId) as UploadResult & { scan_id?: number };
 
       // Show warnings if any
       if (result.warnings && result.warnings.length > 0) {
@@ -74,7 +76,7 @@ export default function VideoUpload({ onUploadSuccess, disabled }: VideoUploadPr
         setVideoInfo(result.video_info);
       }
 
-      onUploadSuccess(result.job_id);
+      onUploadSuccess(result.job_id, result.scan_id);
     } catch (err: any) {
       console.error('Upload error:', err);
 
