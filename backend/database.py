@@ -40,20 +40,28 @@ def init_db():
 
 def _seed_demo_user():
     """Seed demo user if not exists"""
-    from passlib.context import CryptContext
-    from models.db_models import User
-
-    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-    db = SessionLocal()
+    import logging
+    logger = logging.getLogger(__name__)
     try:
-        existing = db.query(User).filter(User.email == "demo@gaussian-splat.demo").first()
-        if not existing:
-            demo_user = User(
-                email="demo@gaussian-splat.demo",
-                password_hash=pwd_context.hash("demo123"),
-                is_demo=True,
-            )
-            db.add(demo_user)
-            db.commit()
-    finally:
-        db.close()
+        from passlib.context import CryptContext
+        from models.db_models import User
+
+        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+        db = SessionLocal()
+        try:
+            existing = db.query(User).filter(User.email == "demo@gaussian-splat.demo").first()
+            if not existing:
+                demo_user = User(
+                    email="demo@gaussian-splat.demo",
+                    password_hash=pwd_context.hash("demo123"),
+                    is_demo=True,
+                )
+                db.add(demo_user)
+                db.commit()
+                logger.info("Demo user seeded successfully")
+            else:
+                logger.info("Demo user already exists")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"Failed to seed demo user: {e}", exc_info=True)
