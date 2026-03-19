@@ -97,13 +97,13 @@ export default function JobStatus({ jobId, onComplete, embedded }: JobStatusProp
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle className="flex items-center">
-            {isActive && <Loader2 className="w-5 h-5 mr-2 animate-spin text-[#35c889]" />}
-            {isComplete && <CheckCircle className="w-5 h-5 mr-2 text-[#35c889]" />}
+            {isActive && <Loader2 className="w-5 h-5 mr-2 animate-spin text-[#7c3aed]" />}
+            {isComplete && <CheckCircle className="w-5 h-5 mr-2 text-[#7c3aed]" />}
             {isError && <AlertOctagon className="w-5 h-5 mr-2 text-red-400" />}
             Processing Status
           </CardTitle>
           {isActive && (
-            <div className="font-mono text-xs text-[#35c889] bg-[#35c889]/[0.08] px-2 py-1 rounded border border-[#35c889]/[0.15]">
+            <div className="font-mono text-xs text-[#7c3aed] bg-[#7c3aed]/[0.08] px-2 py-1 rounded border border-[#7c3aed]/[0.15]">
               Running
             </div>
           )}
@@ -117,26 +117,26 @@ export default function JobStatus({ jobId, onComplete, embedded }: JobStatusProp
         {/* Info Grid */}
         {(qualityPreset || isActive) && (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-            <div className="p-3 rounded-lg bg-[#060606] border border-white/[0.06]">
+            <div className="p-3 rounded-lg bg-[#08080f] border border-white/[0.06]">
               <span className="text-gray-500 block text-xs mb-1">Status</span>
               <span className="font-medium text-white flex items-center">
                 {STATUS_LABELS[status]}
               </span>
             </div>
 
-            <div className="p-3 rounded-lg bg-[#060606] border border-white/[0.06]">
+            <div className="p-3 rounded-lg bg-[#08080f] border border-white/[0.06]">
               <span className="text-gray-500 block text-xs mb-1">Time Elapsed</span>
               <span className="font-mono text-white flex items-center">
-                <Clock className="w-3 h-3 mr-2 text-[#35c889]/40" />
+                <Clock className="w-3 h-3 mr-2 text-[#7c3aed]/40" />
                 {elapsedTime}
               </span>
             </div>
 
             {qualityPreset && (
-              <div className="p-3 rounded-lg bg-[#060606] border border-white/[0.06]">
+              <div className="p-3 rounded-lg bg-[#08080f] border border-white/[0.06]">
                 <span className="text-gray-500 block text-xs mb-1">Quality</span>
                 <span className="font-medium text-white flex items-center">
-                  <Settings className="w-2.5 h-2.5 mr-2 text-[#35c889]/40" />
+                  <Settings className="w-2.5 h-2.5 mr-2 text-[#7c3aed]/40" />
                   {PRESET_LABELS[qualityPreset] || qualityPreset}
                 </span>
               </div>
@@ -149,11 +149,11 @@ export default function JobStatus({ jobId, onComplete, embedded }: JobStatusProp
           <div className="space-y-2">
             <div className="flex justify-between text-xs text-gray-500">
               <span>Progress</span>
-              <span className="text-[#35c889]/70">{Math.round(progress * 100)}%</span>
+              <span className="text-[#7c3aed]/70">{Math.round(progress * 100)}%</span>
             </div>
-            <div className="h-2 w-full bg-[#060606] rounded-full overflow-hidden border border-white/[0.04]">
+            <div className="h-2 w-full bg-[#08080f] rounded-full overflow-hidden border border-white/[0.04]">
               <div
-                className="h-full bg-gradient-to-r from-[#35c889]/60 to-[#35c889] transition-all duration-500 ease-out rounded-full"
+                className="h-full bg-gradient-to-r from-[#7c3aed]/60 to-[#7c3aed] transition-all duration-500 ease-out rounded-full"
                 style={{ width: `${progress * 100}%` }}
               />
             </div>

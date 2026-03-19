@@ -128,14 +128,14 @@ export default function VideoUpload({ onUploadSuccess, disabled, projectId, scan
                 className={cn(
                   "flex flex-col items-start p-3 rounded-lg border text-left transition-all duration-200",
                   selectedPreset === preset.id
-                    ? "border-[#35c889]/25 bg-[#35c889]/[0.06] text-[#35c889]"
-                    : "border-white/[0.06] bg-[#060606]/50 text-gray-400 hover:border-[#35c889]/[0.12] hover:bg-[#081717]/50",
+                    ? "border-[#7c3aed]/25 bg-[#7c3aed]/[0.06] text-[#7c3aed]"
+                    : "border-white/[0.06] bg-[#08080f]/50 text-gray-400 hover:border-[#7c3aed]/[0.12] hover:bg-[#0d0b1a]/50",
                   (disabled || uploading) && "opacity-50 cursor-not-allowed"
                 )}
               >
                 <div className="flex items-center justify-between w-full mb-1">
                   <span className="font-semibold text-sm">{preset.name}</span>
-                  {selectedPreset === preset.id && <CheckCircle className="w-3 h-3 text-[#35c889]" />}
+                  {selectedPreset === preset.id && <CheckCircle className="w-3 h-3 text-[#7c3aed]" />}
                 </div>
                 <span className="text-xs opacity-70 mb-2 flex items-center">
                   <Clock className="w-3 h-3 mr-1" /> {preset.time}
@@ -150,11 +150,11 @@ export default function VideoUpload({ onUploadSuccess, disabled, projectId, scan
         <div
           className={cn(
             "border-2 border-dashed rounded-xl p-5 flex flex-col items-center justify-center text-center transition-all",
-            "border-white/[0.06] bg-[#060606]/30 hover:bg-[#081717]/40 hover:border-[#35c889]/[0.15]",
+            "border-white/[0.06] bg-[#08080f]/30 hover:bg-[#0d0b1a]/40 hover:border-[#7c3aed]/[0.15]",
             (disabled || uploading) && "opacity-50 pointer-events-none"
           )}
         >
-          <div className="w-10 h-10 rounded-full bg-[#081717] flex items-center justify-center mb-3 border border-white/[0.06]">
+          <div className="w-10 h-10 rounded-full bg-[#0d0b1a] flex items-center justify-center mb-3 border border-white/[0.06]">
             <Upload className="w-5 h-5 text-gray-400" />
           </div>
 
@@ -182,7 +182,7 @@ export default function VideoUpload({ onUploadSuccess, disabled, projectId, scan
 
         {/* Status Messages */}
         {videoInfo && (
-          <div className="flex items-center p-3 rounded-lg bg-[#a4a4ff]/[0.06] border border-[#a4a4ff]/[0.12] text-[#a4a4ff] text-sm">
+          <div className="flex items-center p-3 rounded-lg bg-[#a78bfa]/[0.06] border border-[#a78bfa]/[0.12] text-[#a78bfa] text-sm">
             <FileVideo className="w-4 h-4 mr-2" />
             <span>
               Video: {videoInfo.duration.toFixed(1)}s • {videoInfo.resolution} • {videoInfo.fps.toFixed(1)} fps

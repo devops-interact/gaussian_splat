@@ -25,7 +25,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   };
 
   return (
-    <div className="min-h-screen w-full bg-black flex">
+    <div className="h-screen w-full bg-black flex overflow-hidden">
       <Sidebar
         activeItem={activeItem}
         onNavigate={handleNavigate}

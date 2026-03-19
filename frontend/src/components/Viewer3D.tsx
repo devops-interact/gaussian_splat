@@ -750,7 +750,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
   if (!modelUrl) return null;
 
   return (
-    <div className="w-full h-full relative group bg-[#060606] rounded-xl overflow-hidden">
+    <div className="w-full h-full relative group bg-[#08080f] rounded-xl overflow-hidden">
       {/* Viewer container — the Viewer class creates its own <canvas> inside */}
       <div ref={containerRef} className="w-full h-full" />
 
@@ -893,7 +893,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       {/* ── Help Panel ────────────────────────────────────────────────────── */}
       {showHelp && (
         <div className="absolute top-14 right-3 z-20 w-64">
-          <div className="bg-[#060606]/95 backdrop-blur-md border border-white/[0.06] rounded-xl p-4 text-xs text-white/70 space-y-3">
+          <div className="bg-[#08080f]/95 backdrop-blur-md border border-white/[0.06] rounded-xl p-4 text-xs text-white/70 space-y-3">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-white text-sm">Viewer Controls</span>
               <button onClick={() => setShowHelp(false)} className="text-white/40 hover:text-white"><X className="w-3 h-3" /></button>

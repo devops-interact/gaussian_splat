@@ -59,7 +59,7 @@ export default function ProjectDetail() {
 
   const statusColor = (s: string | null) => {
     if (!s) return 'text-gray-500';
-    if (s === 'completed') return 'text-[#35c889]';
+    if (s === 'completed') return 'text-[#7c3aed]';
     if (s === 'error') return 'text-red-400';
     return 'text-amber-400';
   };
@@ -93,7 +93,7 @@ export default function ProjectDetail() {
         <p className="text-gray-500 text-sm">Scans in this project</p>
         <button
           onClick={handleNewScan}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#35c889] text-black font-mono font-semibold hover:bg-[#35c889]/90 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#7c3aed] text-white font-mono font-semibold hover:bg-[#7c3aed]/90 transition-colors"
         >
           <Plus className="w-4 h-4" />
           New Scan
@@ -101,13 +101,13 @@ export default function ProjectDetail() {
       </div>
 
       {scans.length === 0 ? (
-        <div className="rounded-xl border-2 border-dashed border-white/[0.06] bg-[#060606]/50 p-12 text-center">
+        <div className="rounded-xl border-2 border-dashed border-white/[0.06] bg-[#08080f]/50 p-12 text-center">
           <ScanIcon className="w-12 h-12 text-gray-600 mx-auto mb-4" />
           <p className="text-gray-500 font-mono mb-2">No scans yet</p>
           <p className="text-gray-600 text-sm mb-4">Create a scan to upload a video and start 3D reconstruction</p>
           <button
             onClick={handleNewScan}
-            className="px-4 py-2 rounded-lg bg-[#35c889] text-black font-mono font-medium"
+            className="px-4 py-2 rounded-lg bg-[#7c3aed] text-white font-mono font-medium"
           >
             New Scan
           </button>
@@ -117,11 +117,11 @@ export default function ProjectDetail() {
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="rounded-xl border-2 border-dashed border-[#35c889]/20 bg-[#35c889]/[0.03] p-6 flex flex-col items-center justify-center min-h-[140px] hover:border-[#35c889]/40 hover:bg-[#35c889]/[0.06] transition-colors cursor-pointer"
+            className="rounded-xl border-2 border-dashed border-[#7c3aed]/20 bg-[#7c3aed]/[0.03] p-6 flex flex-col items-center justify-center min-h-[140px] hover:border-[#7c3aed]/40 hover:bg-[#7c3aed]/[0.06] transition-colors cursor-pointer"
             onClick={handleNewScan}
           >
-            <Plus className="w-8 h-8 text-[#35c889] mb-2" />
-            <span className="font-mono text-sm text-[#35c889]">New Scan</span>
+            <Plus className="w-8 h-8 text-[#7c3aed] mb-2" />
+            <span className="font-mono text-sm text-[#7c3aed]">New Scan</span>
           </motion.div>
           <AnimatePresence>
             {scans.map((s, i) => (
@@ -131,14 +131,14 @@ export default function ProjectDetail() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
                 transition={{ delay: i * 0.05 }}
-                className="relative rounded-xl border border-white/[0.08] bg-[#060606] p-4 hover:border-[#35c889]/[0.15] transition-colors group"
+                className="relative rounded-xl border border-white/[0.08] bg-[#08080f] p-4 hover:border-[#7c3aed]/[0.15] transition-colors group"
               >
                 <button
                   onClick={() => navigate(`/projects/${projectId}/scans/${s.id}`)}
                   className="block w-full text-left"
                 >
                   <div className="flex items-start justify-between mb-2">
-                    <ScanIcon className="w-8 h-8 text-[#35c889]/50" />
+                    <ScanIcon className="w-8 h-8 text-[#7c3aed]/50" />
                     <button
                       onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === s.id ? null : s.id); }}
                       className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-white/[0.06] text-gray-400"
