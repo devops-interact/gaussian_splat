@@ -42,7 +42,7 @@ A web application that converts video footage of rooms into interactive 3D point
 │  │                     (FFmpeg @ FPS)        (MASt3R + 3DGS)            │   │
 │  │                                                │                      │   │
 │  │  6. Complete ◀── 5. Mesh Recon (opt.) ◀── 4. Export & Compress       │   │
-│  │  .ply + .glb      Poisson → GLB             PLY + Gzip               │   │
+│  │  .ply + .obj      Poisson → OBJ             PLY + Gzip               │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
 │  ┌──────────────────────────────────────────────────────────────────────┐   │
@@ -72,9 +72,12 @@ A web application that converts video footage of rooms into interactive 3D point
 | React 18 + TypeScript | UI framework |
 | Vite | Build tool |
 | Three.js (`@react-three/fiber`, `@react-three/drei`) | 3D visualization (points + GLB mesh) |
-| Custom PLY parser | Binary GS format with SH→RGB + direct RGB priority |
+| `@mkkellogg/gaussian-splats-3d` | 3DGS React component and core renderer |
+| Custom PLY parser | Binary GS format conversion within renderer |
 | Tailwind CSS | Styling |
 | Lucide React | Iconography |
+| Framer Motion | UI Animations |
+| React Router | Client-side routing |
 
 ### Backend (RunPod GPU)
 
@@ -86,7 +89,8 @@ A web application that converts video footage of rooms into interactive 3D point
 | FFmpeg | Video frame extraction |
 | LongSplat | 3D Gaussian Splatting (MASt3R poses) |
 | Open3D | Poisson surface reconstruction |
-| trimesh | GLB mesh export |
+| trimesh | OBJ mesh export |
+| Passlib / PyJWT | Authentication |
 
 ### Infrastructure
 
@@ -115,9 +119,11 @@ Video (MP4)
   → 1. Validate (duration, resolution, format)
   → 2. Extract Frames (FFmpeg @ preset FPS → JPGs)
   → 3. LongSplat Training (MASt3R pose estimation → 3DGS)
-  → 4. Export PLY + Gzip compress
-  → 5. Mesh Reconstruction (Poisson surface → GLB)  [optional]
-  → 6. Complete → served via /static/models/
+  → 4. Scaffold-GS to standard 3DGS conversion
+  → 5. Postprocess (prune low opacity, filter outliers, center)
+  → 6. Export PLY + Gzip compress
+  → 7. Mesh Reconstruction (Poisson surface → OBJ)  [optional]
+  → 8. Complete → served via /api/jobs/{id}/model
 ```
 
 ### Step Details
@@ -126,8 +132,9 @@ Video (MP4)
 |---|---|---|
 | Frame Extraction | 10-30 s | `/app/storage/frames/{job_id}/` |
 | LongSplat Training | 10-60 min | `model.ply` in models dir |
+| Scaffold Conversion & Post-Process | 1-2 min | Converted and centered `model.ply` |
 | PLY Export + Compress | 5-10 s | `{job_id}.ply`, `{job_id}.ply.gz` |
-| Mesh Reconstruction | 30-120 s | `{job_id}.glb` (Poisson → decimate → GLB) |
+| Mesh Reconstruction | 30-120 s | `{job_id}.obj` (Poisson → decimate → OBJ) |
 
 ### Mesh Reconstruction Sub-Pipeline
 
@@ -137,7 +144,7 @@ Video (MP4)
 4. Trim low-density faces (bottom 2%)
 5. Transfer vertex colors from nearest points (KNN)
 6. Decimate to 500K faces for browser performance
-7. Export as GLB via trimesh
+7. Export as OBJ via trimesh
 
 ---
 
@@ -145,9 +152,8 @@ Video (MP4)
 
 | Preset | FPS | Iterations | Est. Time | Use Case |
 |---|---|---|---|---|
-| **Fast** | 1.0 | 2,000 | 3-5 min | Quick preview |
-| **Balanced** | 2.0 | 5,000 | 8-12 min | Recommended |
-| **Quality** | 3.0 | 12,000 | 20-30 min | Production |
+| **Balanced** | 2.0 | 10,000 + 3,000 | 20-30 min | Recommended for initial previews |
+| **Quality** | 3.0 | 30,000 + 7,000 | 60+ min | Production fidelity |
 
 ---
 
@@ -218,10 +224,10 @@ Available formats: `.ply` (full), `.ply.gz` (compressed), `.glb` (mesh, when ava
 | Hex | Role |
 |---|---|
 | `#000000` | Base background |
-| `#060606` | Elevated surfaces, viewer background |
-| `#081717` | Card backgrounds, form inputs, teal-tinted dark |
-| `#35c889` | Primary accent (brand green) |
-| `#a4a4ff` | Secondary accent (lavender) |
+| `#08080f` | Elevated surfaces, viewer background |
+| `#0d0b1a` | Card backgrounds, form inputs, purple-tinted dark |
+| `#7c3aed` | Primary accent (brand purple) |
+| `#a78bfa` | Secondary accent (soft lavender) |
 
 Transparency variations for interactions: `/[0.04]`–`/[0.06]` subtle, `/[0.08]`–`/[0.12]` hover, `/[0.15]`–`/[0.25]` active/selected.
 
@@ -232,38 +238,42 @@ Transparency variations for interactions: `/[0.04]`–`/[0.06]` subtle, `/[0.08]
 ```
 gaussian-room-reconstruction/
 ├── backend/
-│   ├── api/jobs.py                     # Upload, status, download endpoints
+│   ├── api/
+│   │   ├── jobs.py                     # Upload, status, download endpoints
+│   │   └── auth.py                     # Auth and simulated DB logic
 │   ├── core/
 │   │   ├── config.py                   # Quality presets, settings
-│   │   ├── models.py                   # Pydantic models (Job, incl. model_url_mesh)
-│   │   └── pipeline.py                 # Processing orchestration (6 steps)
+│   │   ├── models.py                   # Pydantic models
+│   │   ├── pipeline.py                 # Processing orchestration
+│   │   └── logging_config.py           # Standardized logger
 │   ├── services/
 │   │   ├── longsplat/
-│   │   │   ├── train.py                # LongSplat training wrapper
-│   │   │   └── longsplat_to_3dgs_converter.py  # SH→RGB heuristic conversion
+│   │   │   ├── train.py                # LongSplat training and conversion
+│   │   │   ├── longsplat_to_3dgs_converter.py  # SH→RGB heuristic conversion
+│   │   │   └── postprocess.py          # Pruning, outliers, and centering
 │   │   ├── video/
 │   │   │   ├── extract_frames.py
 │   │   │   └── validate.py
 │   │   └── export/
 │   │       ├── to_ply.py               # PLY export + color diagnostics
-│   │       ├── to_obj.py               # OBJ export (optional)
-│   │       ├── to_mesh.py              # Poisson surface → GLB
+│   │       ├── to_obj.py               # OBJ export
 │   │       └── compress.py             # Gzip compression
+│   ├── database.py                     # In-memory session mock DB
 │   ├── main.py                         # FastAPI app entry
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
+│   │   │   ├── components/layout/       # Sidebar and dashboard shell
 │   │   │   ├── VideoUpload.tsx          # Preset selector, file upload
 │   │   │   ├── JobStatus.tsx            # Progress bar, status badges
-│   │   │   ├── Viewer3D.tsx             # PLY/GLB 3D viewer, tools
+│   │   │   ├── Viewer3D.tsx             # Splat viewer, tools
 │   │   │   ├── TechnicalDetails.tsx     # Metadata panel
-│   │   │   ├── layout/
-│   │   │   │   └── dashboard-layout.tsx # Header bar, layout shell
 │   │   │   └── ui/
 │   │   │       ├── button.tsx           # Button variants
 │   │   │       └── card.tsx             # Card primitive
-│   │   ├── pages/Home.tsx               # Main page layout
+│   │   ├── contexts/AuthContext.tsx     # JWT management
+│   │   ├── pages/Home.tsx               # Dashboard main page
 │   │   ├── types/job.ts                 # TypeScript interfaces
 │   │   ├── api/jobs.ts                  # API client
 │   │   └── index.css                    # Global styles

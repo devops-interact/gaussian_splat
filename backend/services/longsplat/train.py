@@ -289,7 +289,7 @@ async def train_longsplat(
                     "/usr/bin/python3.10", str(convert_script),
                     "-m", str(output_dir),
                     "--iteration", str(convert_iters),
-                    "--prune_ratio", "0.4",  # Keep 60% of anchors for denser result
+                    "--prune_ratio", "0.5",  # Keep 50% of anchors — tighter pruning reduces messy edges
                 ]
                 convert_log_path = output_dir / "convert_3dgs.log"
                 logger.info(f"Running Scaffold-GS → 3DGS conversion ({convert_iters} refinement iters): {' '.join(convert_cmd)}")

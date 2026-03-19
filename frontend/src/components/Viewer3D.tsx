@@ -273,11 +273,20 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         const blob = new Blob([buffer], { type: 'application/octet-stream' });
         blobUrl = URL.createObjectURL(blob);
 
-        // 4. Build a Three.js scene with grid + invisible raycast points
+        // 4. Build a Three.js scene with grid + origin axes
         const threeScene = new THREE.Scene();
-        const grid = new THREE.GridHelper(30, 30, 0x0c1f1f, 0x081717);
+        const grid = new THREE.GridHelper(30, 30, 0x1a1425, 0x0d0b1a);
         grid.position.y = -0.01;
         threeScene.add(grid);
+
+        // Add AxesHelper for (0,0,0) reference
+        const axesHelper = new THREE.AxesHelper(1.5);
+        // Standardize axes colors slightly
+        // @ts-ignore (material.color is valid but type definitions might complain)
+        axesHelper.material.transparent = true;
+        // @ts-ignore
+        axesHelper.material.opacity = 0.6;
+        threeScene.add(axesHelper);
 
 
 
@@ -318,7 +327,8 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
           showLoadingUI: false,
           format: 2, // SceneFormat.Ply (0=Splat, 1=KSplat, 2=Ply, 3=Spz)
           position: [-meta.center[0], -meta.center[1], -meta.center[2]],
-          rotation: [0, 0, 0, 1],
+          // APPLY Y-UP CORRECTION: Rotate 180° around X-axis (quaternion [1, 0, 0, 0])
+          rotation: [1, 0, 0, 0],
           scale: [1, 1, 1],
         });
 
@@ -432,10 +442,22 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
   }, [mode]);
 
   // ── Measurement Click Handler ──────────────────────────────────────────
+  const lastClickTimeRef = useRef<number>(0);
+
   useEffect(() => {
+    const canvas = containerRef.current?.querySelector('canvas');
+    if (canvas) {
+      if (mode === 'measure') {
+        canvas.style.cursor = 'crosshair';
+      } else if (mode === 'walkthrough') {
+        canvas.style.cursor = 'none';
+      } else {
+        canvas.style.cursor = 'grab';
+      }
+    }
+
     if (mode !== 'measure') return;
     const viewer = viewerRef.current;
-    const canvas = containerRef.current?.querySelector('canvas');
     if (!viewer || !canvas) return;
 
     // Access the library's built-in raycaster and splatMesh
@@ -456,6 +478,15 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
     if (!camera || !gsRaycaster || !splatMesh) return;
 
     const onClick = (e: MouseEvent) => {
+      // Debounce clicks to prevent crashes from rapid raycasting
+      const now = performance.now();
+      if (now - lastClickTimeRef.current < 300) return;
+      lastClickTimeRef.current = now;
+
+      // Ensure splat scene is ready
+      if (!splatMesh || splatMesh.visible === false) return;
+      if (typeof (viewerAny as any).isLoading === 'function' && (viewerAny as any).isLoading()) return;
+
       // Use screen-space pixel coordinates — the library handles NDC conversion internally
       const mousePos = new THREE.Vector2(e.offsetX, e.offsetY);
       const renderDims = new THREE.Vector2();
@@ -467,13 +498,22 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         renderDims.set(canvas.clientWidth, canvas.clientHeight);
       }
 
-      gsRaycaster.setFromCameraAndScreenPosition(camera, mousePos, renderDims);
+      try {
+        gsRaycaster.setFromCameraAndScreenPosition(camera, mousePos, renderDims);
 
-      const hits: { origin: THREE.Vector3; distance: number; splatIndex: number }[] = [];
-      gsRaycaster.intersectSplatMesh(splatMesh, hits);
+        const hits: { origin: THREE.Vector3; distance: number; splatIndex: number }[] = [];
+        gsRaycaster.intersectSplatMesh(splatMesh, hits);
 
-      if (hits.length > 0) {
-        handleAddMeasurePoint(hits[0].origin.clone());
+        if (hits.length > 0) {
+          // Validate hit distance (ignore errant hits way outside the bounding box)
+          const validHit = hits.find(h => isFinite(h.distance) && h.distance < 100);
+          if (validHit) {
+            handleAddMeasurePoint(validHit.origin.clone());
+          }
+        }
+      } catch (err) {
+        // Splat sorting in the worker can occasionally cause index out of bounds during intersect
+        console.warn('[GS3D] Raycaster intersection failed (likely during mid-sort):', err);
       }
     };
 
@@ -494,11 +534,11 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
     toRemove.forEach(o => { scene.remove(o); });
 
     const sphereGeo = new THREE.SphereGeometry(0.012, 12, 12);
-    const greenMat = new THREE.MeshBasicMaterial({ color: '#35c889' });
-    const purpleMat = new THREE.MeshBasicMaterial({ color: '#a4a4ff' });
+    const purpleMat = new THREE.MeshBasicMaterial({ color: '#7c3aed' });
+    const lavenderMat = new THREE.MeshBasicMaterial({ color: '#a78bfa' });
 
     visibleMeasurePoints.forEach((pt, i) => {
-      const mesh = new THREE.Mesh(sphereGeo, i === 0 ? purpleMat : greenMat);
+      const mesh = new THREE.Mesh(sphereGeo, i === 0 ? lavenderMat : purpleMat);
       mesh.position.copy(pt.position);
       mesh.userData.__measure = true;
       scene.add(mesh);
@@ -506,7 +546,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
 
     if (visibleMeasurePoints.length === 2) {
       const lineGeo = new THREE.BufferGeometry().setFromPoints(visibleMeasurePoints.map(p => p.position));
-      const lineMat = new THREE.LineBasicMaterial({ color: '#35c889', linewidth: 2 });
+      const lineMat = new THREE.LineBasicMaterial({ color: '#7c3aed', linewidth: 2 });
       const line = new THREE.Line(lineGeo, lineMat);
       line.userData.__measure = true;
       scene.add(line);
@@ -657,7 +697,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       // 5. Draw title
       let textY = panelY + padY + titleFontSize;
       ctx.font = `bold ${titleFontSize}px monospace`;
-      ctx.fillStyle = '#35c889';
+      ctx.fillStyle = '#7c3aed';
       ctx.fillText(title, panelX + padX, textY);
 
       // 6. Draw info lines
@@ -669,11 +709,11 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         textY += lineHeight;
         // Highlight measurement value in accent color
         if (line.startsWith('Measurement:')) {
-          ctx.fillStyle = '#35c889';
+          ctx.fillStyle = '#7c3aed';
           ctx.fillText(line, panelX + padX, textY);
           ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
         } else if (line.startsWith('Scale:')) {
-          ctx.fillStyle = '#a4a4ff';
+          ctx.fillStyle = '#a78bfa';
           ctx.fillText(line, panelX + padX, textY);
           ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
         } else {
@@ -684,7 +724,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       // 7. Small branding in top-right corner
       const brand = '3D Scanner';
       ctx.font = `bold ${Math.max(10, Math.round(10 * dpr))}px monospace`;
-      ctx.fillStyle = 'rgba(53, 200, 137, 0.4)';
+      ctx.fillStyle = 'rgba(124, 58, 237, 0.4)';
       const brandW = ctx.measureText(brand).width;
       ctx.fillText(brand, w - brandW - margin, margin + Math.round(10 * dpr));
 
@@ -716,10 +756,10 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
 
       {/* Loading overlay */}
       {loading && !error && (
-        <div className="absolute inset-0 flex items-center justify-center z-20 bg-[#060606]/80">
+        <div className="absolute inset-0 flex items-center justify-center z-20 bg-[#08080f]/80">
           <div className="flex flex-col items-center gap-3">
-            <div className="w-8 h-8 border-2 border-[#35c889]/30 border-t-[#35c889] rounded-full animate-spin" />
-            <span className="text-[#35c889]/70 font-mono text-xs">Loading Gaussian Splats...</span>
+            <div className="w-8 h-8 border-2 border-[#7c3aed]/30 border-t-[#7c3aed] rounded-full animate-spin" />
+            <span className="text-[#a78bfa]/70 font-mono text-xs">Loading Gaussian Splats...</span>
           </div>
         </div>
       )}
@@ -757,7 +797,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       {mode === 'measure' && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10">
           <div className="bg-black/80 backdrop-blur-md border border-white/[0.06] rounded-xl px-4 py-2.5 flex items-center gap-3 font-mono text-xs">
-            <span className={`text-[10px] px-1.5 py-0.5 rounded ${measurePhase === 'calibrate' ? 'bg-[#a4a4ff]/15 text-[#a4a4ff]' : 'bg-[#35c889]/15 text-[#35c889]'}`}>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded ${measurePhase === 'calibrate' ? 'bg-[#a78bfa]/15 text-[#a78bfa]' : 'bg-[#7c3aed]/15 text-[#7c3aed]'}`}>
               {measurePhase === 'calibrate' ? 'STEP 1: Calibrate' : 'STEP 2: Measure'}
             </span>
             <div className="border-l border-white/[0.06] h-5" />
@@ -765,11 +805,11 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
             {measurePhase === 'calibrate' ? (
               <>
                 <div className="flex items-center gap-2">
-                  <span className={`flex items-center gap-1 ${calibPoints.length >= 1 ? 'text-[#a4a4ff]' : 'text-white/30'}`}>
+                  <span className={`flex items-center gap-1 ${calibPoints.length >= 1 ? 'text-[#a78bfa]' : 'text-white/30'}`}>
                     <CircleDot className="w-3 h-3" /> A {calibPoints.length >= 1 ? '✓' : ''}
                   </span>
                   <span className="text-white/15">&rarr;</span>
-                  <span className={`flex items-center gap-1 ${calibPoints.length >= 2 ? 'text-[#35c889]' : 'text-white/30'}`}>
+                  <span className={`flex items-center gap-1 ${calibPoints.length >= 2 ? 'text-[#7c3aed]' : 'text-white/30'}`}>
                     <CircleDot className="w-3 h-3" /> B {calibPoints.length >= 2 ? '✓' : ''}
                   </span>
                 </div>
@@ -784,13 +824,13 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
                         min="0.01"
                         value={meterInput}
                         onChange={e => setMeterInput(e.target.value)}
-                        className="w-16 bg-[#081717] border border-white/[0.08] rounded px-1.5 py-0.5 text-white text-xs font-mono text-center focus:border-[#35c889]/40 focus:outline-none"
+                        className="w-16 bg-[#0d0b1a] border border-white/[0.08] rounded px-1.5 py-0.5 text-white text-xs font-mono text-center focus:border-[#7c3aed]/40 focus:outline-none"
                       />
                       <span className="text-white/40">m</span>
                     </div>
                     <button
                       onClick={handleConfirmCalibration}
-                      className="px-2 py-0.5 rounded bg-[#35c889]/15 text-[#35c889] border border-[#35c889]/20 hover:bg-[#35c889]/25 transition-colors"
+                      className="px-2 py-0.5 rounded bg-[#7c3aed]/15 text-[#7c3aed] border border-[#7c3aed]/20 hover:bg-[#7c3aed]/25 transition-colors"
                     >
                       Confirm
                     </button>
@@ -800,11 +840,11 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
             ) : (
               <>
                 <div className="flex items-center gap-2">
-                  <span className={`flex items-center gap-1 ${measurePoints.length >= 1 ? 'text-[#a4a4ff]' : 'text-white/30'}`}>
+                  <span className={`flex items-center gap-1 ${measurePoints.length >= 1 ? 'text-[#a78bfa]' : 'text-white/30'}`}>
                     <CircleDot className="w-3 h-3" /> A {measurePoints.length >= 1 ? '✓' : ''}
                   </span>
                   <span className="text-white/15">&rarr;</span>
-                  <span className={`flex items-center gap-1 ${measurePoints.length >= 2 ? 'text-[#35c889]' : 'text-white/30'}`}>
+                  <span className={`flex items-center gap-1 ${measurePoints.length >= 2 ? 'text-[#7c3aed]' : 'text-white/30'}`}>
                     <CircleDot className="w-3 h-3" /> B {measurePoints.length >= 2 ? '✓' : ''}
                   </span>
                 </div>
@@ -812,8 +852,8 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
                   <>
                     <div className="border-l border-white/[0.06] h-5" />
                     <div className="flex items-center gap-2">
-                      <Ruler className="w-3.5 h-3.5 text-[#35c889]" />
-                      <span className="text-[#35c889] text-sm font-semibold">{measuredDistance.toFixed(3)}</span>
+                      <Ruler className="w-3.5 h-3.5 text-[#7c3aed]" />
+                      <span className="text-[#7c3aed] text-sm font-semibold">{measuredDistance.toFixed(3)}</span>
                       <span className="text-white/30">m</span>
                     </div>
                   </>
@@ -827,7 +867,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
                   </>
                 )}
                 <div className="border-l border-white/[0.06] h-5" />
-                <button onClick={handleResetCalibration} className="flex items-center gap-1 text-[#a4a4ff]/60 hover:text-[#a4a4ff] transition-colors text-[10px]">
+                <button onClick={handleResetCalibration} className="flex items-center gap-1 text-[#a78bfa]/60 hover:text-[#a78bfa] transition-colors text-[10px]">
                   Recalibrate
                 </button>
                 {calibration && (
@@ -877,8 +917,8 @@ function ToolbarButton({ icon, label, active, onClick }: {
   icon: React.ReactNode; label: string; active?: boolean; onClick: () => void;
 }) {
   const color = active
-    ? 'bg-[#35c889]/15 text-[#35c889] border-[#35c889]/20'
-    : 'bg-black/70 text-white/50 border-white/[0.06] hover:text-white hover:bg-[#081717]';
+    ? 'bg-[#7c3aed]/15 text-[#7c3aed] border-[#7c3aed]/20'
+    : 'bg-black/70 text-white/50 border-white/[0.06] hover:text-white hover:bg-[#0d0b1a]';
   return (
     <button
       onClick={onClick}
