@@ -45,6 +45,15 @@ interface CalibrationState {
   scaleFactor: number;
 }
 
+/** Scene-scale max ray distance for accepting a splat hit (PLY axis-aligned bbox diagonal). */
+function maxSplatPickDistance(bbox: ModelMetadata['boundingBox']): number {
+  const dx = bbox.max[0] - bbox.min[0];
+  const dy = bbox.max[1] - bbox.min[1];
+  const dz = bbox.max[2] - bbox.min[2];
+  const diagonal = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  return Math.max(diagonal * 4, 3);
+}
+
 // ── Lightweight PLY header parser (metadata + positions only) ────────────────
 
 interface PLYMeta {
@@ -336,6 +345,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
 
         // 7. Start rendering
         viewer.start();
+        viewer.raycaster.raycastAgainstTrueSplatEllipsoid = true;
         viewerRef.current = viewer;
         console.log('[GS3D] Viewer started successfully');
         setLoading(false);
@@ -487,16 +497,25 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       if (!splatMesh || splatMesh.visible === false) return;
       if (typeof (viewerAny as any).isLoading === 'function' && (viewerAny as any).isLoading()) return;
 
-      // Use screen-space pixel coordinates — the library handles NDC conversion internally
-      const mousePos = new THREE.Vector2(e.offsetX, e.offsetY);
+      // Map pointer into the same pixel space as getRenderDimensions (root offset size), so NDC
+      // matches the viewer even when canvas CSS box ≠ root layout (see GS3D getRenderDimensions).
       const renderDims = new THREE.Vector2();
-
       if (viewerAny.getRenderDimensions) {
         viewerAny.getRenderDimensions(renderDims);
       } else {
-        // Fallback to canvas size
         renderDims.set(canvas.clientWidth, canvas.clientHeight);
       }
+
+      const rect = canvas.getBoundingClientRect();
+      const mousePos = new THREE.Vector2();
+      if (rect.width > 0 && rect.height > 0) {
+        mousePos.x = ((e.clientX - rect.left) / rect.width) * renderDims.x;
+        mousePos.y = ((e.clientY - rect.top) / rect.height) * renderDims.y;
+      } else {
+        mousePos.set(e.offsetX, e.offsetY);
+      }
+      mousePos.x = THREE.MathUtils.clamp(mousePos.x, 0, renderDims.x);
+      mousePos.y = THREE.MathUtils.clamp(mousePos.y, 0, renderDims.y);
 
       try {
         gsRaycaster.setFromCameraAndScreenPosition(camera, mousePos, renderDims);
@@ -504,12 +523,13 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         const hits: { origin: THREE.Vector3; distance: number; splatIndex: number }[] = [];
         gsRaycaster.intersectSplatMesh(splatMesh, hits);
 
-        if (hits.length > 0) {
-          // Validate hit distance (ignore errant hits way outside the bounding box)
-          const validHit = hits.find(h => isFinite(h.distance) && h.distance < 100);
-          if (validHit) {
-            handleAddMeasurePoint(validHit.origin.clone());
-          }
+        // @mkkellogg/gaussian-splats-3d sorts hits by ascending distance; take closest within scale-aware max.
+        const maxDist = metadataRef.current
+          ? maxSplatPickDistance(metadataRef.current.boundingBox)
+          : 100;
+        const validHit = hits.find(h => isFinite(h.distance) && h.distance <= maxDist);
+        if (validHit) {
+          handleAddMeasurePoint(validHit.origin.clone());
         }
       } catch (err) {
         // Splat sorting in the worker can occasionally cause index out of bounds during intersect

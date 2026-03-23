@@ -201,6 +201,7 @@ The backend converter also detects whether `f_dc` values are already in `[0,1]` 
 
 ### 3D Viewer (`Viewer3D.tsx`)
 
+- **Splat picking** — measurement clicks use `@mkkellogg/gaussian-splats-3d`’s built-in splat raycaster (`setFromCameraAndScreenPosition` + `intersectSplatMesh`), not [`THREE.Raycaster`](https://threejs.org/docs/#Raycaster). Core three.js raycasting targets meshes/lines/points; Gaussian splats need the library’s specialized intersection. Pointer position is mapped from `canvas.getBoundingClientRect()` into the same dimensions returned by `getRenderDimensions` (root `offsetWidth` / `offsetHeight`) so the ray matches the rendered viewport when layout differs. Ellipsoid-accurate tests are enabled (`raycastAgainstTrueSplatEllipsoid`). Hits are sorted by distance; the app accepts the closest hit within a bounding-box–scaled max distance. Reconstructions from LongSplat / MASt3R have no inherent metric scale and may carry pose noise—real-world distances rely on the viewer’s **calibration step**, not the raycaster alone.
 - **Orbit mode** — rotate, pan, zoom with OrbitControls
 - **Walk-through mode** — first-person WASD + mouse-look via pointer lock
 - **Measurement tool** — click two points (A = lavender, B = green), displays distance

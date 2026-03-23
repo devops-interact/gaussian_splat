@@ -13,7 +13,7 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-echo -e "${PURPLE}=== GAUSSIAN ROOM RECONSTRUCTION - BUILD & PUSH (OPTIMIZED) ===${NC}"
+echo -e "${PURPLE}=== GAUSSIAN ROOM RECONSTRUCTION - BUILD & PUSH ===${NC}"
 echo ""
 
 # Configuration
@@ -37,11 +37,31 @@ echo -e "${GREEN}✓ Docker is running${NC}"
 echo ""
 echo -e "${YELLOW}=== STEP 0: PRE-BUILD VALIDATION ===${NC}"
 
-# Ensure frontend deps are installed
+# Ensure frontend deps are installed (same toolchain as Dockerfile stage frontend-build)
 echo -e "${BLUE}Installing frontend dependencies...${NC}"
 cd frontend && npm install
+echo -e "${BLUE}Running frontend production build (tsc + vite) — fails fast before Docker...${NC}"
+npm run build
 cd ..
-echo -e "${GREEN}✓ Frontend deps ready${NC}"
+echo -e "${GREEN}✓ Frontend deps + build OK (matches Docker stage 1)${NC}"
+
+# Viewer / splat picking stack (GaussianSplats3D, not THREE.Raycaster)
+echo -e "${BLUE}Verifying viewer & picking sources...${NC}"
+for f in \
+    "frontend/src/components/Viewer3D.tsx" \
+    "frontend/src/types/gaussian-splats-3d.d.ts" \
+    "frontend/package.json"
+do
+    if [ ! -f "$f" ]; then
+        echo -e "${RED}❌ Missing required file: $f${NC}"
+        exit 1
+    fi
+done
+grep -q "@mkkellogg/gaussian-splats-3d" frontend/package.json || {
+    echo -e "${RED}❌ @mkkellogg/gaussian-splats-3d missing from frontend/package.json${NC}"
+    exit 1
+}
+echo -e "${GREEN}✓ Viewer / GS3D splat picking sources OK${NC}"
 
 # Verify key backend files exist (new optimized pipeline)
 echo -e "${BLUE}Verifying backend structure...${NC}"
@@ -91,16 +111,22 @@ echo -e "Theme: Deep Purple / Dark"
 echo -e "Log file: ${LOG_FILE}"
 echo ""
 
-# Create buildx builder if it doesn't exist
-docker buildx inspect gsbuilder > /dev/null 2>&1 || docker buildx create --name gsbuilder --use
+# Create buildx builder if it doesn't exist; always select it for this build
+if ! docker buildx inspect gsbuilder > /dev/null 2>&1; then
+    docker buildx create --name gsbuilder --use
+else
+    docker buildx use gsbuilder
+fi
 
-# Build and push directly
-# --no-cache is recommended to ensure fresh CUDA kernels for A40
-docker buildx build \
-    --platform linux/amd64 \
-    -t ${FULL_IMAGE} \
-    --push \
-    . 2>&1 | tee ${LOG_FILE}
+# Build and push (frontend dist is built again inside Dockerfile stage frontend-build)
+# Optional: export BUILD_NO_CACHE=1 to force clean CUDA/submodule layers on the server
+BUILDX_ARGS=(--platform linux/amd64 -t "${FULL_IMAGE}" --push .)
+if [ "${BUILD_NO_CACHE:-0}" = "1" ]; then
+    echo -e "${YELLOW}BUILD_NO_CACHE=1 → full rebuild (slower, fresh CUDA kernels)${NC}"
+    BUILDX_ARGS=(--no-cache "${BUILDX_ARGS[@]}")
+fi
+
+docker buildx build "${BUILDX_ARGS[@]}" 2>&1 | tee ${LOG_FILE}
 
 if [ ${PIPESTATUS[0]} -eq 0 ]; then
     echo ""
@@ -120,7 +146,8 @@ if [ ${PIPESTATUS[0]} -eq 0 ]; then
     echo -e "  │ Expose HTTP Ports  │ 8000                                         │"
     echo -e "  └────────────────────┴──────────────────────────────────────────────┘"
     echo ""
-    echo -e "${PURPLE}Optimized: Opacity Pruning, Orientation Fix, Purple UI, Raycaster Stabilized${NC}"
+    echo -e "${PURPLE}Viewer: GaussianSplats3D picking (viewport-aligned + ellipsoid), measure calibration, purple UI${NC}"
+    echo -e "${BLUE}Tip: BUILD_NO_CACHE=1 ./build-and-push.sh for a full CUDA layer rebuild${NC}"
     echo ""
 else
     echo ""
