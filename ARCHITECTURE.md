@@ -150,10 +150,14 @@ Video (MP4)
 
 ## Quality Presets
 
-| Preset | FPS | Iterations | Est. Time | Use Case |
-|---|---|---|---|---|
-| **Balanced** | 2.0 | 10,000 + 3,000 | 20-30 min | Recommended for initial previews |
-| **Quality** | 3.0 | 30,000 + 7,000 | 60+ min | Production fidelity |
+Defined in [`backend/core/config.py`](backend/core/config.py) (`QUALITY_PRESETS`).
+
+| Preset | FPS | LongSplat iterations | `convert_3dgs` prune ratio | Est. time | Use case |
+|---|---|---|---|---|---|
+| **Balanced** | 1.5 | 12,000 | 0.62 | ~20 min | Default previews |
+| **Quality** | 2.0 | 20,000 | 0.68 | ~38 min | Higher fidelity |
+
+Higher **prune ratio** keeps more Gaussians after Scaffold-GS → 3DGS conversion (less aggressive pruning). Tuning is per preset without code changes beyond `PresetConfig`.
 
 ---
 
@@ -209,6 +213,16 @@ The backend converter also detects whether `f_dc` values are already in `[0,1]` 
 - **Snapshot** — capture current view as PNG
 - **Adaptive point size** — auto-calculated from bounding sphere, with manual +/- controls
 - **Gizmo** — axis indicator (bottom-right)
+- **Rendering (flicker / sparkles)** — `sphericalHarmonicsDegree: 1` when PLY includes `f_rest_*` (better view-dependent color than DC-only). `gpuAcceleratedSort: true` for depth-sort stability; `splatAlphaRemovalThreshold: 8` trims very transparent splats. Frontend-only: does not change the PLY produced by the backend.
+
+### Debugging reconstruction vs viewer
+
+If a scene looks noisy or full of sparkles after a deploy:
+
+1. **A/B the PLY** — Download a `model.ply` from a job that used to look good and open it in the **current** web viewer. If it looks fine, the new artifact is likely **reconstruction** (LongSplat / MASt3R / conversion), not the viewer. If it looks bad, tune viewer options above or roll back viewer changes.
+2. **Backend logs per job** — On the server, under `/app/storage/models/{job_id}/`: `training.log` (LongSplat stdout) and `convert_3dgs.log` (conversion). Container logs also mention `prune_ratio` and point to these paths after a successful `convert_3dgs.py`.
+3. **Dependency diagnostics** — Training startup logs `find_spec("simple_knn")`, `__file__`, and `__loader__` so a broken or shadowed `simple_knn` install is visible before long runs.
+4. **Measurement** — Use the two-point calibration step for real-world distances; MASt3R/LongSplat output is not metric by default.
 
 ### Metadata Panel (`TechnicalDetails.tsx`)
 

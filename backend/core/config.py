@@ -24,6 +24,8 @@ class PresetConfig(BaseModel):
     resolution: int
     init_frames_ratio: float  # Ratio of frames to use for initialization
     estimated_minutes: int
+    # LongSplat convert_3dgs.py: higher = keep more anchor-derived Gaussians (less aggressive prune).
+    convert_3dgs_prune_ratio: float = 0.62
 
 
 # Quality preset definitions - Optimized for SPEED + DENSITY balance
@@ -35,7 +37,8 @@ QUALITY_PRESETS: Dict[QualityPreset, PresetConfig] = {
         iterations=12000,
         resolution=1,
         init_frames_ratio=0.30,
-        estimated_minutes=20
+        estimated_minutes=20,
+        convert_3dgs_prune_ratio=0.62,
     ),
     QualityPreset.QUALITY: PresetConfig(
         name="Quality",
@@ -44,7 +47,8 @@ QUALITY_PRESETS: Dict[QualityPreset, PresetConfig] = {
         iterations=20000,
         resolution=1,
         init_frames_ratio=0.25,
-        estimated_minutes=38
+        estimated_minutes=38,
+        convert_3dgs_prune_ratio=0.68,
     ),
 }
 

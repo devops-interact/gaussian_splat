@@ -104,11 +104,12 @@ async def process_job(job: Job) -> Job:
         longsplat_output_dir.mkdir(parents=True, exist_ok=True)
         
         training_success = await train_longsplat(
-            frames_dir, 
+            frames_dir,
             longsplat_output_dir,
             iterations=preset_config.iterations,
             resolution=preset_config.resolution,
-            init_ratio=preset_config.init_frames_ratio
+            init_ratio=preset_config.init_frames_ratio,
+            convert_prune_ratio=preset_config.convert_3dgs_prune_ratio,
         )
         
         if not training_success:

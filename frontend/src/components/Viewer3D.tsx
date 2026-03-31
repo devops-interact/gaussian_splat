@@ -320,19 +320,19 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
           threeScene: threeScene,
           selfDrivenMode: true,
           useBuiltInControls: true,
-          gpuAcceleratedSort: false,
+          gpuAcceleratedSort: true,
           sharedMemoryForWorkers: false,
           sceneRevealMode: SceneRevealMode.Instant,
           antialiased: false,
           freeIntermediateSplatData: true,
           logLevel: 0,
-          sphericalHarmonicsDegree: 0,
+          sphericalHarmonicsDegree: 1,
         } as Record<string, unknown>);
 
         // 6. Add the splat scene
         console.log('[GS3D] Adding splat scene...');
         await viewer.addSplatScene(blobUrl, {
-          splatAlphaRemovalThreshold: 5,
+          splatAlphaRemovalThreshold: 8,
           showLoadingUI: false,
           format: 2, // SceneFormat.Ply (0=Splat, 1=KSplat, 2=Ply, 3=Spz)
           position: [-meta.center[0], -meta.center[1], -meta.center[2]],

@@ -4,6 +4,7 @@ https://github.com/NVlabs/LongSplat
 """
 import asyncio
 import hashlib
+import importlib.util
 import logging
 import os
 import shutil
@@ -63,7 +64,8 @@ async def train_longsplat(
     output_dir: Path,
     iterations: int = 30000,
     resolution: int = 1,
-    init_ratio: float = 0.2
+    init_ratio: float = 0.2,
+    convert_prune_ratio: float = 0.62,
 ) -> bool:
     """
     Train LongSplat model directly from video frames (no COLMAP needed!)
@@ -73,7 +75,8 @@ async def train_longsplat(
         output_dir: Directory to save trained model
         iterations: Number of training iterations
         resolution: Resolution scale factor (1, 2, 4, or 8)
-    
+        convert_prune_ratio: Passed to convert_3dgs.py --prune_ratio (preset-controlled; higher keeps more Gaussians)
+
     Returns:
         True if training succeeded, False otherwise
     """
@@ -99,8 +102,12 @@ async def train_longsplat(
             logger.info(f"PyTorch: {torch.__version__} (CUDA: {torch.version.cuda})")
             import diff_gaussian_rasterization
             logger.info(f"diff_gaussian_rasterization: {diff_gaussian_rasterization.__file__}")
-            import simple_knn
-            logger.info(f"simple_knn: {simple_knn.__file__}")
+            sk_spec = importlib.util.find_spec("simple_knn")
+            logger.info(f"simple_knn find_spec: {sk_spec} (origin={getattr(sk_spec, 'origin', None)})")
+            import simple_knn as _simple_knn
+            sk_file = getattr(_simple_knn, "__file__", None)
+            sk_loader = getattr(_simple_knn, "__loader__", None)
+            logger.info(f"simple_knn __file__: {sk_file!r}, __loader__: {sk_loader!r}")
             import fused_ssim
             logger.info(f"fused_ssim: {fused_ssim.__file__}")
             logger.info("Diagnostics passed: All CUDA extensions importable.")
@@ -289,10 +296,13 @@ async def train_longsplat(
                     "/usr/bin/python3.10", str(convert_script),
                     "-m", str(output_dir),
                     "--iteration", str(convert_iters),
-                    "--prune_ratio", "0.5",  # Keep 50% of anchors — tighter pruning reduces messy edges
+                    "--prune_ratio", str(convert_prune_ratio),
                 ]
                 convert_log_path = output_dir / "convert_3dgs.log"
-                logger.info(f"Running Scaffold-GS → 3DGS conversion ({convert_iters} refinement iters): {' '.join(convert_cmd)}")
+                logger.info(
+                    f"Running Scaffold-GS → 3DGS conversion ({convert_iters} refinement iters, "
+                    f"prune_ratio={convert_prune_ratio}): {' '.join(convert_cmd)}"
+                )
                 
                 try:
                     with open(convert_log_path, "w") as convert_log:
@@ -308,6 +318,11 @@ async def train_longsplat(
                     if convert_proc.returncode == 0:
                         converted_ply = output_dir / "converted_3dgs" / "point_cloud.ply"
                         logger.info(f"convert_3dgs.py succeeded (exit 0), checking for {converted_ply}")
+                        logger.info(
+                            "Diagnostics: full LongSplat stdout is in %s; convert_3dgs output in %s",
+                            output_dir / "training.log",
+                            convert_log_path,
+                        )
                         if converted_ply.exists():
                             logger.info(f"Converted PLY exists: {converted_ply.stat().st_size} bytes")
                         else:
