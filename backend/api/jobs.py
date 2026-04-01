@@ -1,9 +1,10 @@
 """
 API endpoints for job management
 """
+import gzip
 import logging
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Form, Depends
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pathlib import Path
 from typing import Optional
 from sqlalchemy.orm import Session
@@ -248,15 +249,42 @@ async def download_model(job_id: str, compressed: bool = False):
             )
     
     model_path = settings.MODELS_DIR / job.model_filename
-    
-    if not model_path.exists():
+    gz_path = settings.MODELS_DIR / f"{job.model_filename}.gz"
+
+    if model_path.exists():
+        data = model_path.read_bytes()
+    elif gz_path.exists():
+        with gzip.open(gz_path, "rb") as gz:
+            data = gz.read()
+    else:
         raise HTTPException(status_code=404, detail="Model file not found on disk")
-    
-    return FileResponse(
-        path=str(model_path),
-        filename=job.model_filename,
-        media_type="application/octet-stream"
+
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{job.model_filename}"',
+            "Cross-Origin-Resource-Policy": "cross-origin",
+        },
     )
+
+
+@router.get("/{job_id}/cameras")
+async def get_job_cameras(job_id: str):
+    """Optional: trained camera poses (MASt3R / LongSplat) for custom viewpoints."""
+    job_manager = get_job_manager()
+    job = await job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    cam_path = settings.MODELS_DIR / job_id / "cameras_all.json"
+    if not cam_path.exists():
+        raise HTTPException(status_code=404, detail="Camera file not found")
+    return Response(
+        content=cam_path.read_text(encoding="utf-8"),
+        media_type="application/json",
+        headers={"Cross-Origin-Resource-Policy": "cross-origin"},
+    )
+
 
 @router.get("/{job_id}/preview")
 async def get_preview_url(job_id: str):

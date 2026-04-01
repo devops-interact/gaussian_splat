@@ -9,10 +9,51 @@ import re
 import torch
 import numpy as np
 from pathlib import Path
+from typing import List, Tuple
 from plyfile import PlyData, PlyElement
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_f_rest_fields(vertex_data: np.ndarray) -> Tuple[np.ndarray, int]:
+    """
+    Ensure the number of f_rest_* properties is divisible by 3.
+
+    @mkkellogg/gaussian-splats-3d (INRIA V1 PLY) uses sphericalHarmonicsFieldCount / 3 as
+    coefficientsPerChannel; a non-integer breaks internal f_rest index keys and can yield a
+    blank splat pass with no JS error. LongSplat exports sometimes emit 11 f_rest_* columns.
+    """
+    if vertex_data.dtype.names is None:
+        return vertex_data, 0
+    names = list(vertex_data.dtype.names)
+    frest: List[Tuple[int, str]] = []
+    for n in names:
+        m = re.match(r"f_rest_(\d+)$", n)
+        if m:
+            frest.append((int(m.group(1)), n))
+    if not frest:
+        return vertex_data, 0
+    frest.sort(key=lambda x: x[0])
+    ordered = [x[1] for x in frest]
+    k = len(ordered)
+    r = k % 3
+    if r == 0:
+        return vertex_data, 0
+    to_drop = set(ordered[-r:])
+    new_names = [n for n in names if n not in to_drop]
+    new_dtype = np.dtype([(n, vertex_data.dtype.fields[n][0]) for n in new_names])
+    new_data = np.empty(len(vertex_data), dtype=new_dtype)
+    for n in new_names:
+        new_data[n] = vertex_data[n]
+    logger.info(
+        "Normalized f_rest for web viewer: dropped %d incomplete SH column(s) (%d -> %d): %s",
+        r,
+        k,
+        k - r,
+        sorted(to_drop, key=lambda x: int(x.split("_")[-1])),
+    )
+    return new_data, r
 
 
 def _pick_latest_ply(ply_files):
@@ -179,55 +220,58 @@ def _add_rgb_colors_to_3dgs_ply(source_ply: Path, output_ply: Path) -> bool:
     """
     Read a standard 3DGS PLY that has f_dc_* properties, add red/green/blue
     uchar properties derived from SH DC coefficients, and write the result.
+    Also normalizes f_rest_* column count for GaussianSplats3D (multiple of 3).
     """
     try:
         plydata = PlyData.read(str(source_ply))
         vertex = plydata['vertex']
         prop_names = [prop.name for prop in vertex.properties]
         num_points = len(vertex.data)
-        
+
+        data, f_rest_dropped = _normalize_f_rest_fields(vertex.data)
+        prop_names_set = set(data.dtype.names or ())
+
+        # Check if RGB properties already exist — if so, preserve them (still rewrite if f_rest fixed)
+        if 'red' in prop_names_set and 'green' in prop_names_set and 'blue' in prop_names_set:
+            if f_rest_dropped == 0:
+                logger.info(
+                    "RGB properties already exist in source PLY — preserving original colors (not overwriting)"
+                )
+                import shutil
+                shutil.copy2(source_ply, output_ply)
+                return True
+            new_vertex = PlyElement.describe(data, 'vertex')
+            PlyData([new_vertex], text=False).write(str(output_ply))
+            logger.info("Wrote PLY after f_rest normalization (RGB preserved from source)")
+            return True
+
         # Extract SH DC coefficients
-        f_dc_0 = vertex['f_dc_0']
-        f_dc_1 = vertex['f_dc_1']
-        f_dc_2 = vertex['f_dc_2']
-        
+        f_dc_0 = data['f_dc_0']
+        f_dc_1 = data['f_dc_1']
+        f_dc_2 = data['f_dc_2']
+
         features_dc = np.stack([f_dc_0, f_dc_1, f_dc_2], axis=-1)
         rgb = sh_to_rgb(features_dc)
-        
+
         logger.info(f"Converted SH DC -> RGB for {num_points} points")
         logger.info(f"RGB sample (first 5): {rgb[:5]}")
-        
-        # Check if RGB properties already exist — if so, preserve them
-        if 'red' in prop_names and 'green' in prop_names and 'blue' in prop_names:
-            logger.info("RGB properties already exist in source PLY — preserving original colors (not overwriting)")
-            import shutil
-            shutil.copy2(source_ply, output_ply)
-            return True
-        else:
-            # Build new structured array with RGB properties added
-            old_dtype = vertex.data.dtype
-            
-            # Create new dtype adding red, green, blue as uint8
-            new_fields = list(old_dtype.descr) + [
-                ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')
-            ]
-            new_dtype = np.dtype(new_fields)
-            
-            new_data = np.empty(num_points, dtype=new_dtype)
-            
-            # Copy all existing fields
-            for field_name in old_dtype.names:
-                new_data[field_name] = vertex.data[field_name]
-            
-            # Add RGB
-            new_data['red'] = rgb[:, 0]
-            new_data['green'] = rgb[:, 1]
-            new_data['blue'] = rgb[:, 2]
-            
-            # Write new PLY
-            new_vertex = PlyElement.describe(new_data, 'vertex')
-            PlyData([new_vertex], text=False).write(str(output_ply))
-        
+
+        # Build new structured array with RGB properties added
+        old_dtype = data.dtype
+        new_fields = list(old_dtype.descr) + [
+            ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')
+        ]
+        new_dtype = np.dtype(new_fields)
+        new_data = np.empty(num_points, dtype=new_dtype)
+        for field_name in old_dtype.names:
+            new_data[field_name] = data[field_name]
+        new_data['red'] = rgb[:, 0]
+        new_data['green'] = rgb[:, 1]
+        new_data['blue'] = rgb[:, 2]
+
+        new_vertex = PlyElement.describe(new_data, 'vertex')
+        PlyData([new_vertex], text=False).write(str(output_ply))
+
         logger.info(f"Wrote PLY with RGB colors to {output_ply}")
         return True
         

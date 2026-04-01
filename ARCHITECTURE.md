@@ -185,6 +185,10 @@ where SH_C0 = 0.28209479177387814
 
 The backend converter also detects whether `f_dc` values are already in `[0,1]` or `[0,255]` range and handles each case.
 
+**Web viewer compatibility (`@mkkellogg/gaussian-splats-3d`):** The INRIA PLY path assumes the number of `f_rest_*` properties is **divisible by three** (SH coefficients per color channel). A partial tail (for example eleven `f_rest_0`…`f_rest_10` fields) makes the library use non-integer channel strides and can yield a **blank splat canvas** with no JS error. When building `model.ply`, [`longsplat_to_3dgs_converter.py`](backend/services/longsplat/longsplat_to_3dgs_converter.py) drops the trailing incomplete `f_rest_*` columns so the count is a multiple of three.
+
+**Deployment checklist (Vercel + RunPod):** The SPA (Vercel) and the API/training image (Docker Hub → RunPod) should track the **same `main` commit** when you change PLY or viewer behavior. After merging backend fixes, run `./build-and-push.sh`, **recreate or pull** `interactdevops/gaussian-room-reconstruction:latest` on the pod, then run a **new job**. In container logs, successful normalization logs *Normalized f_rest for web viewer* and export diagnostics should show **9** (or 0) `f_rest_*` fields, not **11**. Old `model.ply` files on disk are not rewritten automatically.
+
 ---
 
 ## API Endpoints
@@ -195,8 +199,9 @@ The backend converter also detects whether `f_dc` values are already in `[0,1]` 
 | `GET` | `/api/presets` | List quality presets |
 | `POST` | `/api/jobs/upload` | Upload video (multipart + quality_preset) |
 | `GET` | `/api/jobs/{id}/status` | Job status, progress, model_url, model_url_mesh |
-| `GET` | `/api/jobs/{id}/model` | Download PLY |
+| `GET` | `/api/jobs/{id}/model` | Download PLY (raw bytes; if only `.ply.gz` exists on disk, decompresses on the fly) |
 | `GET` | `/api/jobs/{id}/model?compressed=true` | Download compressed PLY.gz |
+| `GET` | `/api/jobs/{id}/cameras` | Optional `cameras_all.json` from training output |
 | `GET` | `/static/models/{id}.glb` | GLB mesh (static file) |
 
 ---
@@ -205,15 +210,25 @@ The backend converter also detects whether `f_dc` values are already in `[0,1]` 
 
 ### 3D Viewer (`Viewer3D.tsx`)
 
-- **Splat picking** — measurement clicks use `@mkkellogg/gaussian-splats-3d`’s built-in splat raycaster (`setFromCameraAndScreenPosition` + `intersectSplatMesh`), not [`THREE.Raycaster`](https://threejs.org/docs/#Raycaster). Core three.js raycasting targets meshes/lines/points; Gaussian splats need the library’s specialized intersection. Pointer position is mapped from `canvas.getBoundingClientRect()` into the same dimensions returned by `getRenderDimensions` (root `offsetWidth` / `offsetHeight`) so the ray matches the rendered viewport when layout differs. Ellipsoid-accurate tests are enabled (`raycastAgainstTrueSplatEllipsoid`). Hits are sorted by distance; the app accepts the closest hit within a bounding-box–scaled max distance. Reconstructions from LongSplat / MASt3R have no inherent metric scale and may carry pose noise—real-world distances rely on the viewer’s **calibration step**, not the raycaster alone.
+- **Splat picking** — Primary: library raycaster (`setFromCameraAndScreenPosition` + `intersectSplatMesh`), ellipsoid mode on. Pointer position uses `getBoundingClientRect()` and `getRenderDimensions` for viewport alignment. **Click fallback:** if the library returns no hit, a **nearest splat center to the eye ray** is chosen (screen-space gate ~12px, max distance from PLY bbox), using cached `getSplatCenter(..., true)` positions—see *FIX_GUIDE_GaussianSplat_Viewer_Measurement.md*. Hover preview uses the library path only (no brute-force loop). Reconstructions have no inherent metric scale—use **calibration** for real-world distances.
 - **Orbit mode** — rotate, pan, zoom with OrbitControls
-- **Walk-through mode** — first-person WASD + mouse-look via pointer lock
-- **Measurement tool** — click two points (A = lavender, B = green), displays distance
+- **Walk-through mode** — first-person WASD + mouse-look via pointer lock. Walk/Measure listeners attach after `loading` becomes false so they bind to the real canvas once the GaussianSplats3D viewer exists (avoids stuck modes and DOMExceptions from pointer lock on a disposed canvas).
+- **Measurement tool** — click two points on the splat cloud (A = lavender, B = green); **mousemove** shows a semi-transparent preview sphere on the splat under the cursor (throttled raycast). Displays calibrated distance after step 2.
 - **Points / Mesh toggle** — switch between raw point cloud and reconstructed GLB surface
 - **Snapshot** — capture current view as PNG
 - **Adaptive point size** — auto-calculated from bounding sphere, with manual +/- controls
 - **Gizmo** — axis indicator (bottom-right)
-- **Rendering (flicker / sparkles)** — `sphericalHarmonicsDegree: 1` when PLY includes `f_rest_*` (better view-dependent color than DC-only). `gpuAcceleratedSort: true` for depth-sort stability; `splatAlphaRemovalThreshold: 8` trims very transparent splats. Frontend-only: does not change the PLY produced by the backend.
+- **Rendering** — `gpuAcceleratedSort: true`, `sharedMemoryForWorkers: true`, `sphericalHarmonicsDegree: 0`, `splatAlphaRemovalThreshold: 5`, `freeIntermediateSplatData: false`, `cameraUp: [0, -1, 0]` (MASt3R / OpenCV Y-down vs Three.js Y-up). After `addSplatScene` resolves, **`viewer.start()`** runs, then a **world-space splat center cache** is built for measurement fallback. Console: **`[GS3D] Splat count after load`** and **`[GS3D] Splat center cache:`**.
+- **Blank splat canvas (grid/axes OK)** — Confirm PLY **`f_rest_*` count divisible by three** (see PLY Output Format). If isolation headers are missing, the library may fail worker SharedArrayBuffer paths: see **SharedArrayBuffer / GPU** below.
+- **Coordinate / SH tuning** — Raise `sphericalHarmonicsDegree` to `1` when `f_rest_*` is present; adjust `splatAlphaRemovalThreshold` only if needed.
+
+### Viewer: SharedArrayBuffer / GPU-accelerated sort
+
+The SPA should send **`Cross-Origin-Opener-Policy: same-origin`** and **`Cross-Origin-Embedder-Policy: require-corp`** (see `frontend/vercel.json` on Vercel). The FastAPI app adds the same headers plus **`Cross-Origin-Resource-Policy: cross-origin`** on **all** responses so a COEP-isolated browser tab can still call the RunPod API and load `/static/models/...`. Without isolation, set viewer `gpuAcceleratedSort: false` and `sharedMemoryForWorkers: false` in code.
+
+### CORS / proxy (Authorization)
+
+If the browser reports preflight failures mentioning **`Authorization`** in front of a RunPod or other reverse proxy, inspect the **actual** `OPTIONS`/`GET` responses in DevTools Network. The backend sets permissive CORS headers; the proxy must forward or repeat `Access-Control-Allow-Headers` (including `Authorization`) on preflight. Fix the proxy rather than mixing that with viewer tuning until splats render correctly.
 
 ### Debugging reconstruction vs viewer
 
@@ -240,9 +255,9 @@ Available formats: `.ply` (full), `.ply.gz` (compressed), `.glb` (mesh, when ava
 |---|---|
 | `#000000` | Base background |
 | `#08080f` | Elevated surfaces, viewer background |
-| `#0d0b1a` | Card backgrounds, form inputs, purple-tinted dark |
-| `#7c3aed` | Primary accent (brand purple) |
-| `#a78bfa` | Secondary accent (soft lavender) |
+| `#121008` | Card backgrounds, form inputs, warm-tinted dark |
+| `#efe752` | Primary accent (brand chartreuse) |
+| `#f5ec99` | Secondary accent (soft yellow) |
 
 Transparency variations for interactions: `/[0.04]`–`/[0.06]` subtle, `/[0.08]`–`/[0.12]` hover, `/[0.15]`–`/[0.25]` active/selected.
 

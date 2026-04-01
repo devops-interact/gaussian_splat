@@ -67,17 +67,17 @@ export default function TechnicalDetails({ metadata, jobInfo, embedded }: Techni
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <CardTitle className="text-base font-mono flex items-center gap-2">
-            <Grid3X3 className="w-4 h-4 text-[#7c3aed]" />
+            <Grid3X3 className="w-4 h-4 text-[#efe752]" />
             Metadata
           </CardTitle>
           {/* Status indicator */}
           {metadata ? (
-            <span className="flex items-center gap-1.5 text-[10px] font-mono text-[#7c3aed] bg-[#7c3aed]/[0.08] px-2 py-0.5 rounded border border-[#7c3aed]/[0.15]">
+            <span className="flex items-center gap-1.5 text-[10px] font-mono text-[#efe752] bg-[#efe752]/[0.08] px-2 py-0.5 rounded border border-[#efe752]/[0.15]">
               <CheckCircle className="w-3 h-3" />
               Ready
             </span>
           ) : isProcessing ? (
-            <span className="flex items-center gap-1.5 text-[10px] font-mono text-[#a78bfa] bg-[#a78bfa]/[0.08] px-2 py-0.5 rounded border border-[#a78bfa]/[0.15]">
+            <span className="flex items-center gap-1.5 text-[10px] font-mono text-[#f5ec99] bg-[#f5ec99]/[0.08] px-2 py-0.5 rounded border border-[#f5ec99]/[0.15]">
               <Loader2 className="w-3 h-3 animate-spin" />
               Processing
             </span>
@@ -103,7 +103,7 @@ export default function TechnicalDetails({ metadata, jobInfo, embedded }: Techni
               label="Color Data"
               value={
                 details.hasColors ? (
-                  <span className="flex items-center gap-1"><CheckCircle className="w-3 h-3 text-[#7c3aed]" /> Available</span>
+                  <span className="flex items-center gap-1"><CheckCircle className="w-3 h-3 text-[#efe752]" /> Available</span>
                 ) : (
                   <span className="flex items-center gap-1"><AlertTriangle className="w-3 h-3 text-yellow-400" /> Missing</span>
                 )
@@ -114,7 +114,7 @@ export default function TechnicalDetails({ metadata, jobInfo, embedded }: Techni
               label="Opacity Data"
               value={
                 details.hasOpacity ? (
-                  <span className="flex items-center gap-1"><CheckCircle className="w-3 h-3 text-[#7c3aed]" /> Available</span>
+                  <span className="flex items-center gap-1"><CheckCircle className="w-3 h-3 text-[#efe752]" /> Available</span>
                 ) : (
                   <span className="flex items-center gap-1"><AlertTriangle className="w-3 h-3 text-yellow-400" /> Missing</span>
                 )

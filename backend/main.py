@@ -56,6 +56,9 @@ async def ensure_cors_headers(request: Request, call_next):
                 "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
                 "Access-Control-Allow-Headers": "*",
                 "Access-Control-Max-Age": "86400",
+                "Cross-Origin-Opener-Policy": "same-origin",
+                "Cross-Origin-Embedder-Policy": "require-corp",
+                "Cross-Origin-Resource-Policy": "cross-origin",
             },
         )
 
@@ -63,6 +66,11 @@ async def ensure_cors_headers(request: Request, call_next):
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
     response.headers["Access-Control-Allow-Headers"] = "*"
+    # Cross-origin isolation: SharedArrayBuffer in gaussian-splats-3d workers
+    response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    response.headers.setdefault("Cross-Origin-Embedder-Policy", "require-corp")
+    # CORP on all responses so a COEP-isolated frontend (e.g. Vercel) can fetch this API
+    response.headers.setdefault("Cross-Origin-Resource-Policy", "cross-origin")
     return response
 
 # Include routers

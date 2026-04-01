@@ -136,7 +136,7 @@ export default function ScanView() {
             <button
               onClick={() => setDownloadOpen(!downloadOpen)}
               disabled={downloading}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-[#7c3aed]/[0.1] text-[#7c3aed] border border-[#7c3aed]/20 hover:bg-[#7c3aed]/[0.18] hover:border-[#7c3aed]/30 transition-all duration-200 text-sm font-mono font-medium disabled:opacity-50"
+              className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-[#efe752]/[0.1] text-[#efe752] border border-[#efe752]/20 hover:bg-[#efe752]/[0.18] hover:border-[#efe752]/30 transition-all duration-200 text-sm font-mono font-medium disabled:opacity-50"
             >
               <Download className="w-4 h-4" />
               <span className="hidden sm:inline">Export</span>
@@ -149,9 +149,9 @@ export default function ScanView() {
                   <button
                     onClick={() => handleDownload(false)}
                     disabled={downloading}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-mono text-white/70 hover:text-white hover:bg-[#0d0b1a] transition-colors group"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-mono text-white/70 hover:text-white hover:bg-[#121008] transition-colors group"
                   >
-                    <FileBox className="w-4 h-4 text-[#7c3aed]/50 group-hover:text-[#7c3aed]" />
+                    <FileBox className="w-4 h-4 text-[#efe752]/50 group-hover:text-[#efe752]" />
                     <div>
                       <span className="block text-white/80 group-hover:text-white">.ply</span>
                       <span className="block text-[10px] text-white/30">Full quality</span>
@@ -160,9 +160,9 @@ export default function ScanView() {
                   <button
                     onClick={() => handleDownload(true)}
                     disabled={downloading}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-mono text-white/70 hover:text-white hover:bg-[#0d0b1a] transition-colors group"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-mono text-white/70 hover:text-white hover:bg-[#121008] transition-colors group"
                   >
-                    <FileArchive className="w-4 h-4 text-[#a78bfa]/50 group-hover:text-[#a78bfa]" />
+                    <FileArchive className="w-4 h-4 text-[#f5ec99]/50 group-hover:text-[#f5ec99]" />
                     <div>
                       <span className="block text-white/80 group-hover:text-white">.ply.gz</span>
                       <span className="block text-[10px] text-white/30">Compressed</span>
@@ -171,7 +171,7 @@ export default function ScanView() {
                   {objUrl && (
                     <button
                       onClick={handleObjDownload}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-mono text-white/70 hover:text-white hover:bg-[#0d0b1a] transition-colors group"
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-mono text-white/70 hover:text-white hover:bg-[#121008] transition-colors group"
                     >
                       <FileCode className="w-4 h-4 text-amber-400/50 group-hover:text-amber-400" />
                       <div>
@@ -190,13 +190,13 @@ export default function ScanView() {
       <div className="flex flex-col lg:flex-row gap-4 lg:items-start">
         <div className="w-full lg:w-2/3 flex-shrink-0">
           {modelUrl ? (
-            <div className="rounded-xl overflow-hidden border border-[#7c3aed]/[0.08] bg-[#08080f] h-[400px] sm:h-[520px] lg:h-[calc(100vh-160px)] shadow-2xl shadow-[#7c3aed]/[0.03]">
+            <div className="rounded-xl overflow-hidden border border-[#efe752]/[0.08] bg-[#08080f] h-[400px] sm:h-[520px] lg:h-[calc(100vh-160px)] shadow-2xl shadow-[#efe752]/[0.03]">
               <Viewer3D modelUrl={modelUrl} onModelMetadata={handleModelMetadata} />
             </div>
           ) : (
             <Card className="h-[300px] sm:h-[400px] lg:h-[calc(100vh-160px)] flex items-center justify-center border-dashed border-2 border-white/[0.04] bg-[#08080f]">
               <CardContent className="text-center text-gray-600">
-                <div className="w-16 h-16 rounded-2xl bg-[#0d0b1a]/50 flex items-center justify-center mx-auto mb-4 border border-white/[0.06]">
+                <div className="w-16 h-16 rounded-2xl bg-[#121008]/50 flex items-center justify-center mx-auto mb-4 border border-white/[0.06]">
                   <Box className="w-8 h-8 text-gray-700" />
                 </div>
                 <h3 className="text-base font-medium text-gray-500 mb-1 font-mono">3D Viewer</h3>

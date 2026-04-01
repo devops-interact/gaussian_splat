@@ -9,32 +9,32 @@ const config: Config = {
     theme: {
         extend: {
             colors: {
-                // Brand color scheme
+                // Brand color scheme (dark + chartreuse primary)
                 // #000000  — base black
                 // #08080f  — elevated dark
-                // #0d0b1a  — card / purple-tinted dark
-                // #7c3aed  — primary purple accent
-                // #a78bfa  — secondary lavender accent
+                // #121008  — card / warm-tinted dark
+                // #efe752  — primary accent
+                // #f5ec99  — secondary soft yellow
                 brand: {
-                    green: '#7c3aed', // Keeping the key name the same so we don't break existing classes if any used `brand-green`
-                    lavender: '#a78bfa',
+                    green: '#efe752', // key kept for existing `brand-green` usage
+                    lavender: '#f5ec99',
                 },
                 primary: {
                     DEFAULT: '#000000',
-                    400: '#7c3aed',
-                    500: '#6d28d9',
-                    600: '#5b21b6',
+                    400: '#efe752',
+                    500: '#e5dd4a',
+                    600: '#d4cc48',
                 },
                 surface: {
                     primary: '#000000',
                     secondary: '#08080f',
-                    tertiary: '#0d0b1a',
-                    elevated: '#1a1425',
+                    tertiary: '#121008',
+                    elevated: '#1b1a0e',
                 },
                 border: {
                     primary: 'rgba(255, 255, 255, 0.08)',
                     secondary: 'rgba(255, 255, 255, 0.04)',
-                    accent: '#7c3aed',
+                    accent: '#efe752',
                 },
                 secondary: {
                     50: '#f8fafc',
@@ -60,14 +60,14 @@ const config: Config = {
             backgroundColor: {
                 'app-primary': '#000000',
                 'app-secondary': '#08080f',
-                'app-tertiary': '#0d0b1a',
-                'app-elevated': '#1a1425',
-                'app-card': 'rgba(13, 11, 26, 0.6)',
+                'app-tertiary': '#121008',
+                'app-elevated': '#1b1a0e',
+                'app-card': 'rgba(18, 16, 8, 0.6)',
             },
             borderColor: {
                 'app-primary': 'rgba(255, 255, 255, 0.08)',
                 'app-secondary': 'rgba(255, 255, 255, 0.04)',
-                'app-accent': '#7c3aed',
+                'app-accent': '#efe752',
             },
             animation: {
                 'fade-in': 'fadeIn 0.5s ease-in-out',

@@ -7,8 +7,8 @@
   --foreground-rgb: 255, 255, 255;
   --background-start-rgb: 0, 0, 0;
   --background-end-rgb: 0, 0, 0;
-  --brand-green: #7c3aed; /* Kept variable name the same to avoid breakages */
-  --brand-lavender: #a78bfa;
+  --brand-green: #efe752; /* key name kept for compatibility */
+  --brand-lavender: #f5ec99;
 }
 
 @layer base {
@@ -30,7 +30,7 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Dark scrollbars — brand green tint */
+  /* Dark scrollbars — brand accent tint */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -39,11 +39,11 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgba(124, 58, 237, 0.12);
+    background: rgba(239, 231, 82, 0.12);
     border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(124, 58, 237, 0.25);
+    background: rgba(239, 231, 82, 0.25);
   }
   ::-webkit-scrollbar-corner {
     background: transparent;
@@ -52,14 +52,14 @@
   /* Firefox scrollbar */
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgba(124, 58, 237, 0.12) transparent;
+    scrollbar-color: rgba(239, 231, 82, 0.12) transparent;
   }
 
   /* Form controls */
   input,
   textarea,
   select {
-    background-color: #0d0b1a;
+    background-color: #121008;
     color: #e5e5e5;
     border-color: rgba(255, 255, 255, 0.08);
   }
@@ -71,14 +71,14 @@
   textarea:focus,
   select:focus {
     outline: none;
-    border-color: rgba(124, 58, 237, 0.4);
-    box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.1);
+    border-color: rgba(239, 231, 82, 0.4);
+    box-shadow: 0 0 0 2px rgba(239, 231, 82, 0.1);
   }
 
   /* Selection */
   ::selection {
-    background: rgba(124, 58, 237, 0.25);
-    color: white;
+    background: rgba(239, 231, 82, 0.28);
+    color: #0a0a0a;
   }
 }
 
@@ -94,7 +94,7 @@
 
   .scrollbar-thin {
     scrollbar-width: thin;
-    scrollbar-color: rgba(124, 58, 237, 0.08) transparent;
+    scrollbar-color: rgba(239, 231, 82, 0.08) transparent;
   }
   .scrollbar-thin::-webkit-scrollbar {
     width: 4px;
@@ -103,11 +103,11 @@
     background: transparent;
   }
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    background: rgba(124, 58, 237, 0.08);
+    background: rgba(239, 231, 82, 0.08);
     border-radius: 2px;
   }
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    background: rgba(124, 58, 237, 0.18);
+    background: rgba(239, 231, 82, 0.18);
   }
 }
 

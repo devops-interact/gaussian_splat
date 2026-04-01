@@ -166,10 +166,10 @@ Video (MP4)
 | Hex | Role |
 |---|---|
 | `#000000` | Base background |
-| `#060606` | Elevated surfaces |
-| `#081717` | Cards, inputs |
-| `#35c889` | Primary accent (green) |
-| `#a4a4ff` | Secondary accent (lavender) |
+| `#08080f` | Elevated surfaces |
+| `#121008` | Cards, inputs |
+| `#efe752` | Primary accent (chartreuse) |
+| `#f5ec99` | Secondary accent (soft yellow) |
 
 ---
 

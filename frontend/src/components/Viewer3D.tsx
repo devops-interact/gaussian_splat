@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import { Viewer, SceneRevealMode } from '@mkkellogg/gaussian-splats-3d';
+import { Viewer, SceneRevealMode, LogLevel } from '@mkkellogg/gaussian-splats-3d';
 import {
   Camera,
   Ruler,
@@ -52,6 +52,115 @@ function maxSplatPickDistance(bbox: ModelMetadata['boundingBox']): number {
   const dz = bbox.max[2] - bbox.min[2];
   const diagonal = Math.sqrt(dx * dx + dy * dy + dz * dz);
   return Math.max(diagonal * 4, 3);
+}
+
+const PICK_RADIUS_PX = 12;
+
+type SplatMeshWithCenters = THREE.Object3D & {
+  getSplatCount?: (includeSinceLastBuild?: boolean) => number;
+  getSplatCenter?: (globalIndex: number, outCenter: THREE.Vector3, applySceneTransform?: boolean) => void;
+};
+
+function buildSplatCenterWorldCache(splatMesh: SplatMeshWithCenters): Float32Array | null {
+  const countFn = splatMesh.getSplatCount;
+  const centerFn = splatMesh.getSplatCenter;
+  if (!countFn || !centerFn) return null;
+  const n = countFn.call(splatMesh, false);
+  if (!n || n <= 0) return null;
+  const buf = new Float32Array(n * 3);
+  const p = new THREE.Vector3();
+  for (let i = 0; i < n; i++) {
+    centerFn.call(splatMesh, i, p, true);
+    buf[i * 3] = p.x;
+    buf[i * 3 + 1] = p.y;
+    buf[i * 3 + 2] = p.z;
+  }
+  return buf;
+}
+
+/**
+ * Fallback when intersectSplatMesh misses: nearest splat center to eye ray, gated by screen-space distance to cursor.
+ * (Brute force — used on click only, not every mousemove.)
+ */
+function nearestSplatCenterAlongRay(
+  camera: THREE.PerspectiveCamera,
+  ndcX: number,
+  ndcY: number,
+  centers: Float32Array,
+  canvasW: number,
+  canvasH: number,
+  maxRayPerpDist: number,
+): THREE.Vector3 | null {
+  const raycaster = new THREE.Raycaster();
+  raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+  const ray = raycaster.ray;
+  const ndcTol = (PICK_RADIUS_PX * 2) / Math.max(1, Math.min(canvasW, canvasH));
+  const ndcTolSq = ndcTol * ndcTol;
+  const maxPerpSq = maxRayPerpDist * maxRayPerpDist;
+
+  const vProj = new THREE.Vector3();
+  let bestPerpSq = Infinity;
+  let bestI = -1;
+
+  const oc = new THREE.Vector3();
+  for (let i = 0, n = centers.length / 3; i < n; i++) {
+    const px = centers[i * 3];
+    const py = centers[i * 3 + 1];
+    const pz = centers[i * 3 + 2];
+
+    oc.set(px - ray.origin.x, py - ray.origin.y, pz - ray.origin.z);
+    const t = oc.dot(ray.direction);
+    if (t < 0) continue;
+    const cx = ray.origin.x + t * ray.direction.x - px;
+    const cy = ray.origin.y + t * ray.direction.y - py;
+    const cz = ray.origin.z + t * ray.direction.z - pz;
+    const perpSq = cx * cx + cy * cy + cz * cz;
+    if (perpSq > maxPerpSq) continue;
+
+    vProj.set(px, py, pz).project(camera);
+    const dx = vProj.x - ndcX;
+    const dy = vProj.y - ndcY;
+    if (dx * dx + dy * dy > ndcTolSq) continue;
+
+    if (perpSq < bestPerpSq) {
+      bestPerpSq = perpSq;
+      bestI = i;
+    }
+  }
+
+  if (bestI < 0) return null;
+  const j = bestI * 3;
+  return new THREE.Vector3(centers[j], centers[j + 1], centers[j + 2]);
+}
+
+function removeMeasurePreviewFromScene(scene: THREE.Scene) {
+  const list: THREE.Mesh[] = [];
+  scene.traverse((o) => {
+    if (o.userData.__measurePreview && o instanceof THREE.Mesh) list.push(o);
+  });
+  for (const m of list) {
+    scene.remove(m);
+    m.geometry.dispose();
+    const mat = m.material;
+    if (Array.isArray(mat)) mat.forEach((mm) => mm.dispose());
+    else mat.dispose();
+  }
+}
+
+function setMeasurePreviewInScene(scene: THREE.Scene, position: THREE.Vector3 | null) {
+  removeMeasurePreviewFromScene(scene);
+  if (!position) return;
+  const geo = new THREE.SphereGeometry(0.014, 14, 14);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xf5ec99,
+    transparent: true,
+    opacity: 0.55,
+    depthTest: true,
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.copy(position);
+  mesh.userData.__measurePreview = true;
+  scene.add(mesh);
 }
 
 // ── Lightweight PLY header parser (metadata + positions only) ────────────────
@@ -221,6 +330,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
   });
 
   const metadataRef = useRef<ModelMetadata | null>(null);
+  const splatCentersRef = useRef<Float32Array | null>(null);
 
   const [mode, setMode] = useState<ViewerMode>('orbit');
   const [showHelp, setShowHelp] = useState(false);
@@ -264,7 +374,14 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         if (meta.vertexCount === 0) throw new Error('No visible points in PLY');
         console.log(`[GS3D] PLY parsed: ${meta.vertexCount}/${meta.totalVertices} verts, center=[${meta.center.map(v => v.toFixed(2))}]`);
 
-
+        const fRestProps = meta.properties.filter((p) => /^f_rest_\d+$/.test(p));
+        if (fRestProps.length > 0 && fRestProps.length % 3 !== 0) {
+          console.warn(
+            '[GS3D] PLY has',
+            fRestProps.length,
+            'f_rest_* properties (not divisible by 3). @mkkellogg/gaussian-splats-3d may render an empty splat pass. Re-export from a backend that runs _normalize_f_rest_fields (redeploy Docker image + new job).',
+          );
+        }
 
         const modelMeta: ModelMetadata = {
           pointCount: meta.vertexCount,
@@ -284,7 +401,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
 
         // 4. Build a Three.js scene with grid + origin axes
         const threeScene = new THREE.Scene();
-        const grid = new THREE.GridHelper(30, 30, 0x1a1425, 0x0d0b1a);
+        const grid = new THREE.GridHelper(30, 30, 0x1b1a0e, 0x121008);
         grid.position.y = -0.01;
         threeScene.add(grid);
 
@@ -313,39 +430,55 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
 
         console.log('[GS3D] Creating standalone Viewer...');
         const viewer = new Viewer({
-          cameraUp: [0, 1, 0],
-          initialCameraPosition: [0, camDist * 0.3, camDist * 0.8],
+          // MASt3R / LongSplat: OpenCV-style Y-down; align with Three.js (see FIX_GUIDE_GaussianSplat_Viewer_Measurement.md)
+          cameraUp: [0, -1, 0],
+          initialCameraPosition: [0, camDist * 0.35, camDist * 0.75],
           initialCameraLookAt: [0, 0, 0],
           rootElement: containerRef.current!,
           threeScene: threeScene,
           selfDrivenMode: true,
           useBuiltInControls: true,
           gpuAcceleratedSort: true,
-          sharedMemoryForWorkers: false,
+          sharedMemoryForWorkers: true,
           sceneRevealMode: SceneRevealMode.Instant,
           antialiased: false,
-          freeIntermediateSplatData: true,
-          logLevel: 0,
-          sphericalHarmonicsDegree: 1,
+          freeIntermediateSplatData: false,
+          logLevel: LogLevel.Warning,
+          sphericalHarmonicsDegree: 0,
         } as Record<string, unknown>);
 
         // 6. Add the splat scene
         console.log('[GS3D] Adding splat scene...');
         await viewer.addSplatScene(blobUrl, {
-          splatAlphaRemovalThreshold: 8,
+          splatAlphaRemovalThreshold: 5,
           showLoadingUI: false,
+          progressiveLoad: false,
           format: 2, // SceneFormat.Ply (0=Splat, 1=KSplat, 2=Ply, 3=Spz)
           position: [-meta.center[0], -meta.center[1], -meta.center[2]],
-          // APPLY Y-UP CORRECTION: Rotate 180° around X-axis (quaternion [1, 0, 0, 0])
           rotation: [1, 0, 0, 0],
           scale: [1, 1, 1],
         });
 
         if (disposed) return;
 
-        // 7. Start rendering
+        const splatMeshAny = viewer.splatMesh as unknown as {
+          getSplatCount?: (includeSinceLastBuild?: boolean) => number;
+        };
+        const lastBuild = splatMeshAny.getSplatCount?.();
+        const bufferTotal = splatMeshAny.getSplatCount?.(true);
+        if (lastBuild !== undefined || bufferTotal !== undefined) {
+          console.log('[GS3D] Splat count after load (lastBuild / bufferTotal):', lastBuild, '/', bufferTotal);
+        }
+
+        // 7. Start rendering (after scene is loaded — required by GaussianSplats3D)
         viewer.start();
         viewer.raycaster.raycastAgainstTrueSplatEllipsoid = true;
+        splatCentersRef.current = buildSplatCenterWorldCache(
+          viewer.splatMesh as SplatMeshWithCenters,
+        );
+        if (splatCentersRef.current) {
+          console.log('[GS3D] Splat center cache:', splatCentersRef.current.length / 3, 'points');
+        }
         viewerRef.current = viewer;
         console.log('[GS3D] Viewer started successfully');
         setLoading(false);
@@ -361,6 +494,10 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
 
     return () => {
       disposed = true;
+      splatCentersRef.current = null;
+      try {
+        document.exitPointerLock?.();
+      } catch { /* ignore */ }
       if (blobUrl) URL.revokeObjectURL(blobUrl);
       if (viewerRef.current) {
         try { viewerRef.current.dispose(); } catch { /* ignore */ }
@@ -386,20 +523,33 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       document.exitPointerLock?.();
       wt.isLocked = false;
       if (wt.rafId !== null) { cancelAnimationFrame(wt.rafId); wt.rafId = null; }
-      // Re-enable viewer's orbit controls
-      try { const v = viewer as unknown as Record<string, CallableFunction>; v.setOrbitControlsEnabled?.(true); } catch { /* ignore */ }
+      if (viewer) {
+        try {
+          const v = viewer as unknown as Record<string, CallableFunction>;
+          v.setOrbitControlsEnabled?.(true);
+        } catch { /* ignore */ }
+      }
       return;
     }
 
-    // Disable viewer's orbit controls
-    try { const v = viewer as unknown as Record<string, CallableFunction>; v.setOrbitControlsEnabled?.(false); } catch { /* ignore */ }
+    try {
+      const v = viewer as unknown as Record<string, CallableFunction>;
+      v.setOrbitControlsEnabled?.(false);
+    } catch { /* ignore */ }
 
     const camera = (viewer as unknown as { camera?: THREE.PerspectiveCamera }).camera;
     if (!camera) return;
 
     const onKeyDown = (e: KeyboardEvent) => wt.keys.add(e.code);
     const onKeyUp = (e: KeyboardEvent) => wt.keys.delete(e.code);
-    const onClick = () => { if (wt.active && !wt.isLocked) canvas.requestPointerLock(); };
+    const onClick = () => {
+      if (!wt.active || wt.isLocked || !canvas.isConnected) return;
+      try {
+        canvas.requestPointerLock();
+      } catch {
+        /* user gesture / policy / disposed canvas */
+      }
+    };
     const onPLC = () => { wt.isLocked = document.pointerLockElement === canvas; };
     const onMM = (e: MouseEvent) => {
       if (!wt.isLocked) return;
@@ -449,56 +599,53 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       wt.isLocked = false;
       if (wt.rafId !== null) { cancelAnimationFrame(wt.rafId); wt.rafId = null; }
     };
-  }, [mode]);
+  }, [mode, loading]);
+
+  // ── Canvas cursor (re-apply when viewer finishes loading and canvas exists) ──
+  useEffect(() => {
+    const canvas = containerRef.current?.querySelector('canvas');
+    if (!canvas) return;
+    if (mode === 'measure') canvas.style.cursor = 'crosshair';
+    else if (mode === 'walkthrough') canvas.style.cursor = 'none';
+    else canvas.style.cursor = 'grab';
+  }, [mode, loading]);
 
   // ── Measurement Click Handler ──────────────────────────────────────────
   const lastClickTimeRef = useRef<number>(0);
 
   useEffect(() => {
-    const canvas = containerRef.current?.querySelector('canvas');
-    if (canvas) {
-      if (mode === 'measure') {
-        canvas.style.cursor = 'crosshair';
-      } else if (mode === 'walkthrough') {
-        canvas.style.cursor = 'none';
-      } else {
-        canvas.style.cursor = 'grab';
-      }
-    }
-
     if (mode !== 'measure') return;
     const viewer = viewerRef.current;
-    if (!viewer || !canvas) return;
+    const canvas = containerRef.current?.querySelector('canvas');
+    if (loading || !viewer || !canvas) return;
 
     // Access the library's built-in raycaster and splatMesh
     // These operate in the correct coordinate space matching the rendered scene
     const viewerAny = viewer as unknown as {
       camera?: THREE.PerspectiveCamera;
+      threeScene?: THREE.Scene;
       raycaster?: {
         setFromCameraAndScreenPosition: (camera: THREE.Camera, screenPos: THREE.Vector2, screenDims: THREE.Vector2) => void;
         intersectSplatMesh: (splatMesh: THREE.Object3D, outHits?: { origin: THREE.Vector3; distance: number; splatIndex: number }[]) => { origin: THREE.Vector3; distance: number; splatIndex: number }[];
       };
       splatMesh?: THREE.Object3D;
       getRenderDimensions?: (out: THREE.Vector2) => void;
+      isLoading?: () => boolean;
     };
 
     const camera = viewerAny.camera;
     const gsRaycaster = viewerAny.raycaster;
     const splatMesh = viewerAny.splatMesh;
-    if (!camera || !gsRaycaster || !splatMesh) return;
+    const threeScene = viewerAny.threeScene;
+    if (!camera || !gsRaycaster || !splatMesh || !threeScene) return;
 
-    const onClick = (e: MouseEvent) => {
-      // Debounce clicks to prevent crashes from rapid raycasting
-      const now = performance.now();
-      if (now - lastClickTimeRef.current < 300) return;
-      lastClickTimeRef.current = now;
+    const pickWorldFromEvent = (
+      e: MouseEvent,
+      opts?: { allowNearestFallback?: boolean },
+    ): THREE.Vector3 | null => {
+      if (!splatMesh.visible) return null;
+      if (typeof viewerAny.isLoading === 'function' && viewerAny.isLoading()) return null;
 
-      // Ensure splat scene is ready
-      if (!splatMesh || splatMesh.visible === false) return;
-      if (typeof (viewerAny as any).isLoading === 'function' && (viewerAny as any).isLoading()) return;
-
-      // Map pointer into the same pixel space as getRenderDimensions (root offset size), so NDC
-      // matches the viewer even when canvas CSS box ≠ root layout (see GS3D getRenderDimensions).
       const renderDims = new THREE.Vector2();
       if (viewerAny.getRenderDimensions) {
         viewerAny.getRenderDimensions(renderDims);
@@ -517,29 +664,64 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       mousePos.x = THREE.MathUtils.clamp(mousePos.x, 0, renderDims.x);
       mousePos.y = THREE.MathUtils.clamp(mousePos.y, 0, renderDims.y);
 
+      gsRaycaster.setFromCameraAndScreenPosition(camera, mousePos, renderDims);
+      const hits: { origin: THREE.Vector3; distance: number; splatIndex: number }[] = [];
+      gsRaycaster.intersectSplatMesh(splatMesh, hits);
+      const maxDist = metadataRef.current
+        ? maxSplatPickDistance(metadataRef.current.boundingBox)
+        : 100;
+      const validHit = hits.find(h => isFinite(h.distance) && h.distance <= maxDist);
+      if (validHit) return validHit.origin.clone();
+
+      if (opts?.allowNearestFallback && splatCentersRef.current && rect.width > 0 && rect.height > 0) {
+        const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+        return nearestSplatCenterAlongRay(
+          camera,
+          ndcX,
+          ndcY,
+          splatCentersRef.current,
+          rect.width,
+          rect.height,
+          maxDist,
+        );
+      }
+      return null;
+    };
+
+    const onClick = (e: MouseEvent) => {
+      const now = performance.now();
+      if (now - lastClickTimeRef.current < 300) return;
+      lastClickTimeRef.current = now;
       try {
-        gsRaycaster.setFromCameraAndScreenPosition(camera, mousePos, renderDims);
-
-        const hits: { origin: THREE.Vector3; distance: number; splatIndex: number }[] = [];
-        gsRaycaster.intersectSplatMesh(splatMesh, hits);
-
-        // @mkkellogg/gaussian-splats-3d sorts hits by ascending distance; take closest within scale-aware max.
-        const maxDist = metadataRef.current
-          ? maxSplatPickDistance(metadataRef.current.boundingBox)
-          : 100;
-        const validHit = hits.find(h => isFinite(h.distance) && h.distance <= maxDist);
-        if (validHit) {
-          handleAddMeasurePoint(validHit.origin.clone());
-        }
+        const p = pickWorldFromEvent(e, { allowNearestFallback: true });
+        if (p) handleAddMeasurePoint(p);
       } catch (err) {
-        // Splat sorting in the worker can occasionally cause index out of bounds during intersect
         console.warn('[GS3D] Raycaster intersection failed (likely during mid-sort):', err);
       }
     };
 
+    let lastHoverMs = 0;
+    const onMove = (e: MouseEvent) => {
+      const now = performance.now();
+      if (now - lastHoverMs < 50) return;
+      lastHoverMs = now;
+      try {
+        const p = pickWorldFromEvent(e);
+        setMeasurePreviewInScene(threeScene, p);
+      } catch {
+        removeMeasurePreviewFromScene(threeScene);
+      }
+    };
+
     canvas.addEventListener('click', onClick);
-    return () => canvas.removeEventListener('click', onClick);
-  }, [mode, measurePhase, calibration]);
+    canvas.addEventListener('mousemove', onMove);
+    return () => {
+      canvas.removeEventListener('click', onClick);
+      canvas.removeEventListener('mousemove', onMove);
+      removeMeasurePreviewFromScene(threeScene);
+    };
+  }, [mode, measurePhase, calibration, loading]);
 
   // ── Measurement Visuals (add/remove spheres and lines in the threeScene) ──
   useEffect(() => {
@@ -554,11 +736,11 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
     toRemove.forEach(o => { scene.remove(o); });
 
     const sphereGeo = new THREE.SphereGeometry(0.012, 12, 12);
-    const purpleMat = new THREE.MeshBasicMaterial({ color: '#7c3aed' });
-    const lavenderMat = new THREE.MeshBasicMaterial({ color: '#a78bfa' });
+    const primaryMat = new THREE.MeshBasicMaterial({ color: '#efe752' });
+    const secondaryMat = new THREE.MeshBasicMaterial({ color: '#f5ec99' });
 
     visibleMeasurePoints.forEach((pt, i) => {
-      const mesh = new THREE.Mesh(sphereGeo, i === 0 ? lavenderMat : purpleMat);
+      const mesh = new THREE.Mesh(sphereGeo, i === 0 ? secondaryMat : primaryMat);
       mesh.position.copy(pt.position);
       mesh.userData.__measure = true;
       scene.add(mesh);
@@ -566,7 +748,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
 
     if (visibleMeasurePoints.length === 2) {
       const lineGeo = new THREE.BufferGeometry().setFromPoints(visibleMeasurePoints.map(p => p.position));
-      const lineMat = new THREE.LineBasicMaterial({ color: '#7c3aed', linewidth: 2 });
+      const lineMat = new THREE.LineBasicMaterial({ color: '#efe752', linewidth: 2 });
       const line = new THREE.Line(lineGeo, lineMat);
       line.userData.__measure = true;
       scene.add(line);
@@ -710,14 +892,14 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       ctx.fill();
 
       // Subtle border
-      ctx.strokeStyle = 'rgba(53, 200, 137, 0.25)';
+      ctx.strokeStyle = 'rgba(239, 231, 82, 0.25)';
       ctx.lineWidth = Math.max(1, dpr);
       ctx.stroke();
 
       // 5. Draw title
       let textY = panelY + padY + titleFontSize;
       ctx.font = `bold ${titleFontSize}px monospace`;
-      ctx.fillStyle = '#7c3aed';
+      ctx.fillStyle = '#efe752';
       ctx.fillText(title, panelX + padX, textY);
 
       // 6. Draw info lines
@@ -729,11 +911,11 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         textY += lineHeight;
         // Highlight measurement value in accent color
         if (line.startsWith('Measurement:')) {
-          ctx.fillStyle = '#7c3aed';
+          ctx.fillStyle = '#efe752';
           ctx.fillText(line, panelX + padX, textY);
           ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
         } else if (line.startsWith('Scale:')) {
-          ctx.fillStyle = '#a78bfa';
+          ctx.fillStyle = '#f5ec99';
           ctx.fillText(line, panelX + padX, textY);
           ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
         } else {
@@ -744,7 +926,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       // 7. Small branding in top-right corner
       const brand = '3D Scanner';
       ctx.font = `bold ${Math.max(10, Math.round(10 * dpr))}px monospace`;
-      ctx.fillStyle = 'rgba(124, 58, 237, 0.4)';
+      ctx.fillStyle = 'rgba(239, 231, 82, 0.4)';
       const brandW = ctx.measureText(brand).width;
       ctx.fillText(brand, w - brandW - margin, margin + Math.round(10 * dpr));
 
@@ -778,8 +960,8 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       {loading && !error && (
         <div className="absolute inset-0 flex items-center justify-center z-20 bg-[#08080f]/80">
           <div className="flex flex-col items-center gap-3">
-            <div className="w-8 h-8 border-2 border-[#7c3aed]/30 border-t-[#7c3aed] rounded-full animate-spin" />
-            <span className="text-[#a78bfa]/70 font-mono text-xs">Loading Gaussian Splats...</span>
+            <div className="w-8 h-8 border-2 border-[#efe752]/30 border-t-[#efe752] rounded-full animate-spin" />
+            <span className="text-[#f5ec99]/70 font-mono text-xs">Loading Gaussian Splats...</span>
           </div>
         </div>
       )}
@@ -817,7 +999,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       {mode === 'measure' && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10">
           <div className="bg-black/80 backdrop-blur-md border border-white/[0.06] rounded-xl px-4 py-2.5 flex items-center gap-3 font-mono text-xs">
-            <span className={`text-[10px] px-1.5 py-0.5 rounded ${measurePhase === 'calibrate' ? 'bg-[#a78bfa]/15 text-[#a78bfa]' : 'bg-[#7c3aed]/15 text-[#7c3aed]'}`}>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded ${measurePhase === 'calibrate' ? 'bg-[#f5ec99]/15 text-[#f5ec99]' : 'bg-[#efe752]/15 text-[#efe752]'}`}>
               {measurePhase === 'calibrate' ? 'STEP 1: Calibrate' : 'STEP 2: Measure'}
             </span>
             <div className="border-l border-white/[0.06] h-5" />
@@ -825,11 +1007,11 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
             {measurePhase === 'calibrate' ? (
               <>
                 <div className="flex items-center gap-2">
-                  <span className={`flex items-center gap-1 ${calibPoints.length >= 1 ? 'text-[#a78bfa]' : 'text-white/30'}`}>
+                  <span className={`flex items-center gap-1 ${calibPoints.length >= 1 ? 'text-[#f5ec99]' : 'text-white/30'}`}>
                     <CircleDot className="w-3 h-3" /> A {calibPoints.length >= 1 ? '✓' : ''}
                   </span>
                   <span className="text-white/15">&rarr;</span>
-                  <span className={`flex items-center gap-1 ${calibPoints.length >= 2 ? 'text-[#7c3aed]' : 'text-white/30'}`}>
+                  <span className={`flex items-center gap-1 ${calibPoints.length >= 2 ? 'text-[#efe752]' : 'text-white/30'}`}>
                     <CircleDot className="w-3 h-3" /> B {calibPoints.length >= 2 ? '✓' : ''}
                   </span>
                 </div>
@@ -844,13 +1026,13 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
                         min="0.01"
                         value={meterInput}
                         onChange={e => setMeterInput(e.target.value)}
-                        className="w-16 bg-[#0d0b1a] border border-white/[0.08] rounded px-1.5 py-0.5 text-white text-xs font-mono text-center focus:border-[#7c3aed]/40 focus:outline-none"
+                        className="w-16 bg-[#121008] border border-white/[0.08] rounded px-1.5 py-0.5 text-white text-xs font-mono text-center focus:border-[#efe752]/40 focus:outline-none"
                       />
                       <span className="text-white/40">m</span>
                     </div>
                     <button
                       onClick={handleConfirmCalibration}
-                      className="px-2 py-0.5 rounded bg-[#7c3aed]/15 text-[#7c3aed] border border-[#7c3aed]/20 hover:bg-[#7c3aed]/25 transition-colors"
+                      className="px-2 py-0.5 rounded bg-[#efe752]/15 text-[#efe752] border border-[#efe752]/20 hover:bg-[#efe752]/25 transition-colors"
                     >
                       Confirm
                     </button>
@@ -860,11 +1042,11 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
             ) : (
               <>
                 <div className="flex items-center gap-2">
-                  <span className={`flex items-center gap-1 ${measurePoints.length >= 1 ? 'text-[#a78bfa]' : 'text-white/30'}`}>
+                  <span className={`flex items-center gap-1 ${measurePoints.length >= 1 ? 'text-[#f5ec99]' : 'text-white/30'}`}>
                     <CircleDot className="w-3 h-3" /> A {measurePoints.length >= 1 ? '✓' : ''}
                   </span>
                   <span className="text-white/15">&rarr;</span>
-                  <span className={`flex items-center gap-1 ${measurePoints.length >= 2 ? 'text-[#7c3aed]' : 'text-white/30'}`}>
+                  <span className={`flex items-center gap-1 ${measurePoints.length >= 2 ? 'text-[#efe752]' : 'text-white/30'}`}>
                     <CircleDot className="w-3 h-3" /> B {measurePoints.length >= 2 ? '✓' : ''}
                   </span>
                 </div>
@@ -872,8 +1054,8 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
                   <>
                     <div className="border-l border-white/[0.06] h-5" />
                     <div className="flex items-center gap-2">
-                      <Ruler className="w-3.5 h-3.5 text-[#7c3aed]" />
-                      <span className="text-[#7c3aed] text-sm font-semibold">{measuredDistance.toFixed(3)}</span>
+                      <Ruler className="w-3.5 h-3.5 text-[#efe752]" />
+                      <span className="text-[#efe752] text-sm font-semibold">{measuredDistance.toFixed(3)}</span>
                       <span className="text-white/30">m</span>
                     </div>
                   </>
@@ -887,7 +1069,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
                   </>
                 )}
                 <div className="border-l border-white/[0.06] h-5" />
-                <button onClick={handleResetCalibration} className="flex items-center gap-1 text-[#a78bfa]/60 hover:text-[#a78bfa] transition-colors text-[10px]">
+                <button onClick={handleResetCalibration} className="flex items-center gap-1 text-[#f5ec99]/60 hover:text-[#f5ec99] transition-colors text-[10px]">
                   Recalibrate
                 </button>
                 {calibration && (
@@ -937,8 +1119,8 @@ function ToolbarButton({ icon, label, active, onClick }: {
   icon: React.ReactNode; label: string; active?: boolean; onClick: () => void;
 }) {
   const color = active
-    ? 'bg-[#7c3aed]/15 text-[#7c3aed] border-[#7c3aed]/20'
-    : 'bg-black/70 text-white/50 border-white/[0.06] hover:text-white hover:bg-[#0d0b1a]';
+    ? 'bg-[#efe752]/15 text-[#efe752] border-[#efe752]/20'
+    : 'bg-black/70 text-white/50 border-white/[0.06] hover:text-white hover:bg-[#121008]';
   return (
     <button
       onClick={onClick}

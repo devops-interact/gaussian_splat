@@ -86,6 +86,18 @@ grep -q "passlib" backend/requirements.txt || { echo -e "${RED}❌ passlib missi
 grep -q "plyfile" backend/requirements.txt || { echo -e "${RED}❌ plyfile missing from requirements.txt${NC}"; exit 1; }
 echo -e "${GREEN}✓ Backend requirements OK${NC}"
 
+# COOP/COEP + CORP (SharedArrayBuffer in GS3D workers; Vercel SPA must also send COOP/COEP — see frontend/vercel.json)
+echo -e "${BLUE}Verifying cross-origin isolation headers in backend...${NC}"
+grep -q "Cross-Origin-Embedder-Policy" backend/main.py || {
+    echo -e "${RED}❌ backend/main.py missing Cross-Origin-Embedder-Policy (COEP)${NC}"
+    exit 1
+}
+grep -q "Cross-Origin-Resource-Policy" backend/main.py || {
+    echo -e "${RED}❌ backend/main.py missing Cross-Origin-Resource-Policy (CORP)${NC}"
+    exit 1
+}
+echo -e "${GREEN}✓ Backend isolation headers present${NC}"
+
 # ============================================
 # STEP 1: DOCKER LOGIN
 # ============================================
@@ -107,7 +119,7 @@ echo -e "${YELLOW}=== STEP 2: BUILD AND PUSH ===${NC}"
 echo -e "Image: ${FULL_IMAGE}"
 echo -e "Platform: linux/amd64"
 echo -e "Target GPU: A40 (sm_86, 48GB VRAM)"
-echo -e "Theme: Deep Purple / Dark"
+echo -e "Theme: Dark + chartreuse accent (#efe752)"
 echo -e "Log file: ${LOG_FILE}"
 echo ""
 
@@ -132,7 +144,7 @@ if [ ${PIPESTATUS[0]} -eq 0 ]; then
     echo ""
     echo -e "${GREEN}✅ BUILD AND PUSH SUCCESSFUL${NC}"
     echo ""
-    echo -e "${PURPLE}=== DEPLOYMENT READY (PURPLE EDITION) ===${NC}"
+    echo -e "${PURPLE}=== DEPLOYMENT READY ===${NC}"
     echo ""
     echo -e "Docker Image: ${FULL_IMAGE}"
     echo ""
@@ -146,7 +158,8 @@ if [ ${PIPESTATUS[0]} -eq 0 ]; then
     echo -e "  │ Expose HTTP Ports  │ 8000                                         │"
     echo -e "  └────────────────────┴──────────────────────────────────────────────┘"
     echo ""
-    echo -e "${PURPLE}Viewer: GaussianSplats3D picking (viewport-aligned + ellipsoid), measure calibration, purple UI${NC}"
+    echo -e "${PURPLE}Viewer: GaussianSplats3D (GPU sort + SharedArrayBuffer), COOP/COEP/CORP on API, PLY gzip fallback on /model, chartreuse UI${NC}"
+    echo -e "${BLUE}Vercel: ensure frontend/vercel.json COOP+COEP is deployed with the SPA (cross-origin isolation).${NC}"
     echo -e "${BLUE}Tip: BUILD_NO_CACHE=1 ./build-and-push.sh for a full CUDA layer rebuild${NC}"
     echo ""
 else

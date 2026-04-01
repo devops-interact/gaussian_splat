@@ -75,7 +75,7 @@ export default function Dashboard() {
         </div>
         <button
           onClick={() => setShowCreate(true)}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#7c3aed] text-white font-mono font-semibold hover:bg-[#7c3aed]/90 transition-colors"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#efe752] text-black font-mono font-semibold hover:bg-[#e5dd4a] transition-colors"
         >
           <Plus className="w-4 h-4" />
           New Project
@@ -94,13 +94,13 @@ export default function Dashboard() {
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               placeholder="Project name"
-              className="flex-1 px-4 py-2 rounded-lg bg-[#0a0a0a] border border-white/[0.08] text-white placeholder-gray-500 font-mono text-sm focus:border-[#7c3aed]/50 outline-none"
+              className="flex-1 px-4 py-2 rounded-lg bg-[#0a0a0a] border border-white/[0.08] text-white placeholder-gray-500 font-mono text-sm focus:border-[#efe752]/50 outline-none"
               autoFocus
             />
             <button
               type="submit"
               disabled={!newName.trim() || creating}
-              className="px-4 py-2 rounded-lg bg-[#7c3aed] text-white font-mono font-medium disabled:opacity-50"
+              className="px-4 py-2 rounded-lg bg-[#efe752] text-black font-mono font-medium disabled:opacity-50"
             >
               {creating ? 'Creating...' : 'Create'}
             </button>
@@ -124,7 +124,7 @@ export default function Dashboard() {
           <p className="text-gray-600 text-sm mb-4">Create a project to start adding 3D scans</p>
           <button
             onClick={() => setShowCreate(true)}
-            className="px-4 py-2 rounded-lg bg-[#7c3aed] text-white font-mono font-medium"
+            className="px-4 py-2 rounded-lg bg-[#efe752] text-black font-mono font-medium"
           >
             Create Project
           </button>
@@ -139,14 +139,14 @@ export default function Dashboard() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
                 transition={{ delay: i * 0.05 }}
-                className="relative rounded-xl border border-white/[0.08] bg-[#08080f] p-4 hover:border-[#7c3aed]/[0.15] transition-colors group"
+                className="relative rounded-xl border border-white/[0.08] bg-[#08080f] p-4 hover:border-[#efe752]/[0.15] transition-colors group"
               >
                 <button
                   onClick={() => navigate(`/projects/${p.id}`)}
                   className="block w-full text-left"
                 >
                   <div className="flex items-start justify-between mb-2">
-                    <FolderOpen className="w-8 h-8 text-[#7c3aed]/50" />
+                    <FolderOpen className="w-8 h-8 text-[#efe752]/50" />
                     <button
                       onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === p.id ? null : p.id); }}
                       className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-white/[0.06] text-gray-400"
