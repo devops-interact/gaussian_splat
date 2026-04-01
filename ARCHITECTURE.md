@@ -189,6 +189,16 @@ The backend converter also detects whether `f_dc` values are already in `[0,1]` 
 
 **Deployment checklist (Vercel + RunPod):** The SPA (Vercel) and the API/training image (Docker Hub → RunPod) should track the **same `main` commit** when you change PLY or viewer behavior. After merging backend fixes, run `./build-and-push.sh`, **recreate or pull** `interactdevops/gaussian-room-reconstruction:latest` on the pod, then run a **new job**. In container logs, successful normalization logs *Normalized f_rest for web viewer* and export diagnostics should show **9** (or 0) `f_rest_*` fields, not **11**. Old `model.ply` files on disk are not rewritten automatically.
 
+### 3D viewer troubleshooting (GaussianSplats3D)
+
+Use this order to separate **data** issues from **runtime** issues:
+
+1. **Console logs from `Viewer3D`:** After load, check `[GS3D] Splat count after load` and `[GS3D] Splat center cache`. Counts at **0** or missing point to PLY parse / SH layout, not “Three.js not drawing.”
+2. **`f_rest_*` count:** In the PLY header, `f_rest_*` properties must be a **multiple of three** for `@mkkellogg/gaussian-splats-3d`; otherwise the splat pass can be empty while the grid/axes still render.
+3. **`crossOriginIsolated`:** Run `crossOriginIsolated` in the browser console on the deployed app. If **false**, `SharedArrayBuffer` paths in the library may fail; align COOP/COEP on the HTML response (`frontend/vercel.json`) with CORP on the API (`backend/main.py`).
+4. **Network:** Confirm the PLY `fetch` is **200** and the API sends **`Cross-Origin-Resource-Policy: cross-origin`** so a COEP-isolated page can read the body.
+5. **Camera vs. scene:** If splat count is healthy but the view looks empty, compare bbox logs to camera position (centering / scale); misalignment is rarer than bad PLY SH columns.
+
 ---
 
 ## API Endpoints

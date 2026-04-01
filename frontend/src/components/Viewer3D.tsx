@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { Viewer, SceneRevealMode, LogLevel } from '@mkkellogg/gaussian-splats-3d';
+import { getApiBaseUrl } from '@/lib/apiBase';
 import {
   Camera,
   Ruler,
@@ -161,6 +162,17 @@ function setMeasurePreviewInScene(scene: THREE.Scene, position: THREE.Vector3 | 
   mesh.position.copy(position);
   mesh.userData.__measurePreview = true;
   scene.add(mesh);
+}
+
+/** Avoid innerHTML + Viewer.dispose() both touching the same nodes (removeChild DOMException). */
+function removeContainerChildrenSafe(el: HTMLElement) {
+  while (el.firstChild) {
+    try {
+      el.removeChild(el.firstChild);
+    } catch {
+      break;
+    }
+  }
 }
 
 // ── Lightweight PLY header parser (metadata + positions only) ────────────────
@@ -353,7 +365,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
     let disposed = false;
     let blobUrl: string | null = null;
 
-    const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+    const apiBase = getApiBaseUrl();
     const fullUrl = modelUrl.startsWith('http') ? modelUrl : `${apiBase}${modelUrl}`;
 
     setLoading(true);
@@ -499,13 +511,18 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         document.exitPointerLock?.();
       } catch { /* ignore */ }
       if (blobUrl) URL.revokeObjectURL(blobUrl);
-      if (viewerRef.current) {
-        try { viewerRef.current.dispose(); } catch { /* ignore */ }
-        viewerRef.current = null;
+      const root = containerRef.current;
+      const viewer = viewerRef.current;
+      viewerRef.current = null;
+      if (viewer) {
+        try {
+          viewer.dispose();
+        } catch {
+          /* GaussianSplats3D may removeChild after React already detached nodes */
+        }
       }
-      // Clear the container (Viewer creates a canvas inside it)
-      if (containerRef.current) {
-        containerRef.current.innerHTML = '';
+      if (root) {
+        removeContainerChildrenSafe(root);
       }
     };
   }, [modelUrl, onModelMetadata]);

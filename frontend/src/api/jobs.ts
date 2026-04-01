@@ -1,8 +1,8 @@
 import axios from 'axios';
 import { JobStatusResponse } from '../types/job';
+import { getApiBaseUrl } from '../lib/apiBase';
 
-// Use environment variable for API URL, fallback to localhost for development
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE_URL = getApiBaseUrl();
 const API_JOBS_URL = `${API_BASE_URL}/api/jobs`;
 
 export interface UploadResponse {

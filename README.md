@@ -39,7 +39,16 @@ docker system prune -af && docker builder prune -af
 
 ### 3. Deploy Frontend to Vercel
 
-Set environment variable:
+The SPA must reach your RunPod API over HTTPS. Pick **one** of these patterns:
+
+| Approach | What to do |
+|---|---|
+| **A. Explicit API URL (simplest)** | In Vercel → Settings → Environment Variables → **Production**, set `VITE_API_BASE_URL` to your RunPod HTTPS origin with **no trailing slash**, e.g. `https://your-pod-id-8000.proxy.runpod.net`. Rebuild the project after changing env vars (Vite bakes this in at build time). |
+| **B. Same-origin `/api` proxy** | Leave `VITE_API_BASE_URL` **unset** for Production. The app then calls relative URLs like `/api/projects`. Add **rewrites** in `frontend/vercel.json` so `/api/:path*` is forwarded to your RunPod URL (replace the destination with your pod): `{"source": "/api/:path*", "destination": "https://YOUR_RUNPOD_HOST/api/:path*"}` alongside the existing `headers` block. |
+
+If Production is built **without** `VITE_API_BASE_URL` and **without** rewrites, the browser will request `/api/...` on the Vercel domain only — those routes will 404 unless you add rewrites or a serverless proxy.
+
+Example env (approach A):
 
 ```
 VITE_API_BASE_URL=https://your-pod-id-8000.proxy.runpod.net

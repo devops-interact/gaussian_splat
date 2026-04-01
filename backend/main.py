@@ -24,6 +24,17 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
+# Explicit list: browsers sending Authorization need this on preflight responses;
+# Access-Control-Allow-Headers: * is not sufficient for that case in Firefox / stricter Chrome.
+CORS_ALLOW_HEADERS = [
+    "Authorization",
+    "Content-Type",
+    "Accept",
+    "Origin",
+    "X-Requested-With",
+]
+CORS_ALLOW_HEADERS_VALUE = ", ".join(CORS_ALLOW_HEADERS)
+
 # Initialize database and seed demo user
 from database import init_db
 init_db()
@@ -36,7 +47,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=CORS_ALLOW_HEADERS,
     expose_headers=["*"],
 )
 
@@ -54,7 +65,7 @@ async def ensure_cors_headers(request: Request, call_next):
             headers={
                 "Access-Control-Allow-Origin": "*",
                 "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-                "Access-Control-Allow-Headers": "*",
+                "Access-Control-Allow-Headers": CORS_ALLOW_HEADERS_VALUE,
                 "Access-Control-Max-Age": "86400",
                 "Cross-Origin-Opener-Policy": "same-origin",
                 "Cross-Origin-Embedder-Policy": "require-corp",
@@ -65,7 +76,7 @@ async def ensure_cors_headers(request: Request, call_next):
     response = await call_next(request)
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-    response.headers["Access-Control-Allow-Headers"] = "*"
+    response.headers["Access-Control-Allow-Headers"] = CORS_ALLOW_HEADERS_VALUE
     # Cross-origin isolation: SharedArrayBuffer in gaussian-splats-3d workers
     response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
     response.headers.setdefault("Cross-Origin-Embedder-Policy", "require-corp")

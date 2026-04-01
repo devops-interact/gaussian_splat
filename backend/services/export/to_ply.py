@@ -12,6 +12,8 @@ import re
 import shutil
 from pathlib import Path
 
+from services.longsplat.longsplat_to_3dgs_converter import rewrite_ply_sanitize_f_rest_inplace
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,6 +51,7 @@ async def export_to_ply(
     if model_ply.exists():
         logger.info(f"Using converter output: {model_ply}")
         shutil.copy2(model_ply, output_ply)
+        rewrite_ply_sanitize_f_rest_inplace(output_ply)
         _log_ply_color_info(output_ply)
         return output_ply
 
@@ -58,6 +61,7 @@ async def export_to_ply(
         source_ply = _pick_latest_ply(ply_files)
         logger.info(f"Using root PLY (no model.ply found): {source_ply}")
         shutil.copy2(source_ply, output_ply)
+        rewrite_ply_sanitize_f_rest_inplace(output_ply)
         _log_ply_color_info(output_ply)
         return output_ply
 
@@ -67,6 +71,7 @@ async def export_to_ply(
         source_ply = _pick_latest_ply(ply_files)
         logger.warning(f"Using raw training PLY (may lack RGB): {source_ply}")
         shutil.copy2(source_ply, output_ply)
+        rewrite_ply_sanitize_f_rest_inplace(output_ply)
         _log_ply_color_info(output_ply)
         return output_ply
 
@@ -76,6 +81,7 @@ async def export_to_ply(
         source_ply = _pick_latest_ply(ply_files)
         logger.warning(f"Fallback PLY: {source_ply}")
         shutil.copy2(source_ply, output_ply)
+        rewrite_ply_sanitize_f_rest_inplace(output_ply)
         _log_ply_color_info(output_ply)
         return output_ply
 
@@ -94,8 +100,19 @@ def _log_ply_color_info(ply_path: Path) -> None:
         vertex = plydata["vertex"]
         props = [p.name for p in vertex.properties]
         n = len(vertex.data)
-
-        logger.info(f"PLY exported: {n} vertices, props={props[:20]}")
+        frest = [p for p in props if re.match(r"^f_rest_\d+$", p)]
+        frest.sort(key=lambda x: int(x.split("_")[-1]))
+        logger.info(
+            "PLY exported: %s vertices, f_rest_* count=%s, props(head)=%s",
+            n,
+            len(frest),
+            props[:20],
+        )
+        if frest and len(frest) % 3 != 0:
+            logger.warning(
+                "  f_rest_* count %d is not divisible by 3 — web viewer may show empty splats",
+                len(frest),
+            )
 
         # Check RGB
         if "red" in props:

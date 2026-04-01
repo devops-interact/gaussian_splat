@@ -9,6 +9,7 @@ import type { ModelMetadata } from '@/components/Viewer3D';
 import { Card, CardContent } from '@/components/ui/card';
 import { Box, Download, ChevronDown, FileBox, FileArchive, FileCode } from 'lucide-react';
 import { downloadModel } from '@/api/jobs';
+import { getApiBaseUrl } from '@/lib/apiBase';
 
 export default function Home() {
   const [jobId, setJobId] = useState<string | null>(null);
@@ -73,7 +74,7 @@ export default function Home() {
   const handleObjDownload = () => {
     if (!objUrl) return;
     setDownloadOpen(false);
-    const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+    const apiBase = getApiBaseUrl();
     const fullUrl = objUrl.startsWith('http') ? objUrl : `${apiBase}${objUrl}`;
     const a = document.createElement('a');
     a.href = fullUrl;

@@ -11,6 +11,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Box, Download, ChevronDown, FileBox, FileArchive, FileCode, ArrowLeft } from 'lucide-react';
 import { downloadModel } from '@/api/jobs';
 import { getScan } from '@/api/scans';
+import { getApiBaseUrl } from '@/lib/apiBase';
 
 export default function ScanView() {
   const { projectId, scanId } = useParams<{ projectId: string; scanId: string }>();
@@ -90,7 +91,7 @@ export default function ScanView() {
   const handleObjDownload = () => {
     if (!objUrl) return;
     setDownloadOpen(false);
-    const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+    const apiBase = getApiBaseUrl();
     const fullUrl = objUrl.startsWith('http') ? objUrl : `${apiBase}${objUrl}`;
     const a = document.createElement('a');
     a.href = fullUrl;

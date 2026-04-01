@@ -56,6 +56,82 @@ def _normalize_f_rest_fields(vertex_data: np.ndarray) -> Tuple[np.ndarray, int]:
     return new_data, r
 
 
+def _ordered_f_rest_property_names(prop_names: List[str]) -> List[str]:
+    """All f_rest_* names in numeric order (from PLY header order / properties)."""
+    found: List[Tuple[int, str]] = []
+    for n in prop_names:
+        m = re.match(r"f_rest_(\d+)$", n)
+        if m:
+            found.append((int(m.group(1)), n))
+    found.sort(key=lambda x: x[0])
+    return [x[1] for x in found]
+
+
+def normalize_vertex_f_rest_by_property_names(vertex, prop_names: List[str]) -> Tuple[np.ndarray, int]:
+    """
+    Drop trailing f_rest_* columns so count is divisible by 3, using PLY property names.
+    Works even when vertex.data.dtype.names is missing or incomplete (plyfile edge cases).
+    """
+    ordered_frest = _ordered_f_rest_property_names(prop_names)
+    k = len(ordered_frest)
+    if k == 0:
+        if vertex.data.dtype.names is not None:
+            return _normalize_f_rest_fields(vertex.data)
+        return vertex.data, 0
+
+    r = k % 3
+    to_drop = set(ordered_frest[-r:]) if r else set()
+
+    if r == 0 and vertex.data.dtype.names is not None:
+        return _normalize_f_rest_fields(vertex.data)
+
+    keep_names = [n for n in prop_names if n not in to_drop]
+    n_verts = len(vertex.data)
+    if n_verts == 0:
+        return vertex.data, 0
+
+    descr: List[Tuple[str, np.dtype]] = []
+    for n in keep_names:
+        arr = np.asarray(vertex[n])
+        descr.append((n, arr.dtype))
+    new_dtype = np.dtype(descr)
+    new_data = np.empty(n_verts, dtype=new_dtype)
+    for n in keep_names:
+        new_data[n] = np.asarray(vertex[n])
+
+    if r != 0:
+        logger.info(
+            "Normalized f_rest for web viewer: dropped %d incomplete SH column(s) (%d -> %d): %s",
+            r,
+            k,
+            k - r,
+            sorted(to_drop, key=lambda x: int(x.split("_")[-1])),
+        )
+    return new_data, r
+
+
+def rewrite_ply_sanitize_f_rest_inplace(ply_path: Path) -> bool:
+    """
+    If exported PLY has f_rest_* count not divisible by 3, rewrite file in place for web viewer.
+    Returns True if file was rewritten.
+    """
+    try:
+        plydata = PlyData.read(str(ply_path))
+        vertex = plydata["vertex"]
+        prop_names = [p.name for p in vertex.properties]
+        frest = _ordered_f_rest_property_names(prop_names)
+        if not frest or len(frest) % 3 == 0:
+            return False
+        data, _ = normalize_vertex_f_rest_by_property_names(vertex, prop_names)
+        new_vertex = PlyElement.describe(data, "vertex")
+        PlyData([new_vertex], text=False).write(str(ply_path))
+        logger.info("Sanitized f_rest in place for web viewer: %s", ply_path)
+        return True
+    except Exception as e:
+        logger.warning("Could not sanitize f_rest on %s: %s", ply_path, e)
+        return False
+
+
 def _pick_latest_ply(ply_files):
     """Pick the PLY file from the highest training iteration (numeric sort).
     
@@ -226,29 +302,37 @@ def _add_rgb_colors_to_3dgs_ply(source_ply: Path, output_ply: Path) -> bool:
         plydata = PlyData.read(str(source_ply))
         vertex = plydata['vertex']
         prop_names = [prop.name for prop in vertex.properties]
-        num_points = len(vertex.data)
+        ordered_frest = _ordered_f_rest_property_names(prop_names)
+        pre_bad_frest = len(ordered_frest) % 3 != 0
 
-        data, f_rest_dropped = _normalize_f_rest_fields(vertex.data)
+        data, f_rest_dropped = normalize_vertex_f_rest_by_property_names(vertex, prop_names)
         prop_names_set = set(data.dtype.names or ())
+        num_points = len(data)
 
-        # Check if RGB properties already exist — if so, preserve them (still rewrite if f_rest fixed)
-        if 'red' in prop_names_set and 'green' in prop_names_set and 'blue' in prop_names_set:
-            if f_rest_dropped == 0:
-                logger.info(
-                    "RGB properties already exist in source PLY — preserving original colors (not overwriting)"
-                )
-                import shutil
-                shutil.copy2(source_ply, output_ply)
-                return True
-            new_vertex = PlyElement.describe(data, 'vertex')
+        has_rgb = (
+            "red" in prop_names_set
+            and "green" in prop_names_set
+            and "blue" in prop_names_set
+        )
+
+        # Never copy source verbatim if f_rest count was bad for GS3D (11 cols, etc.)
+        if has_rgb and f_rest_dropped == 0 and not pre_bad_frest:
+            logger.info(
+                "RGB properties already exist in source PLY — preserving original colors (not overwriting)"
+            )
+            import shutil
+            shutil.copy2(source_ply, output_ply)
+            return True
+        if has_rgb:
+            new_vertex = PlyElement.describe(data, "vertex")
             PlyData([new_vertex], text=False).write(str(output_ply))
             logger.info("Wrote PLY after f_rest normalization (RGB preserved from source)")
             return True
 
         # Extract SH DC coefficients
-        f_dc_0 = data['f_dc_0']
-        f_dc_1 = data['f_dc_1']
-        f_dc_2 = data['f_dc_2']
+        f_dc_0 = data["f_dc_0"]
+        f_dc_1 = data["f_dc_1"]
+        f_dc_2 = data["f_dc_2"]
 
         features_dc = np.stack([f_dc_0, f_dc_1, f_dc_2], axis=-1)
         rgb = sh_to_rgb(features_dc)
