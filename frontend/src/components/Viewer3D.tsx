@@ -71,6 +71,7 @@ function buildSplatCenterWorldCache(splatMesh: SplatMeshWithCenters): Float32Arr
   const buf = new Float32Array(n * 3);
   const p = new THREE.Vector3();
   for (let i = 0; i < n; i++) {
+    // true = apply splat scene transform → same world space as camera.project / picking ray
     centerFn.call(splatMesh, i, p, true);
     buf[i * 3] = p.x;
     buf[i * 3 + 1] = p.y;
@@ -79,23 +80,32 @@ function buildSplatCenterWorldCache(splatMesh: SplatMeshWithCenters): Float32Arr
   return buf;
 }
 
+/** NDC for Three.js Raycaster; mousePos is top-left origin in same pixel units as renderDims (see getRenderDimensions). */
+function ndcFromMousePos(mousePos: THREE.Vector2, renderDims: THREE.Vector2): { ndcX: number; ndcY: number } {
+  const w = Math.max(1e-6, renderDims.x);
+  const h = Math.max(1e-6, renderDims.y);
+  return {
+    ndcX: (mousePos.x / w) * 2 - 1,
+    ndcY: -(mousePos.y / h) * 2 + 1,
+  };
+}
+
 /**
- * Fallback when intersectSplatMesh misses: nearest splat center to eye ray, gated by screen-space distance to cursor.
- * (Brute force — used on click only, not every mousemove.)
+ * Primary measure/hover pick: nearest splat center to eye ray, gated by screen-space distance to cursor.
+ * renderDims must match the viewer render buffer (same as setFromCameraAndScreenPosition).
  */
 function nearestSplatCenterAlongRay(
   camera: THREE.PerspectiveCamera,
   ndcX: number,
   ndcY: number,
   centers: Float32Array,
-  canvasW: number,
-  canvasH: number,
+  renderDims: THREE.Vector2,
   maxRayPerpDist: number,
 ): THREE.Vector3 | null {
   const raycaster = new THREE.Raycaster();
   raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
   const ray = raycaster.ray;
-  const ndcTol = (PICK_RADIUS_PX * 2) / Math.max(1, Math.min(canvasW, canvasH));
+  const ndcTol = (PICK_RADIUS_PX * 2) / Math.max(1, Math.min(renderDims.x, renderDims.y));
   const ndcTolSq = ndcTol * ndcTol;
   const maxPerpSq = maxRayPerpDist * maxRayPerpDist;
 
@@ -381,6 +391,16 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         if (disposed) return;
         console.log('[GS3D] PLY fetched:', buffer.byteLength, 'bytes');
 
+        const b0 = new Uint8Array(buffer, 0, Math.min(3, buffer.byteLength));
+        if (b0.length >= 2 && b0[0] === 0x1f && b0[1] === 0x8b) {
+          throw new Error(
+            'Received gzip-compressed data without decompression. Use GET /api/jobs/{id}/model (not a raw .ply.gz URL).',
+          );
+        }
+        if (b0.length < 3 || b0[0] !== 0x70 || b0[1] !== 0x6c || b0[2] !== 0x79) {
+          throw new Error('Response does not look like a PLY file (expected ASCII header "ply").');
+        }
+
         // 2. Parse metadata + positions
         const meta = parsePLYForMeta(buffer);
         if (meta.vertexCount === 0) throw new Error('No visible points in PLY');
@@ -656,10 +676,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
     const threeScene = viewerAny.threeScene;
     if (!camera || !gsRaycaster || !splatMesh || !threeScene) return;
 
-    const pickWorldFromEvent = (
-      e: MouseEvent,
-      opts?: { allowNearestFallback?: boolean },
-    ): THREE.Vector3 | null => {
+    const pickWorldFromEvent = (e: MouseEvent): THREE.Vector3 | null => {
       if (!splatMesh.visible) return null;
       if (typeof viewerAny.isLoading === 'function' && viewerAny.isLoading()) return null;
 
@@ -681,29 +698,28 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       mousePos.x = THREE.MathUtils.clamp(mousePos.x, 0, renderDims.x);
       mousePos.y = THREE.MathUtils.clamp(mousePos.y, 0, renderDims.y);
 
-      gsRaycaster.setFromCameraAndScreenPosition(camera, mousePos, renderDims);
-      const hits: { origin: THREE.Vector3; distance: number; splatIndex: number }[] = [];
-      gsRaycaster.intersectSplatMesh(splatMesh, hits);
       const maxDist = metadataRef.current
         ? maxSplatPickDistance(metadataRef.current.boundingBox)
         : 100;
-      const validHit = hits.find(h => isFinite(h.distance) && h.distance <= maxDist);
-      if (validHit) return validHit.origin.clone();
 
-      if (opts?.allowNearestFallback && splatCentersRef.current && rect.width > 0 && rect.height > 0) {
-        const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-        const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      const { ndcX, ndcY } = ndcFromMousePos(mousePos, renderDims);
+      const centers = splatCentersRef.current;
+      if (centers && centers.length >= 3) {
         return nearestSplatCenterAlongRay(
           camera,
           ndcX,
           ndcY,
-          splatCentersRef.current,
-          rect.width,
-          rect.height,
+          centers,
+          renderDims,
           maxDist,
         );
       }
-      return null;
+
+      gsRaycaster.setFromCameraAndScreenPosition(camera, mousePos, renderDims);
+      const hits: { origin: THREE.Vector3; distance: number; splatIndex: number }[] = [];
+      gsRaycaster.intersectSplatMesh(splatMesh, hits);
+      const validHit = hits.find(h => isFinite(h.distance) && h.distance <= maxDist);
+      return validHit ? validHit.origin.clone() : null;
     };
 
     const onClick = (e: MouseEvent) => {
@@ -711,7 +727,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       if (now - lastClickTimeRef.current < 300) return;
       lastClickTimeRef.current = now;
       try {
-        const p = pickWorldFromEvent(e, { allowNearestFallback: true });
+        const p = pickWorldFromEvent(e);
         if (p) handleAddMeasurePoint(p);
       } catch (err) {
         console.warn('[GS3D] Raycaster intersection failed (likely during mid-sort):', err);

@@ -148,7 +148,7 @@ Video (MP4)
     "fps": 30.0,
     "warnings": []
   },
-  "model_url": "/static/models/uuid.ply",
+  "model_url": "/api/jobs/uuid/model",
   "model_url_compressed": "/static/models/uuid.ply.gz",
   "model_url_mesh": "/static/models/uuid.glb"
 }

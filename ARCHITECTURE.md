@@ -208,7 +208,7 @@ Use this order to separate **data** issues from **runtime** issues:
 | `GET` | `/health` | Health check |
 | `GET` | `/api/presets` | List quality presets |
 | `POST` | `/api/jobs/upload` | Upload video (multipart + quality_preset) |
-| `GET` | `/api/jobs/{id}/status` | Job status, progress, model_url, model_url_mesh |
+| `GET` | `/api/jobs/{id}/status` | Job status, progress, `model_url` (PLY via `/api/jobs/{id}/model`), `model_url_compressed`, `model_url_obj` |
 | `GET` | `/api/jobs/{id}/model` | Download PLY (raw bytes; if only `.ply.gz` exists on disk, decompresses on the fly) |
 | `GET` | `/api/jobs/{id}/model?compressed=true` | Download compressed PLY.gz |
 | `GET` | `/api/jobs/{id}/cameras` | Optional `cameras_all.json` from training output |
@@ -220,7 +220,7 @@ Use this order to separate **data** issues from **runtime** issues:
 
 ### 3D Viewer (`Viewer3D.tsx`)
 
-- **Splat picking** — Primary: library raycaster (`setFromCameraAndScreenPosition` + `intersectSplatMesh`), ellipsoid mode on. Pointer position uses `getBoundingClientRect()` and `getRenderDimensions` for viewport alignment. **Click fallback:** if the library returns no hit, a **nearest splat center to the eye ray** is chosen (screen-space gate ~12px, max distance from PLY bbox), using cached `getSplatCenter(..., true)` positions—see *FIX_GUIDE_GaussianSplat_Viewer_Measurement.md*. Hover preview uses the library path only (no brute-force loop). Reconstructions have no inherent metric scale—use **calibration** for real-world distances.
+- **Splat picking** — **Primary (measure + hover):** nearest splat center to the eye ray (brute force on cached centers), with NDC derived from the same `mousePos`/`renderDims` as `setFromCameraAndScreenPosition`, screen-space gate ~12px, max perpendicular distance from PLY bbox diagonal. Centers from `getSplatCenter(..., true)` so scene offsets from `addSplatScene` match world space. **Fallback:** if the center cache is missing, library raycaster (`intersectSplatMesh`, ellipsoid mode on). Reconstructions have no inherent metric scale—use **calibration** for real-world distances.
 - **Orbit mode** — rotate, pan, zoom with OrbitControls
 - **Walk-through mode** — first-person WASD + mouse-look via pointer lock. Walk/Measure listeners attach after `loading` becomes false so they bind to the real canvas once the GaussianSplats3D viewer exists (avoids stuck modes and DOMExceptions from pointer lock on a disposed canvas).
 - **Measurement tool** — click two points on the splat cloud (A = lavender, B = green); **mousemove** shows a semi-transparent preview sphere on the splat under the cursor (throttled raycast). Displays calibrated distance after step 2.
@@ -234,7 +234,7 @@ Use this order to separate **data** issues from **runtime** issues:
 
 ### Viewer: SharedArrayBuffer / GPU-accelerated sort
 
-The SPA should send **`Cross-Origin-Opener-Policy: same-origin`** and **`Cross-Origin-Embedder-Policy: require-corp`** (see `frontend/vercel.json` on Vercel). The FastAPI app adds the same headers plus **`Cross-Origin-Resource-Policy: cross-origin`** on **all** responses so a COEP-isolated browser tab can still call the RunPod API and load `/static/models/...`. Without isolation, set viewer `gpuAcceleratedSort: false` and `sharedMemoryForWorkers: false` in code.
+The SPA should send **`Cross-Origin-Opener-Policy: same-origin`** and **`Cross-Origin-Embedder-Policy: require-corp`** (see `frontend/vercel.json` on Vercel). The FastAPI app adds the same headers plus **`Cross-Origin-Resource-Policy: cross-origin`** on **all** responses so a COEP-isolated browser tab can still call the RunPod API and fetch **`GET /api/jobs/{id}/model`** (decompressed PLY + CORP). Static **`/static/models/...`** remains for `.ply.gz`, OBJ, etc. Without isolation, set viewer `gpuAcceleratedSort: false` and `sharedMemoryForWorkers: false` in code.
 
 ### CORS / proxy (Authorization)
 
