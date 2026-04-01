@@ -105,7 +105,11 @@ function nearestSplatCenterAlongRay(
   const raycaster = new THREE.Raycaster();
   raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
   const ray = raycaster.ray;
-  const ndcTol = (PICK_RADIUS_PX * 2) / Math.max(1, Math.min(renderDims.x, renderDims.y));
+
+  // Screen-space tolerance: how far (in NDC) a splat's projected center can be from the click.
+  // Use PICK_RADIUS_PX on the shorter screen axis for a consistent pixel feel.
+  const ndcTolPerPx = 2 / Math.max(1, Math.min(renderDims.x, renderDims.y));
+  const ndcTol = PICK_RADIUS_PX * ndcTolPerPx;
   const ndcTolSq = ndcTol * ndcTol;
   const maxPerpSq = maxRayPerpDist * maxRayPerpDist;
 
@@ -119,19 +123,22 @@ function nearestSplatCenterAlongRay(
     const py = centers[i * 3 + 1];
     const pz = centers[i * 3 + 2];
 
+    // --- 3-D gate: perpendicular distance from splat center to the ray ---
     oc.set(px - ray.origin.x, py - ray.origin.y, pz - ray.origin.z);
     const t = oc.dot(ray.direction);
-    if (t < 0) continue;
+    if (t <= 0) continue;                          // behind camera
     const cx = ray.origin.x + t * ray.direction.x - px;
     const cy = ray.origin.y + t * ray.direction.y - py;
     const cz = ray.origin.z + t * ray.direction.z - pz;
     const perpSq = cx * cx + cy * cy + cz * cz;
-    if (perpSq > maxPerpSq) continue;
+    if (perpSq > maxPerpSq) continue;              // too far from the ray in 3D
 
+    // --- 2-D gate: project the splat center to screen and check pixel distance ---
     vProj.set(px, py, pz).project(camera);
+    if (vProj.z > 1) continue;                     // behind near-plane after projection
     const dx = vProj.x - ndcX;
     const dy = vProj.y - ndcY;
-    if (dx * dx + dy * dy > ndcTolSq) continue;
+    if (dx * dx + dy * dy > ndcTolSq) continue;   // outside cursor radius in pixels
 
     if (perpSq < bestPerpSq) {
       bestPerpSq = perpSq;
@@ -141,7 +148,9 @@ function nearestSplatCenterAlongRay(
 
   if (bestI < 0) return null;
   const j = bestI * 3;
-  return new THREE.Vector3(centers[j], centers[j + 1], centers[j + 2]);
+  const result = new THREE.Vector3(centers[j], centers[j + 1], centers[j + 2]);
+  console.log(`[Pick] splat #${bestI} @ [${result.x.toFixed(3)}, ${result.y.toFixed(3)}, ${result.z.toFixed(3)}] perpDist=${Math.sqrt(bestPerpSq).toFixed(4)}`);
+  return result;
 }
 
 function removeMeasurePreviewFromScene(scene: THREE.Scene) {
@@ -487,7 +496,10 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
           progressiveLoad: false,
           format: 2, // SceneFormat.Ply (0=Splat, 1=KSplat, 2=Ply, 3=Spz)
           position: [-meta.center[0], -meta.center[1], -meta.center[2]],
-          rotation: [1, 0, 0, 0],
+          // cameraUp:[0,-1,0] already handles the MASt3R Y-down → Three.js Y-up flip.
+          // Using rotation:[1,0,0,0] (180° around X) here would DOUBLE-flip the scene.
+          // Identity quaternion [x=0, y=0, z=0, w=1] = no additional rotation.
+          rotation: [0, 0, 0, 1],
           scale: [1, 1, 1],
         });
 
