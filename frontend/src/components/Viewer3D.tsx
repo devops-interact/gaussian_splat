@@ -55,7 +55,32 @@ function maxSplatPickDistance(bbox: ModelMetadata['boundingBox']): number {
   return Math.max(diagonal * 4, 3);
 }
 
-const PICK_RADIUS_PX = 12;
+const PICK_RADIUS_PX = 20;
+
+/**
+ * Detect the likely "up" axis from the bounding box extents.
+ * MASt3R/LongSplat may produce Y-down or Y-up data depending on version.
+ * We use the axis with the smallest extent as the likely up axis (rooms are
+ * wider than they are tall). Returns a Three.js cameraUp vector.
+ */
+function detectCameraUp(bbox: { min: number[]; max: number[] }): [number, number, number] {
+  const dx = Math.abs(bbox.max[0] - bbox.min[0]);
+  const dy = Math.abs(bbox.max[1] - bbox.min[1]);
+  const dz = Math.abs(bbox.max[2] - bbox.min[2]);
+  // The shortest axis is most likely the vertical (up) axis
+  // For MASt3R Y-down convention the Y extent is often smallest → use [0,-1,0]
+  // For standard scenes the Y extent may be smallest → use [0,1,0]
+  // Default to standard Three.js Y-up; the orbit controls handle the rest
+  if (dy <= dx && dy <= dz) {
+    // Y is shortest axis → Y-up scene; use negative if center-Y is positive (MASt3R Y-down hint)
+    const centerY = (bbox.min[1] + bbox.max[1]) / 2;
+    return centerY > 0 ? [0, -1, 0] : [0, 1, 0];
+  }
+  if (dz <= dx && dz <= dy) {
+    return [0, 0, 1]; // Z-up scene (unusual but possible)
+  }
+  return [0, 1, 0]; // default Y-up
+}
 
 type SplatMeshWithCenters = THREE.Object3D & {
   getSplatCount?: (includeSinceLastBuild?: boolean) => number;
@@ -91,7 +116,11 @@ function ndcFromMousePos(mousePos: THREE.Vector2, renderDims: THREE.Vector2): { 
 }
 
 /**
- * Primary measure/hover pick: nearest splat center to eye ray, gated by screen-space distance to cursor.
+ * Primary measure/hover pick: nearest splat center to eye ray, gated by screen-space distance
+ * to cursor. Picks the **nearest-depth** (smallest ray parameter `t`) splat among all candidates
+ * that project within PICK_RADIUS_PX of the cursor — this ensures we pick the front-most visible
+ * splat rather than one that happens to be closest perpendicularly but is actually behind others.
+ *
  * renderDims must match the viewer render buffer (same as setFromCameraAndScreenPosition).
  */
 function nearestSplatCenterAlongRay(
@@ -100,7 +129,7 @@ function nearestSplatCenterAlongRay(
   ndcY: number,
   centers: Float32Array,
   renderDims: THREE.Vector2,
-  maxRayPerpDist: number,
+  _maxRayPerpDist: number,
 ): THREE.Vector3 | null {
   const raycaster = new THREE.Raycaster();
   raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
@@ -108,48 +137,48 @@ function nearestSplatCenterAlongRay(
 
   // Screen-space tolerance: how far (in NDC) a splat's projected center can be from the click.
   // Use PICK_RADIUS_PX on the shorter screen axis for a consistent pixel feel.
-  const ndcTolPerPx = 2 / Math.max(1, Math.min(renderDims.x, renderDims.y));
+  const shortAxis = Math.max(1, Math.min(renderDims.x, renderDims.y));
+  const ndcTolPerPx = 2 / shortAxis;
   const ndcTol = PICK_RADIUS_PX * ndcTolPerPx;
   const ndcTolSq = ndcTol * ndcTol;
-  const maxPerpSq = maxRayPerpDist * maxRayPerpDist;
 
   const vProj = new THREE.Vector3();
-  let bestPerpSq = Infinity;
+  // Pick by nearest DEPTH (smallest t along ray) for correct front-to-back ordering
+  let bestT = Infinity;
   let bestI = -1;
 
   const oc = new THREE.Vector3();
-  for (let i = 0, n = centers.length / 3; i < n; i++) {
+  const count = centers.length / 3;
+  for (let i = 0; i < count; i++) {
     const px = centers[i * 3];
     const py = centers[i * 3 + 1];
     const pz = centers[i * 3 + 2];
 
-    // --- 3-D gate: perpendicular distance from splat center to the ray ---
+    // --- Quick depth check: ray parameter t (projection onto ray direction) ---
     oc.set(px - ray.origin.x, py - ray.origin.y, pz - ray.origin.z);
     const t = oc.dot(ray.direction);
-    if (t <= 0) continue;                          // behind camera
-    const cx = ray.origin.x + t * ray.direction.x - px;
-    const cy = ray.origin.y + t * ray.direction.y - py;
-    const cz = ray.origin.z + t * ray.direction.z - pz;
-    const perpSq = cx * cx + cy * cy + cz * cz;
-    if (perpSq > maxPerpSq) continue;              // too far from the ray in 3D
+    if (t <= 0.01) continue;           // behind camera or too close to near plane
+    if (t >= bestT) continue;          // already have a closer candidate — skip early
 
     // --- 2-D gate: project the splat center to screen and check pixel distance ---
     vProj.set(px, py, pz).project(camera);
-    if (vProj.z > 1) continue;                     // behind near-plane after projection
+    // After project(): z in [-1,1] = inside frustum. z < -1 = behind camera.
+    if (vProj.z < -1 || vProj.z > 1) continue;
     const dx = vProj.x - ndcX;
     const dy = vProj.y - ndcY;
-    if (dx * dx + dy * dy > ndcTolSq) continue;   // outside cursor radius in pixels
+    if (dx * dx + dy * dy > ndcTolSq) continue;   // outside cursor radius in screen pixels
 
-    if (perpSq < bestPerpSq) {
-      bestPerpSq = perpSq;
-      bestI = i;
-    }
+    // This splat is closer and under the cursor → new best
+    bestT = t;
+    bestI = i;
   }
 
   if (bestI < 0) return null;
   const j = bestI * 3;
   const result = new THREE.Vector3(centers[j], centers[j + 1], centers[j + 2]);
-  console.log(`[Pick] splat #${bestI} @ [${result.x.toFixed(3)}, ${result.y.toFixed(3)}, ${result.z.toFixed(3)}] perpDist=${Math.sqrt(bestPerpSq).toFixed(4)}`);
+  console.log(
+    `[Pick] splat #${bestI} @ [${result.x.toFixed(3)}, ${result.y.toFixed(3)}, ${result.z.toFixed(3)}] depth=${bestT.toFixed(4)}`,
+  );
   return result;
 }
 
@@ -362,6 +391,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
 
   const metadataRef = useRef<ModelMetadata | null>(null);
   const splatCentersRef = useRef<Float32Array | null>(null);
+  const splatTreeReadyRef = useRef<boolean>(false);
 
   const [mode, setMode] = useState<ViewerMode>('orbit');
   const [showHelp, setShowHelp] = useState(false);
@@ -467,12 +497,13 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
           (bbMax[2] - bbMin[2]) ** 2,
         );
         const camDist = Math.max(diagonal * 1.2, 3); // at least 3 units away
-        console.log(`[GS3D] BBox diagonal=${diagonal.toFixed(2)}, camDist=${camDist.toFixed(2)}`);
+        const cameraUp = detectCameraUp(meta.boundingBox);
+        console.log(`[GS3D] BBox diagonal=${diagonal.toFixed(2)}, camDist=${camDist.toFixed(2)}, cameraUp=[${cameraUp}]`);
 
         console.log('[GS3D] Creating standalone Viewer...');
         const viewer = new Viewer({
-          // MASt3R / LongSplat: OpenCV-style Y-down; align with Three.js (see FIX_GUIDE_GaussianSplat_Viewer_Measurement.md)
-          cameraUp: [0, -1, 0],
+          // Auto-detected camera up from bounding box analysis
+          cameraUp,
           initialCameraPosition: [0, camDist * 0.35, camDist * 0.75],
           initialCameraLookAt: [0, 0, 0],
           rootElement: containerRef.current!,
@@ -517,12 +548,40 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         // 7. Start rendering (after scene is loaded — required by GaussianSplats3D)
         viewer.start();
         viewer.raycaster.raycastAgainstTrueSplatEllipsoid = true;
+
+        // Build splat center cache for fallback picking
         splatCentersRef.current = buildSplatCenterWorldCache(
           viewer.splatMesh as SplatMeshWithCenters,
         );
         if (splatCentersRef.current) {
           console.log('[GS3D] Splat center cache:', splatCentersRef.current.length / 3, 'points');
+        } else {
+          console.warn('[GS3D] Failed to build splat center cache — getSplatCount or getSplatCenter not available');
         }
+
+        // Register callback for when the SplatTree finishes building (async, in web worker)
+        // The library raycaster (intersectSplatMesh) requires the tree to be ready.
+        splatTreeReadyRef.current = false;
+        const splatMeshInternal = viewer.splatMesh as unknown as {
+          onSplatTreeReady?: (cb: () => void) => void;
+          getSplatTree?: () => unknown;
+        };
+        if (splatMeshInternal.getSplatTree?.()) {
+          // Tree already built (small scenes may complete synchronously)
+          splatTreeReadyRef.current = true;
+          console.log('[GS3D] SplatTree already available');
+        } else if (splatMeshInternal.onSplatTreeReady) {
+          splatMeshInternal.onSplatTreeReady(() => {
+            if (!disposed) {
+              splatTreeReadyRef.current = true;
+              console.log('[GS3D] SplatTree ready — library raycaster is now active');
+            }
+          });
+          console.log('[GS3D] Waiting for SplatTree to build (async)...');
+        } else {
+          console.warn('[GS3D] onSplatTreeReady not available — library raycaster may not work');
+        }
+
         viewerRef.current = viewer;
         console.log('[GS3D] Viewer started successfully');
         setLoading(false);
@@ -539,6 +598,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
     return () => {
       disposed = true;
       splatCentersRef.current = null;
+      splatTreeReadyRef.current = false;
       try {
         document.exitPointerLock?.();
       } catch { /* ignore */ }
@@ -714,6 +774,26 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         ? maxSplatPickDistance(metadataRef.current.boundingBox)
         : 100;
 
+      // Strategy: prefer the library's built-in raycaster (accurate ellipsoid intersection)
+      // when the SplatTree has been built. Fall back to our center-cache brute-force approach.
+      if (splatTreeReadyRef.current) {
+        try {
+          gsRaycaster.setFromCameraAndScreenPosition(camera, mousePos, renderDims);
+          const hits: { origin: THREE.Vector3; distance: number; splatIndex: number }[] = [];
+          gsRaycaster.intersectSplatMesh(splatMesh, hits);
+          const validHit = hits.find(h => isFinite(h.distance) && h.distance <= maxDist);
+          if (validHit) {
+            console.log(
+              `[Pick:lib] splat #${validHit.splatIndex} @ [${validHit.origin.x.toFixed(3)}, ${validHit.origin.y.toFixed(3)}, ${validHit.origin.z.toFixed(3)}] dist=${validHit.distance.toFixed(4)}`,
+            );
+            return validHit.origin.clone();
+          }
+        } catch (err) {
+          console.warn('[GS3D] Library raycaster failed (mid-sort?), trying center cache...', err);
+        }
+      }
+
+      // Fallback: brute-force nearest-depth search across cached splat centers
       const { ndcX, ndcY } = ndcFromMousePos(mousePos, renderDims);
       const centers = splatCentersRef.current;
       if (centers && centers.length >= 3) {
@@ -727,11 +807,8 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         );
       }
 
-      gsRaycaster.setFromCameraAndScreenPosition(camera, mousePos, renderDims);
-      const hits: { origin: THREE.Vector3; distance: number; splatIndex: number }[] = [];
-      gsRaycaster.intersectSplatMesh(splatMesh, hits);
-      const validHit = hits.find(h => isFinite(h.distance) && h.distance <= maxDist);
-      return validHit ? validHit.origin.clone() : null;
+      console.warn('[GS3D] No picking method available — splatTree not ready and no center cache');
+      return null;
     };
 
     const onClick = (e: MouseEvent) => {
