@@ -75,6 +75,22 @@ class PlyOptimizer:
                     )
                     data = data[scale_mask]
 
+            # ── 3b. Scale floor clamp ───────────────────────────────────
+            # Gaussians with extremely small scales are sub-pixel and invisible.
+            # Clamp log-scale to a reasonable minimum so every splat is at least
+            # ~4mm (exp(-5.5) ≈ 0.004 units) in each axis.
+            MIN_LOG_SCALE = -5.5
+            if 'scale_0' in prop_names:
+                for s in ['scale_0', 'scale_1', 'scale_2']:
+                    below = data[s] < MIN_LOG_SCALE
+                    n_clamped = int(np.sum(below))
+                    if n_clamped > 0:
+                        data[s] = np.maximum(data[s], MIN_LOG_SCALE)
+                        logger.info(
+                            f"Scale floor: clamped {n_clamped:,} values in {s} "
+                            f"to >= {MIN_LOG_SCALE}"
+                        )
+
             # ── 4. Statistical position outlier removal ──────────────────
             x, y, z = data['x'].astype(np.float64), data['y'].astype(np.float64), data['z'].astype(np.float64)
             positions = np.column_stack([x, y, z])

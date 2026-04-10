@@ -379,6 +379,117 @@ function parsePLYForMeta(buffer: ArrayBuffer): PLYMeta {
   };
 }
 
+// ── PLY scale/opacity diagnostics (helps debug invisible splats) ─────────────
+
+function logPLYScaleOpacityDiag(buffer: ArrayBuffer) {
+  try {
+    const bytes = new Uint8Array(buffer);
+    const decoder = new TextDecoder('utf-8');
+    let headerEnd = -1;
+    const searchLimit = Math.min(bytes.length, 20000);
+    for (let i = 0; i < searchLimit; i++) {
+      if (
+        bytes[i] === 0x65 && bytes[i + 1] === 0x6e && bytes[i + 2] === 0x64 &&
+        bytes[i + 3] === 0x5f && bytes[i + 4] === 0x68 && bytes[i + 5] === 0x65 &&
+        bytes[i + 6] === 0x61 && bytes[i + 7] === 0x64 && bytes[i + 8] === 0x65 &&
+        bytes[i + 9] === 0x72
+      ) {
+        headerEnd = i + 10;
+        while (headerEnd < bytes.length && (bytes[headerEnd] === 0x0a || bytes[headerEnd] === 0x0d)) headerEnd++;
+        break;
+      }
+    }
+    if (headerEnd === -1) return;
+    const headerText = decoder.decode(bytes.slice(0, headerEnd));
+    const headerLines = headerText.split('\n').map(l => l.trim());
+    let vertexCount = 0;
+    const props: { name: string; type: string }[] = [];
+    for (const line of headerLines) {
+      if (line.startsWith('element vertex')) vertexCount = parseInt(line.split(/\s+/)[2]);
+      else if (line.startsWith('property')) {
+        const parts = line.split(/\s+/);
+        props.push({ type: parts[1], name: parts[2] });
+      }
+    }
+    if (vertexCount === 0 || !headerText.includes('binary_little_endian')) return;
+    const propNames = props.map(p => p.name);
+    const scaleIdx = propNames.indexOf('scale_0');
+    const opacityIdx = propNames.indexOf('opacity');
+    if (scaleIdx === -1 && opacityIdx === -1) return;
+
+    const propOffsets: number[] = [];
+    let bytesPerVertex = 0;
+    for (const prop of props) {
+      propOffsets.push(bytesPerVertex);
+      switch (prop.type) {
+        case 'float': case 'float32': bytesPerVertex += 4; break;
+        case 'double': case 'float64': bytesPerVertex += 8; break;
+        case 'uchar': case 'uint8': bytesPerVertex += 1; break;
+        case 'short': case 'int16': case 'ushort': case 'uint16': bytesPerVertex += 2; break;
+        default: bytesPerVertex += 4;
+      }
+    }
+
+    const dv = new DataView(buffer, headerEnd);
+    const n = Math.min(vertexCount, Math.floor((buffer.byteLength - headerEnd) / bytesPerVertex));
+    const samples = Math.min(10, n);
+
+    if (scaleIdx !== -1) {
+      const sOff = propOffsets[scaleIdx];
+      let minS = Infinity, maxS = -Infinity, sumS = 0, subPixel = 0;
+      for (let i = 0; i < n; i++) {
+        const base = i * bytesPerVertex;
+        for (let c = 0; c < 3; c++) {
+          const s = dv.getFloat32(base + sOff + c * 4, true);
+          if (s < minS) minS = s;
+          if (s > maxS) maxS = s;
+          sumS += s;
+          if (s < -6) subPixel++;
+        }
+      }
+      console.log(
+        `[GS3D-diag] Scale (log-space): min=${minS.toFixed(3)}, max=${maxS.toFixed(3)}, ` +
+        `mean=${(sumS / (n * 3)).toFixed(3)}, sub-pixel(<-6): ${subPixel}/${n * 3} (${(subPixel / (n * 3) * 100).toFixed(1)}%)`,
+      );
+      console.log(
+        `[GS3D-diag] Scale (world): min_exp=${Math.exp(minS).toFixed(6)}, max_exp=${Math.exp(maxS).toFixed(4)}, ` +
+        `median_approx_exp=${Math.exp(sumS / (n * 3)).toFixed(6)}`,
+      );
+      for (let i = 0; i < samples; i++) {
+        const base = i * bytesPerVertex;
+        const s0 = dv.getFloat32(base + sOff, true);
+        const s1 = dv.getFloat32(base + sOff + 4, true);
+        const s2 = dv.getFloat32(base + sOff + 8, true);
+        console.log(
+          `[GS3D-diag] v${i}: scale=[${s0.toFixed(3)},${s1.toFixed(3)},${s2.toFixed(3)}] ` +
+          `exp=[${Math.exp(s0).toFixed(5)},${Math.exp(s1).toFixed(5)},${Math.exp(s2).toFixed(5)}]`,
+        );
+      }
+    }
+
+    if (opacityIdx !== -1) {
+      const oOff = propOffsets[opacityIdx];
+      let minO = Infinity, maxO = -Infinity, sumSig = 0, highCount = 0;
+      for (let i = 0; i < n; i++) {
+        const raw = dv.getFloat32(i * bytesPerVertex + oOff, true);
+        if (raw < minO) minO = raw;
+        if (raw > maxO) maxO = raw;
+        const sig = 1 / (1 + Math.exp(-raw));
+        sumSig += sig;
+        if (sig > 0.5) highCount++;
+      }
+      console.log(
+        `[GS3D-diag] Opacity (logit): min=${minO.toFixed(3)}, max=${maxO.toFixed(3)}`,
+      );
+      console.log(
+        `[GS3D-diag] Opacity (sigmoid): mean=${(sumSig / n).toFixed(4)}, >0.5: ${highCount}/${n}`,
+      );
+    }
+  } catch (e) {
+    console.warn('[GS3D-diag] Scale/opacity diagnostic failed:', e);
+  }
+}
+
 // ── Main Viewer Component (standalone Viewer — no R3F) ──────────────────────
 
 export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
@@ -444,6 +555,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         const meta = parsePLYForMeta(buffer);
         if (meta.vertexCount === 0) throw new Error('No visible points in PLY');
         console.log(`[GS3D] PLY parsed: ${meta.vertexCount}/${meta.totalVertices} verts, center=[${meta.center.map(v => v.toFixed(2))}]`);
+        logPLYScaleOpacityDiag(buffer);
 
         const fRestProps = meta.properties.filter((p) => /^f_rest_\d+$/.test(p));
         if (fRestProps.length > 0 && fRestProps.length % 3 !== 0) {
@@ -513,10 +625,10 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
           gpuAcceleratedSort: true,
           sharedMemoryForWorkers: true,
           sceneRevealMode: SceneRevealMode.Instant,
-          antialiased: false,
+          antialiased: true,
           freeIntermediateSplatData: false,
           logLevel: LogLevel.Warning,
-          sphericalHarmonicsDegree: 0,
+          sphericalHarmonicsDegree: 2,
         } as Record<string, unknown>);
 
         // 6. Add the splat scene

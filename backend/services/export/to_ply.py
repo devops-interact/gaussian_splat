@@ -137,5 +137,43 @@ def _log_ply_color_info(ply_path: Path) -> None:
                 f"f1=[{np.min(f1):.3f}-{np.max(f1):.3f}], "
                 f"f2=[{np.min(f2):.3f}-{np.max(f2):.3f}]"
             )
+
+        # Scale diagnostics (critical for visibility)
+        if "scale_0" in props:
+            s0, s1, s2 = vertex["scale_0"], vertex["scale_1"], vertex["scale_2"]
+            s_all = np.concatenate([s0, s1, s2])
+            logger.info(
+                f"  Scale (log-space): s0=[{np.min(s0):.3f} to {np.max(s0):.3f}], "
+                f"s1=[{np.min(s1):.3f} to {np.max(s1):.3f}], "
+                f"s2=[{np.min(s2):.3f} to {np.max(s2):.3f}]"
+            )
+            logger.info(
+                f"  Scale (world-space): min_exp={np.exp(np.min(s_all)):.6f}, "
+                f"max_exp={np.exp(np.max(s_all)):.4f}, "
+                f"median_exp={np.exp(np.median(s_all)):.6f}"
+            )
+            sub_pixel = int(np.sum(s_all < -6))
+            logger.info(
+                f"  Scale < exp(-6): {sub_pixel}/{len(s_all)} values "
+                f"({sub_pixel / len(s_all) * 100:.1f}%)"
+            )
+        else:
+            logger.warning("  No scale_0 property — splats may render as default size")
+
+        # Opacity diagnostics
+        if "opacity" in props:
+            op = vertex["opacity"].astype(np.float64)
+            sig_op = 1.0 / (1.0 + np.exp(-op))
+            logger.info(
+                f"  Opacity (logit): [{np.min(op):.3f} to {np.max(op):.3f}], "
+                f"mean={np.mean(op):.3f}"
+            )
+            logger.info(
+                f"  Opacity (sigmoid): [{np.min(sig_op):.4f} to {np.max(sig_op):.4f}], "
+                f"mean={np.mean(sig_op):.4f}, >0.5: {int(np.sum(sig_op > 0.5))}/{n}"
+            )
+        else:
+            logger.warning("  No opacity property — splats default to transparent")
+
     except Exception as e:
         logger.warning(f"Could not read PLY for diagnostics: {e}")

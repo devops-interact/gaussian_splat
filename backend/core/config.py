@@ -38,7 +38,7 @@ QUALITY_PRESETS: Dict[QualityPreset, PresetConfig] = {
         resolution=1,
         init_frames_ratio=0.30,
         estimated_minutes=20,
-        convert_3dgs_prune_ratio=0.62,
+        convert_3dgs_prune_ratio=0.40,
     ),
     QualityPreset.QUALITY: PresetConfig(
         name="Quality",
@@ -47,8 +47,8 @@ QUALITY_PRESETS: Dict[QualityPreset, PresetConfig] = {
         iterations=20000,
         resolution=1,
         init_frames_ratio=0.25,
-        estimated_minutes=38,
-        convert_3dgs_prune_ratio=0.68,
+        estimated_minutes=45,
+        convert_3dgs_prune_ratio=0.45,
     ),
 }
 

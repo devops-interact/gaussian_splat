@@ -171,7 +171,8 @@ async def train_longsplat(
         post_iter   = max(800, int(2000 * quality_factor))
         init_iter   = max(600, int(1500 * quality_factor))
         # Iterations for Scaffold-GS → standard 3DGS conversion refinement
-        convert_iters = max(2000, int(8000 * quality_factor))
+        # Higher count gives densification more time to spawn Gaussians and fit scales
+        convert_iters = max(5000, int(15000 * quality_factor))
 
         logger.info(
             f"Quality factor: {quality_factor:.2f} → pose={pose_iter}, "
@@ -355,6 +356,10 @@ async def train_longsplat(
             
             if conversion_success:
                 logger.info("Conversion completed - PLY has f_dc_* + RGB properties")
+                model_ply = output_dir / "model.ply"
+                if model_ply.exists():
+                    logger.info("Running PlyOptimizer on model.ply (center, prune, scale floor)...")
+                    PlyOptimizer.optimize(model_ply, model_ply)
             else:
                 logger.error("Conversion failed - PLY may be missing properties")
             
