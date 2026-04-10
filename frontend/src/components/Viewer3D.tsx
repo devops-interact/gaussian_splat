@@ -58,28 +58,13 @@ function maxSplatPickDistance(bbox: ModelMetadata['boundingBox']): number {
 const PICK_RADIUS_PX = 20;
 
 /**
- * Detect the likely "up" axis from the bounding box extents.
- * MASt3R/LongSplat may produce Y-down or Y-up data depending on version.
- * We use the axis with the smallest extent as the likely up axis (rooms are
- * wider than they are tall). Returns a Three.js cameraUp vector.
+ * MASt3R/LongSplat always outputs Y-axis-vertical coordinates.
+ * If the bbox centroid Y > 0.5 the data is likely in Y-down convention
+ * (camera looking downward), so we flip the up vector.
  */
 function detectCameraUp(bbox: { min: number[]; max: number[] }): [number, number, number] {
-  const dx = Math.abs(bbox.max[0] - bbox.min[0]);
-  const dy = Math.abs(bbox.max[1] - bbox.min[1]);
-  const dz = Math.abs(bbox.max[2] - bbox.min[2]);
-  // The shortest axis is most likely the vertical (up) axis
-  // For MASt3R Y-down convention the Y extent is often smallest → use [0,-1,0]
-  // For standard scenes the Y extent may be smallest → use [0,1,0]
-  // Default to standard Three.js Y-up; the orbit controls handle the rest
-  if (dy <= dx && dy <= dz) {
-    // Y is shortest axis → Y-up scene; use negative if center-Y is positive (MASt3R Y-down hint)
-    const centerY = (bbox.min[1] + bbox.max[1]) / 2;
-    return centerY > 0 ? [0, -1, 0] : [0, 1, 0];
-  }
-  if (dz <= dx && dz <= dy) {
-    return [0, 0, 1]; // Z-up scene (unusual but possible)
-  }
-  return [0, 1, 0]; // default Y-up
+  const centerY = (bbox.min[1] + bbox.max[1]) / 2;
+  return centerY > 0.5 ? [0, -1, 0] : [0, 1, 0];
 }
 
 type SplatMeshWithCenters = THREE.Object3D & {
@@ -594,15 +579,12 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
                     'SharedArrayBuffer:', typeof SharedArrayBuffer !== 'undefined',
                     '-> sharedMemory:', canUseSharedMemory);
 
-        // Catch unhandled rejections from sort worker during viewer lifecycle
-        let rejectionError: string | null = null;
+        // Catch unhandled rejections during viewer lifecycle (diagnostic only)
         const onUnhandledRejection = (e: PromiseRejectionEvent) => {
           const msg = e.reason?.message || String(e.reason);
           if (msg.includes('SharedArrayBuffer') || msg.includes('postMessage') ||
               msg.includes('DOMException') || msg.includes('Worker') || msg.includes('not usable')) {
-            rejectionError = msg;
-            console.error('[GS3D] Unhandled rejection (likely sort worker):', msg);
-            e.preventDefault();
+            console.warn('[GS3D] Unhandled rejection (browser extension interference?):', msg);
           }
         };
         window.addEventListener('unhandledrejection', onUnhandledRejection);
@@ -620,111 +602,62 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         const cameraUp = detectCameraUp(meta.boundingBox);
         console.log(`[GS3D] BBox diagonal=${diagonal.toFixed(2)}, camDist=${camDist.toFixed(2)}, cameraUp=[${cameraUp}]`);
 
-        // 5. Helper: create, load, and start the viewer
-        const initViewer = async (useSharedMem: boolean): Promise<Viewer | null> => {
-          if (disposed) return null;
-          const root = containerRef.current!;
-          removeContainerChildrenSafe(root);
+        // 5. Build Three.js scene with grid + origin axes
+        const threeScene = new THREE.Scene();
+        const grid = new THREE.GridHelper(30, 30, 0x1b1a0e, 0x121008);
+        grid.position.y = -0.01;
+        threeScene.add(grid);
+        const axesHelper = new THREE.AxesHelper(1.5);
+        // @ts-ignore
+        axesHelper.material.transparent = true;
+        // @ts-ignore
+        axesHelper.material.opacity = 0.6;
+        threeScene.add(axesHelper);
 
-          const threeScene = new THREE.Scene();
-          const grid = new THREE.GridHelper(30, 30, 0x1b1a0e, 0x121008);
-          grid.position.y = -0.01;
-          threeScene.add(grid);
-          const axesHelper = new THREE.AxesHelper(1.5);
-          // @ts-ignore
-          axesHelper.material.transparent = true;
-          // @ts-ignore
-          axesHelper.material.opacity = 0.6;
-          threeScene.add(axesHelper);
+        // 6. Create standalone Viewer
+        console.log(`[GS3D] Creating Viewer (sharedMemory=${canUseSharedMemory})...`);
+        const viewer = new Viewer({
+          cameraUp,
+          initialCameraPosition: [0, camDist * 0.35, camDist * 0.75],
+          initialCameraLookAt: [0, 0, 0],
+          rootElement: containerRef.current!,
+          threeScene,
+          selfDrivenMode: true,
+          useBuiltInControls: true,
+          gpuAcceleratedSort: canUseSharedMemory,
+          sharedMemoryForWorkers: canUseSharedMemory,
+          sceneRevealMode: SceneRevealMode.Instant,
+          antialiased: true,
+          freeIntermediateSplatData: false,
+          logLevel: LogLevel.Debug,
+          sphericalHarmonicsDegree: 2,
+        } as Record<string, unknown>);
 
-          console.log(`[GS3D] Creating Viewer (sharedMemory=${useSharedMem})...`);
-          const v = new Viewer({
-            cameraUp,
-            initialCameraPosition: [0, camDist * 0.35, camDist * 0.75],
-            initialCameraLookAt: [0, 0, 0],
-            rootElement: root,
-            threeScene,
-            selfDrivenMode: true,
-            useBuiltInControls: true,
-            gpuAcceleratedSort: useSharedMem,
-            sharedMemoryForWorkers: useSharedMem,
-            sceneRevealMode: SceneRevealMode.Instant,
-            antialiased: true,
-            freeIntermediateSplatData: false,
-            logLevel: LogLevel.Debug,
-            sphericalHarmonicsDegree: 2,
-          } as Record<string, unknown>);
+        // 7. Add the splat scene
+        console.log('[GS3D] Adding splat scene...');
+        await viewer.addSplatScene(blobUrl, {
+          splatAlphaRemovalThreshold: 5,
+          showLoadingUI: false,
+          progressiveLoad: false,
+          format: 2,
+          position: [-meta.center[0], -meta.center[1], -meta.center[2]],
+          rotation: [0, 0, 0, 1],
+          scale: [1, 1, 1],
+        });
+        if (disposed) return;
 
-          console.log('[GS3D] Adding splat scene...');
-          await v.addSplatScene(blobUrl!, {
-            splatAlphaRemovalThreshold: 5,
-            showLoadingUI: false,
-            progressiveLoad: false,
-            format: 2,
-            position: [-meta.center[0], -meta.center[1], -meta.center[2]],
-            rotation: [0, 0, 0, 1],
-            scale: [1, 1, 1],
-          });
-          if (disposed) { try { v.dispose(); } catch {} return null; }
+        // 8. Start rendering
+        viewer.start();
+        viewer.raycaster.raycastAgainstTrueSplatEllipsoid = true;
 
-          v.start();
-          v.raycaster.raycastAgainstTrueSplatEllipsoid = true;
-
-          console.log('[GS3D] splatMesh.visible:', v.splatMesh?.visible);
-          console.log('[GS3D] renderer context:', (v as any).renderer?.getContext()?.constructor?.name);
-
-          return v;
-        };
-
-        // 6. First attempt
-        let viewer = await initViewer(canUseSharedMemory);
-        if (!viewer || disposed) {
-          window.removeEventListener('unhandledrejection', onUnhandledRejection);
-          unhandledRejectionHandler = null;
-          return;
-        }
-
-        // 7. Post-sort verification: poll every 1s for up to 8s
-        if (canUseSharedMemory) {
-          const sortOk = await new Promise<boolean>((resolve) => {
-            let checks = 0;
-            const interval = setInterval(() => {
-              if (disposed) { clearInterval(interval); resolve(false); return; }
-              checks++;
-              const mesh = viewer!.splatMesh as any;
-              const ic = mesh?.geometry?.instanceCount ?? 0;
-              console.log(`[GS3D] Sort verification ${checks}/8: instanceCount=${ic}, rejectionError=${rejectionError}`);
-              if (ic > 0) { clearInterval(interval); resolve(true); }
-              else if (checks >= 8) { clearInterval(interval); resolve(false); }
-            }, 1000);
-          });
-
-          if (!sortOk && !disposed) {
-            console.warn('[GS3D] Sort worker failed with shared memory — retrying without shared memory / GPU sort');
-            if (rejectionError) {
-              setError(`Browser extension interference detected: ${rejectionError}. Retrying with fallback renderer...`);
-            }
-            try { viewer.dispose(); } catch {}
-            removeContainerChildrenSafe(containerRef.current!);
-            rejectionError = null;
-            viewer = await initViewer(false);
-            if (!viewer || disposed) {
-              window.removeEventListener('unhandledrejection', onUnhandledRejection);
-              unhandledRejectionHandler = null;
-              return;
-            }
-            setError(null);
-          }
-        }
-
-        window.removeEventListener('unhandledrejection', onUnhandledRejection);
-        unhandledRejectionHandler = null;
+        console.log('[GS3D] splatMesh.visible:', viewer.splatMesh?.visible);
+        console.log('[GS3D] renderer context:', (viewer as any).renderer?.getContext()?.constructor?.name);
 
         // Diagnostic logging after first sort completes (~3s)
         setTimeout(() => {
           if (disposed) return;
-          const mesh = viewer!.splatMesh as any;
-          console.log('[GS3D] Final post-sort: instanceCount=',
+          const mesh = viewer.splatMesh as any;
+          console.log('[GS3D] Post-sort check: instanceCount=',
                       mesh?.geometry?.instanceCount,
                       'splatRenderReady=', (viewer as any).splatRenderReady);
         }, 3000);
