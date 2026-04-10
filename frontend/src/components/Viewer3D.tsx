@@ -59,12 +59,10 @@ const PICK_RADIUS_PX = 20;
 
 /**
  * MASt3R/LongSplat always outputs Y-axis-vertical coordinates.
- * If the bbox centroid Y > 0.5 the data is likely in Y-down convention
- * (camera looking downward), so we flip the up vector.
+ * The postprocessor centers data to origin. Always use standard Y-up.
  */
-function detectCameraUp(bbox: { min: number[]; max: number[] }): [number, number, number] {
-  const centerY = (bbox.min[1] + bbox.max[1]) / 2;
-  return centerY > 0.5 ? [0, -1, 0] : [0, 1, 0];
+function detectCameraUp(_bbox: { min: number[]; max: number[] }): [number, number, number] {
+  return [0, 1, 0];
 }
 
 type SplatMeshWithCenters = THREE.Object3D & {
@@ -579,7 +577,9 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
                     'SharedArrayBuffer:', typeof SharedArrayBuffer !== 'undefined',
                     '-> sharedMemory:', canUseSharedMemory);
 
-        // Catch unhandled rejections during viewer lifecycle (diagnostic only)
+        // MetaMask's lockdown-install.js (SES) logs DOMException errors when
+        // OrbitControls touches domElement.style. These are cosmetic — the viewer
+        // still functions. Test in incognito to confirm SES is the sole source.
         const onUnhandledRejection = (e: PromiseRejectionEvent) => {
           const msg = e.reason?.message || String(e.reason);
           if (msg.includes('SharedArrayBuffer') || msg.includes('postMessage') ||
