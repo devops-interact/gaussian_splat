@@ -359,7 +359,12 @@ async def train_longsplat(
                 model_ply = output_dir / "model.ply"
                 if model_ply.exists():
                     logger.info("Running PlyOptimizer on model.ply (center, prune, scale floor)...")
-                    PlyOptimizer.optimize(model_ply, model_ply)
+                    opt_ok = PlyOptimizer.optimize(model_ply, model_ply)
+                    if not opt_ok:
+                        logger.warning(
+                            "PlyOptimizer returned False — using original "
+                            "unoptimized model.ply for the rest of the pipeline"
+                        )
             else:
                 logger.error("Conversion failed - PLY may be missing properties")
             
