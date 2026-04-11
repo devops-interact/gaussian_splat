@@ -508,7 +508,6 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
   useEffect(() => {
     if (!containerRef.current || !modelUrl) return;
     let disposed = false;
-    let blobUrl: string | null = null;
     let unhandledRejectionHandler: ((e: PromiseRejectionEvent) => void) | null = null;
 
     const apiBase = getApiBaseUrl();
@@ -564,20 +563,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         metadataRef.current = modelMeta;
         onMetadataRef.current?.(modelMeta);
 
-        // 3. Create blob URL
-        const blob = new Blob([buffer], { type: 'application/octet-stream' });
-        blobUrl = URL.createObjectURL(blob);
-
-        // 4. Capability detection for SharedArrayBuffer / cross-origin isolation
-        const canUseSharedMemory =
-          typeof SharedArrayBuffer !== 'undefined' &&
-          typeof window !== 'undefined' &&
-          (window as any).crossOriginIsolated === true;
-        console.log('[GS3D] crossOriginIsolated:', (window as any).crossOriginIsolated,
-                    'SharedArrayBuffer:', typeof SharedArrayBuffer !== 'undefined',
-                    '-> sharedMemory:', canUseSharedMemory);
-
-        // MetaMask's lockdown-install.js (SES) logs DOMException errors when
+        // 3. MetaMask's lockdown-install.js (SES) logs DOMException errors when
         // OrbitControls touches domElement.style. These are cosmetic — the viewer
         // still functions. Test in incognito to confirm SES is the sole source.
         const onUnhandledRejection = (e: PromiseRejectionEvent) => {
@@ -602,30 +588,15 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         const cameraUp = detectCameraUp(meta.boundingBox);
         console.log(`[GS3D] BBox diagonal=${diagonal.toFixed(2)}, camDist=${camDist.toFixed(2)}, cameraUp=[${cameraUp}]`);
 
-        // 5. Build Three.js scene with grid + origin axes
-        const threeScene = new THREE.Scene();
-        const grid = new THREE.GridHelper(30, 30, 0x1b1a0e, 0x121008);
-        grid.position.y = -0.01;
-        threeScene.add(grid);
-        const axesHelper = new THREE.AxesHelper(1.5);
-        // @ts-ignore
-        axesHelper.material.transparent = true;
-        // @ts-ignore
-        axesHelper.material.opacity = 0.6;
-        threeScene.add(axesHelper);
-
-        // 6. Create standalone Viewer
-        console.log(`[GS3D] Creating Viewer (sharedMemory=${canUseSharedMemory})...`);
+        // 5. Create standalone Viewer (let library manage its own THREE.Scene)
+        console.log(`[GS3D] Creating Viewer...`);
         const viewer = new Viewer({
           cameraUp,
           initialCameraPosition: [0, camDist * 0.35, camDist * 0.75],
           initialCameraLookAt: [0, 0, 0],
           rootElement: containerRef.current!,
-          threeScene,
           selfDrivenMode: true,
           useBuiltInControls: true,
-          gpuAcceleratedSort: canUseSharedMemory,
-          sharedMemoryForWorkers: canUseSharedMemory,
           integerBasedSort: false,
           sceneRevealMode: SceneRevealMode.Instant,
           antialiased: false,
@@ -634,16 +605,27 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
           sphericalHarmonicsDegree: 0,
         } as Record<string, unknown>);
 
-        // 7. Add the splat scene
-        console.log('[GS3D] Adding splat scene...');
-        await viewer.addSplatScene(blobUrl, {
+        // 6. Add grid + axes to the library-managed scene (depthWrite off to avoid occluding splats)
+        const libScene = (viewer as unknown as { threeScene: THREE.Scene }).threeScene;
+        const grid = new THREE.GridHelper(30, 30, 0x1b1a0e, 0x121008);
+        grid.position.y = -0.01;
+        (grid.material as THREE.Material).depthWrite = false;
+        (grid.material as THREE.Material).depthTest = false;
+        libScene.add(grid);
+        const axesHelper = new THREE.AxesHelper(1.5);
+        (axesHelper.material as THREE.Material).transparent = true;
+        (axesHelper.material as THREE.Material).opacity = 0.6;
+        (axesHelper.material as THREE.Material).depthWrite = false;
+        (axesHelper.material as THREE.Material).depthTest = false;
+        libScene.add(axesHelper);
+
+        // 7. Add the splat scene (pass direct URL — the library fetches it internally)
+        console.log('[GS3D] Adding splat scene from:', fullUrl);
+        await viewer.addSplatScene(fullUrl, {
           splatAlphaRemovalThreshold: 1,
           showLoadingUI: false,
           progressiveLoad: false,
           format: 2,
-          position: [-meta.center[0], -meta.center[1], -meta.center[2]],
-          rotation: [0, 0, 0, 1],
-          scale: [1, 1, 1],
         });
         if (disposed) return;
 
@@ -658,9 +640,17 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         setTimeout(() => {
           if (disposed) return;
           const mesh = viewer.splatMesh as any;
+          const cam = (viewer as any).camera as THREE.PerspectiveCamera | undefined;
           console.log('[GS3D] Post-sort check: instanceCount=',
                       mesh?.geometry?.instanceCount,
                       'splatRenderReady=', (viewer as any).splatRenderReady);
+          if (cam) {
+            console.log('[GS3D] Camera pos=', cam.position.toArray().map((v: number) => v.toFixed(2)),
+                        'fov=', cam.fov, 'near=', cam.near, 'far=', cam.far);
+          }
+          if (mesh?.geometry?.instanceCount === 0) {
+            console.warn('[GS3D] instanceCount is 0 — splats loaded but none rendered. Check console for library errors.');
+          }
         }, 3000);
 
         const splatMeshAny = viewer.splatMesh as unknown as {
@@ -727,7 +717,6 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       try {
         document.exitPointerLock?.();
       } catch { /* ignore */ }
-      if (blobUrl) URL.revokeObjectURL(blobUrl);
       const root = containerRef.current;
       const viewer = viewerRef.current;
       viewerRef.current = null;
