@@ -956,6 +956,9 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       if (!splatMesh.visible) return null;
       if (typeof viewerAny.isLoading === 'function' && viewerAny.isLoading()) return null;
 
+      camera.updateMatrixWorld(true);
+      camera.updateProjectionMatrix();
+
       const renderDims = new THREE.Vector2();
       if (viewerAny.getRenderDimensions) {
         viewerAny.getRenderDimensions(renderDims);
