@@ -138,14 +138,34 @@ RUN cd submodules/mast3r/dust3r/croco/models/curope/ && \
 
 # Pre-download MASt3R checkpoint (required for pose estimation in free mode)
 # Reference: https://learnopencv.com/mast3r-sfm-grounding-image-matching-3d/
-# Use retries and long timeouts: large file (~2.6GB) often hits SSL/connection drops (curl 56).
-RUN mkdir -p checkpoints && \
-    curl -fsSL --retry 5 --retry-delay 30 --retry-max-time 3600 \
-        --connect-timeout 60 --max-time 7200 \
-        -o checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth \
-        https://download.europe.naverlabs.com/ComputerVision/MASt3R/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth && \
-    ls -lh checkpoints/ && \
-    echo "MASt3R checkpoint downloaded successfully"
+# Large ~2.6GB: TLS often drops mid-transfer (curl 56 / OpenSSL unexpected eof).
+# Use resume (-C -), --retry-all-errors, HTTP/1.1, and outer waves so partial files continue.
+RUN <<'EOS'
+set -euo pipefail
+mkdir -p checkpoints
+URL="https://download.europe.naverlabs.com/ComputerVision/MASt3R/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth"
+OUT="checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth"
+for wave in $(seq 1 10); do
+  echo "MASt3R checkpoint download wave ${wave}/10"
+  if curl -fSL --http1.1 \
+    --retry 40 --retry-delay 20 --retry-max-time 0 --retry-all-errors \
+    --connect-timeout 120 --max-time 0 \
+    -C - \
+    -o "${OUT}" "${URL}"; then
+    break
+  fi
+  echo "curl exited non-zero, sleeping 120s before next wave (partial file preserved for resume)"
+  sleep 120
+done
+SIZE=$(stat -c%s "${OUT}")
+# Expect ~2.6GB; reject obvious truncation
+if [ "${SIZE}" -lt 1800000000 ]; then
+  echo "Checkpoint too small (${SIZE} bytes); download incomplete or corrupt."
+  exit 1
+fi
+ls -lh checkpoints/
+echo "MASt3R checkpoint downloaded successfully"
+EOS
 
 # Create symlinks for checkpoint in expected locations
 RUN mkdir -p submodules/mast3r/checkpoints && \
