@@ -140,7 +140,8 @@ RUN cd submodules/mast3r/dust3r/croco/models/curope/ && \
 # Reference: https://learnopencv.com/mast3r-sfm-grounding-image-matching-3d/
 # Large ~2.6GB: TLS often drops mid-transfer (curl 56 / OpenSSL unexpected eof).
 # Use resume (-C -), --retry-all-errors, HTTP/1.1, and outer waves so partial files continue.
-RUN <<'EOS'
+# Heredoc defaults to /bin/sh (dash): pipefail requires bash.
+RUN bash <<'EOS'
 set -euo pipefail
 mkdir -p checkpoints
 URL="https://download.europe.naverlabs.com/ComputerVision/MASt3R/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth"
