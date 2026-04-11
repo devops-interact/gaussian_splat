@@ -55,7 +55,7 @@ function maxSplatPickDistance(bbox: ModelMetadata['boundingBox']): number {
   return Math.max(diagonal * 4, 3);
 }
 
-const PICK_RADIUS_PX = 20;
+const PICK_RADIUS_PX = 30;
 
 /**
  * MASt3R/LongSplat always outputs Y-axis-vertical coordinates.
@@ -165,34 +165,103 @@ function nearestSplatCenterAlongRay(
   return result;
 }
 
+interface PickResult {
+  position: THREE.Vector3;
+  isSnapped: boolean;
+}
+
 function removeMeasurePreviewFromScene(scene: THREE.Scene) {
-  const list: THREE.Mesh[] = [];
+  const toRemove: THREE.Object3D[] = [];
   scene.traverse((o) => {
-    if (o.userData.__measurePreview && o instanceof THREE.Mesh) list.push(o);
+    if (o.userData.__measurePreview) toRemove.push(o);
   });
-  for (const m of list) {
-    scene.remove(m);
-    m.geometry.dispose();
-    const mat = m.material;
-    if (Array.isArray(mat)) mat.forEach((mm) => mm.dispose());
-    else mat.dispose();
+  for (const obj of toRemove) {
+    scene.remove(obj);
+    if (obj instanceof THREE.Mesh || obj instanceof THREE.Line) {
+      obj.geometry.dispose();
+      const mat = obj.material;
+      if (Array.isArray(mat)) mat.forEach((mm) => mm.dispose());
+      else (mat as THREE.Material).dispose();
+    }
   }
 }
 
-function setMeasurePreviewInScene(scene: THREE.Scene, position: THREE.Vector3 | null) {
+function setMeasurePreviewInScene(
+  scene: THREE.Scene,
+  pick: PickResult | null,
+  camera: THREE.PerspectiveCamera,
+) {
   removeMeasurePreviewFromScene(scene);
-  if (!position) return;
-  const geo = new THREE.SphereGeometry(0.014, 14, 14);
-  const mat = new THREE.MeshBasicMaterial({
-    color: 0xf5ec99,
+  if (!pick) return;
+
+  const { position, isSnapped } = pick;
+  const color = isSnapped ? 0xefe752 : 0xff6b6b;
+  const camDist = camera.position.distanceTo(position);
+  const scale = Math.max(0.01, camDist * 0.012);
+
+  // Ring indicator
+  const ringGeo = new THREE.RingGeometry(scale * 0.5, scale, 24);
+  const ringMat = new THREE.MeshBasicMaterial({
+    color,
     transparent: true,
-    opacity: 0.55,
-    depthTest: true,
+    opacity: isSnapped ? 0.75 : 0.4,
+    side: THREE.DoubleSide,
+    depthTest: false,
+    depthWrite: false,
   });
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.position.copy(position);
-  mesh.userData.__measurePreview = true;
-  scene.add(mesh);
+  const ring = new THREE.Mesh(ringGeo, ringMat);
+  ring.position.copy(position);
+  ring.lookAt(camera.position);
+  ring.userData.__measurePreview = true;
+  scene.add(ring);
+
+  // Crosshair lines through the ring center
+  const halfLen = scale * 1.2;
+  const lineColor = isSnapped ? 0xefe752 : 0xff6b6b;
+  const lineMat = new THREE.LineBasicMaterial({
+    color: lineColor,
+    transparent: true,
+    opacity: isSnapped ? 0.6 : 0.3,
+    depthTest: false,
+    depthWrite: false,
+  });
+
+  const up = new THREE.Vector3(0, 1, 0);
+  const toCamera = new THREE.Vector3().subVectors(camera.position, position).normalize();
+  const right = new THREE.Vector3().crossVectors(toCamera, up).normalize();
+  const localUp = new THREE.Vector3().crossVectors(right, toCamera).normalize();
+
+  const hPts = [
+    position.clone().addScaledVector(right, -halfLen),
+    position.clone().addScaledVector(right, halfLen),
+  ];
+  const hGeo = new THREE.BufferGeometry().setFromPoints(hPts);
+  const hLine = new THREE.Line(hGeo, lineMat);
+  hLine.userData.__measurePreview = true;
+  scene.add(hLine);
+
+  const vPts = [
+    position.clone().addScaledVector(localUp, -halfLen),
+    position.clone().addScaledVector(localUp, halfLen),
+  ];
+  const vGeo = new THREE.BufferGeometry().setFromPoints(vPts);
+  const vLine = new THREE.Line(vGeo, lineMat.clone());
+  vLine.userData.__measurePreview = true;
+  scene.add(vLine);
+
+  // Small center dot for precision
+  const dotGeo = new THREE.SphereGeometry(scale * 0.15, 8, 8);
+  const dotMat = new THREE.MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity: isSnapped ? 0.9 : 0.5,
+    depthTest: false,
+    depthWrite: false,
+  });
+  const dot = new THREE.Mesh(dotGeo, dotMat);
+  dot.position.copy(position);
+  dot.userData.__measurePreview = true;
+  scene.add(dot);
 }
 
 /** Avoid innerHTML + Viewer.dispose() both touching the same nodes (removeChild DOMException). */
@@ -631,7 +700,8 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
 
         // 8. Start rendering
         viewer.start();
-        viewer.raycaster.raycastAgainstTrueSplatEllipsoid = true;
+        // Sphere-mode gives larger hit volumes — better for noisy LongSplat data
+        viewer.raycaster.raycastAgainstTrueSplatEllipsoid = false;
 
         console.log('[GS3D] splatMesh.visible:', viewer.splatMesh?.visible);
         console.log('[GS3D] renderer context:', (viewer as any).renderer?.getContext()?.constructor?.name);
@@ -662,15 +732,17 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
           console.log('[GS3D] Splat count after load (lastBuild / bufferTotal):', lastBuild, '/', bufferTotal);
         }
 
-        // Build splat center cache for fallback picking
-        splatCentersRef.current = buildSplatCenterWorldCache(
-          viewer.splatMesh as SplatMeshWithCenters,
-        );
-        if (splatCentersRef.current) {
-          console.log('[GS3D] Splat center cache:', splatCentersRef.current.length / 3, 'points');
-        } else {
-          console.warn('[GS3D] Failed to build splat center cache');
-        }
+        // Build splat center cache only after SplatTree is ready (transforms are finalized)
+        const rebuildCenterCache = () => {
+          splatCentersRef.current = buildSplatCenterWorldCache(
+            viewer.splatMesh as SplatMeshWithCenters,
+          );
+          if (splatCentersRef.current) {
+            console.log('[GS3D] Splat center cache built:', splatCentersRef.current.length / 3, 'points');
+          } else {
+            console.warn('[GS3D] Failed to build splat center cache');
+          }
+        };
 
         // Register SplatTree ready callback for library raycaster
         splatTreeReadyRef.current = false;
@@ -680,18 +752,33 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         };
         if (splatMeshInternal.getSplatTree?.()) {
           splatTreeReadyRef.current = true;
+          rebuildCenterCache();
           console.log('[GS3D] SplatTree already available');
         } else if (splatMeshInternal.onSplatTreeReady) {
           splatMeshInternal.onSplatTreeReady(() => {
             if (!disposed) {
               splatTreeReadyRef.current = true;
+              rebuildCenterCache();
               console.log('[GS3D] SplatTree ready — library raycaster is now active');
             }
           });
           console.log('[GS3D] Waiting for SplatTree to build (async)...');
         } else {
-          console.warn('[GS3D] onSplatTreeReady not available — library raycaster may not work');
+          console.warn('[GS3D] onSplatTreeReady not available — building center cache eagerly');
+          rebuildCenterCache();
         }
+
+        // Safety re-check: if SplatTree callback was missed, poll after 5s
+        setTimeout(() => {
+          if (disposed || splatTreeReadyRef.current) return;
+          if (splatMeshInternal.getSplatTree?.()) {
+            splatTreeReadyRef.current = true;
+            rebuildCenterCache();
+            console.log('[GS3D] SplatTree detected via safety poll (5s)');
+          } else {
+            console.warn('[GS3D] SplatTree still not ready after 5s — library raycaster may not work');
+          }
+        }, 5000);
 
         viewerRef.current = viewer;
         console.log('[GS3D] Viewer started successfully');
@@ -863,7 +950,9 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
     const threeScene = viewerAny.threeScene;
     if (!camera || !gsRaycaster || !splatMesh || !threeScene) return;
 
-    const pickWorldFromEvent = (e: MouseEvent): THREE.Vector3 | null => {
+    const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+    const pickWorldFromEvent = (e: MouseEvent): PickResult | null => {
       if (!splatMesh.visible) return null;
       if (typeof viewerAny.isLoading === 'function' && viewerAny.isLoading()) return null;
 
@@ -889,8 +978,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         ? maxSplatPickDistance(metadataRef.current.boundingBox)
         : 100;
 
-      // Strategy: prefer the library's built-in raycaster (accurate ellipsoid intersection)
-      // when the SplatTree has been built. Fall back to our center-cache brute-force approach.
+      // Strategy 1: library raycaster (sphere-mode for better tolerance on noisy data)
       if (splatTreeReadyRef.current) {
         try {
           gsRaycaster.setFromCameraAndScreenPosition(camera, mousePos, renderDims);
@@ -901,28 +989,32 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
             console.log(
               `[Pick:lib] splat #${validHit.splatIndex} @ [${validHit.origin.x.toFixed(3)}, ${validHit.origin.y.toFixed(3)}, ${validHit.origin.z.toFixed(3)}] dist=${validHit.distance.toFixed(4)}`,
             );
-            return validHit.origin.clone();
+            return { position: validHit.origin.clone(), isSnapped: true };
           }
         } catch (err) {
           console.warn('[GS3D] Library raycaster failed (mid-sort?), trying center cache...', err);
         }
       }
 
-      // Fallback: brute-force nearest-depth search across cached splat centers
+      // Strategy 2: brute-force nearest-depth search across cached splat centers
       const { ndcX, ndcY } = ndcFromMousePos(mousePos, renderDims);
       const centers = splatCentersRef.current;
       if (centers && centers.length >= 3) {
-        return nearestSplatCenterAlongRay(
-          camera,
-          ndcX,
-          ndcY,
-          centers,
-          renderDims,
-          maxDist,
-        );
+        const hit = nearestSplatCenterAlongRay(camera, ndcX, ndcY, centers, renderDims, maxDist);
+        if (hit) return { position: hit, isSnapped: true };
       }
 
-      console.warn('[GS3D] No picking method available — splatTree not ready and no center cache');
+      // Strategy 3: ground-plane fallback (hover-only, not valid for measurement)
+      const ndcRaycaster = new THREE.Raycaster();
+      ndcRaycaster.setFromCamera(new THREE.Vector2(
+        (mousePos.x / renderDims.x) * 2 - 1,
+        -(mousePos.y / renderDims.y) * 2 + 1,
+      ), camera);
+      const groundHit = new THREE.Vector3();
+      if (ndcRaycaster.ray.intersectPlane(groundPlane, groundHit)) {
+        return { position: groundHit, isSnapped: false };
+      }
+
       return null;
     };
 
@@ -931,8 +1023,12 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       if (now - lastClickTimeRef.current < 300) return;
       lastClickTimeRef.current = now;
       try {
-        const p = pickWorldFromEvent(e);
-        if (p) handleAddMeasurePoint(p);
+        const pick = pickWorldFromEvent(e);
+        if (pick && pick.isSnapped) {
+          handleAddMeasurePoint(pick.position);
+        } else if (pick && !pick.isSnapped) {
+          console.log('[GS3D] Click rejected — no splat surface under cursor');
+        }
       } catch (err) {
         console.warn('[GS3D] Raycaster intersection failed (likely during mid-sort):', err);
       }
@@ -944,8 +1040,8 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       if (now - lastHoverMs < 50) return;
       lastHoverMs = now;
       try {
-        const p = pickWorldFromEvent(e);
-        setMeasurePreviewInScene(threeScene, p);
+        const pick = pickWorldFromEvent(e);
+        setMeasurePreviewInScene(threeScene, pick, camera);
       } catch {
         removeMeasurePreviewFromScene(threeScene);
       }
