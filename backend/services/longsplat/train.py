@@ -164,7 +164,7 @@ async def train_longsplat(
         # Scale sub-iteration parameters proportionally with main iterations.
         # Reference baseline: 15000 iterations = full quality (original defaults).
         # Lower presets scale down proportionally, with sensible minimums.
-        quality_factor = min(1.0, iterations / 20000)
+        quality_factor = min(1.0, iterations / 25000)
         pose_iter   = max(40,  int(100  * quality_factor))
         local_iter  = max(80,  int(200  * quality_factor))
         global_iter = max(240, int(600  * quality_factor))
@@ -172,7 +172,7 @@ async def train_longsplat(
         init_iter   = max(600, int(1500 * quality_factor))
         # Iterations for Scaffold-GS → standard 3DGS conversion refinement
         # Higher count gives densification more time to spawn Gaussians and fit scales
-        convert_iters = max(5000, int(15000 * quality_factor))
+        convert_iters = max(8000, int(30000 * quality_factor))
 
         logger.info(
             f"Quality factor: {quality_factor:.2f} → pose={pose_iter}, "

@@ -32,23 +32,23 @@ class PresetConfig(BaseModel):
 QUALITY_PRESETS: Dict[QualityPreset, PresetConfig] = {
     QualityPreset.BALANCED: PresetConfig(
         name="Balanced",
-        description="Good quality (~15-25 min). Recommended for most videos.",
+        description="Good quality (~20-30 min). Recommended for most videos.",
         fps=1.5,
-        iterations=12000,
+        iterations=15000,
         resolution=1,
         init_frames_ratio=0.30,
-        estimated_minutes=20,
-        convert_3dgs_prune_ratio=0.40,
+        estimated_minutes=25,
+        convert_3dgs_prune_ratio=0.58,
     ),
     QualityPreset.QUALITY: PresetConfig(
         name="Quality",
-        description="Best quality (~30-45 min). For final production renders.",
+        description="Best quality (~35-50 min). For final production renders.",
         fps=2.0,
-        iterations=20000,
+        iterations=25000,
         resolution=1,
         init_frames_ratio=0.25,
-        estimated_minutes=45,
-        convert_3dgs_prune_ratio=0.45,
+        estimated_minutes=50,
+        convert_3dgs_prune_ratio=0.65,
     ),
 }
 

@@ -34,7 +34,7 @@ async def extract_frames(
         "ffmpeg",
         "-y",  # Overwrite without asking
         "-i", str(video_path),
-        "-vf", f"fps={fps}",
+        "-vf", f"fps={fps},scale='min(1920,iw)':-2",
         str(frame_pattern)
     ]
     

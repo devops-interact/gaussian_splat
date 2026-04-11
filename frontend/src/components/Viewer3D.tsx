@@ -58,11 +58,86 @@ function maxSplatPickDistance(bbox: ModelMetadata['boundingBox']): number {
 const PICK_RADIUS_PX = 30;
 
 /**
- * MASt3R/LongSplat always outputs Y-axis-vertical coordinates.
- * The postprocessor centers data to origin. Always use standard Y-up.
+ * Compute the scene's "up" direction via PCA on centered positions.
+ * The eigenvector with the smallest eigenvalue (least variance = thinnest
+ * spread) is the scene's vertical axis. Rooms/floors are wider than tall,
+ * so this heuristic works well for indoor reconstructions.
+ *
+ * Returns a quaternion that rotates the detected up axis to Y-up [0,1,0].
+ * If PCA fails or data is degenerate, returns identity (no rotation).
  */
-function detectCameraUp(_bbox: { min: number[]; max: number[] }): [number, number, number] {
-  return [0, 1, 0];
+function computeOrientationFromPositions(positions: Float32Array): [number, number, number, number] {
+  const n = positions.length / 3;
+  if (n < 10) return [0, 0, 0, 1];
+
+  // 1. Build 3x3 covariance matrix (data is already centered by backend)
+  let cxx = 0, cxy = 0, cxz = 0, cyy = 0, cyz = 0, czz = 0;
+  for (let i = 0; i < n; i++) {
+    const x = positions[i * 3], y = positions[i * 3 + 1], z = positions[i * 3 + 2];
+    cxx += x * x; cxy += x * y; cxz += x * z;
+    cyy += y * y; cyz += y * z; czz += z * z;
+  }
+  const inv = 1 / n;
+  cxx *= inv; cxy *= inv; cxz *= inv; cyy *= inv; cyz *= inv; czz *= inv;
+
+  // 2. Jacobi eigenvalue iteration for symmetric 3x3 matrix
+  const a = [
+    [cxx, cxy, cxz],
+    [cxy, cyy, cyz],
+    [cxz, cyz, czz],
+  ];
+  const v = [
+    [1, 0, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+  ];
+  for (let sweep = 0; sweep < 50; sweep++) {
+    const offDiag = Math.abs(a[0][1]) + Math.abs(a[0][2]) + Math.abs(a[1][2]);
+    if (offDiag < 1e-12) break;
+    for (const [p, q] of [[0, 1], [0, 2], [1, 2]] as [number, number][]) {
+      if (Math.abs(a[p][q]) < 1e-15) continue;
+      const theta = 0.5 * Math.atan2(2 * a[p][q], a[p][p] - a[q][q]);
+      const c = Math.cos(theta), s = Math.sin(theta);
+      const app = a[p][p], aqq = a[q][q], apq = a[p][q];
+      a[p][p] = c * c * app + 2 * s * c * apq + s * s * aqq;
+      a[q][q] = s * s * app - 2 * s * c * apq + c * c * aqq;
+      a[p][q] = 0; a[q][p] = 0;
+      for (let r = 0; r < 3; r++) {
+        if (r === p || r === q) continue;
+        const arp = a[r][p], arq = a[r][q];
+        a[r][p] = c * arp + s * arq; a[p][r] = a[r][p];
+        a[r][q] = -s * arp + c * arq; a[q][r] = a[r][q];
+      }
+      for (let r = 0; r < 3; r++) {
+        const vrp = v[r][p], vrq = v[r][q];
+        v[r][p] = c * vrp + s * vrq;
+        v[r][q] = -s * vrp + c * vrq;
+      }
+    }
+  }
+
+  // 3. Find eigenvector with smallest eigenvalue
+  const eigenvalues = [a[0][0], a[1][1], a[2][2]];
+  let minIdx = 0;
+  if (eigenvalues[1] < eigenvalues[minIdx]) minIdx = 1;
+  if (eigenvalues[2] < eigenvalues[minIdx]) minIdx = 2;
+
+  const up = new THREE.Vector3(v[0][minIdx], v[1][minIdx], v[2][minIdx]).normalize();
+  console.log(
+    `[GS3D] PCA up axis: [${up.x.toFixed(3)}, ${up.y.toFixed(3)}, ${up.z.toFixed(3)}]`,
+    `eigenvalues: [${eigenvalues.map(e => e.toFixed(4)).join(', ')}]`,
+  );
+
+  // Ensure the up vector points towards positive Y (flip if it points down)
+  if (up.y < 0) up.negate();
+
+  // 4. Build quaternion: rotate detected up → Y-up
+  const yUp = new THREE.Vector3(0, 1, 0);
+  if (Math.abs(up.dot(yUp)) > 0.999) {
+    return [0, 0, 0, 1];
+  }
+  const q = new THREE.Quaternion().setFromUnitVectors(up, yUp);
+  return [q.x, q.y, q.z, q.w];
 }
 
 type SplatMeshWithCenters = THREE.Object3D & {
@@ -654,8 +729,9 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
           (bbMax[2] - bbMin[2]) ** 2,
         );
         const camDist = Math.max(diagonal * 1.2, 3);
-        const cameraUp = detectCameraUp(meta.boundingBox);
-        console.log(`[GS3D] BBox diagonal=${diagonal.toFixed(2)}, camDist=${camDist.toFixed(2)}, cameraUp=[${cameraUp}]`);
+        const cameraUp: [number, number, number] = [0, 1, 0];
+        const orientation = computeOrientationFromPositions(meta.positions);
+        console.log(`[GS3D] BBox diagonal=${diagonal.toFixed(2)}, camDist=${camDist.toFixed(2)}, orientation=[${orientation.map(v => v.toFixed(4))}]`);
 
         // 5. Create standalone Viewer (let library manage its own THREE.Scene)
         console.log(`[GS3D] Creating Viewer...`);
@@ -668,10 +744,10 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
           useBuiltInControls: true,
           integerBasedSort: false,
           sceneRevealMode: SceneRevealMode.Instant,
-          antialiased: false,
+          antialiased: true,
           freeIntermediateSplatData: false,
           logLevel: LogLevel.Debug,
-          sphericalHarmonicsDegree: 0,
+          sphericalHarmonicsDegree: 2,
         } as Record<string, unknown>);
 
         // 6. Add grid + axes to the library-managed scene (depthWrite off to avoid occluding splats)
@@ -689,13 +765,15 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         libScene.add(axesHelper);
 
         // 7. Add the splat scene (pass direct URL — the library fetches it internally)
+        // SceneFormat.Ply = 2; orientation is a valid runtime option but missing from TS types
         console.log('[GS3D] Adding splat scene from:', fullUrl);
         await viewer.addSplatScene(fullUrl, {
           splatAlphaRemovalThreshold: 1,
           showLoadingUI: false,
           progressiveLoad: false,
           format: 2,
-        });
+          orientation,
+        } as Record<string, unknown>);
         if (disposed) return;
 
         // 8. Start rendering
@@ -951,6 +1029,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
     if (!camera || !gsRaycaster || !splatMesh || !threeScene) return;
 
     const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    let pickDimsLogged = false;
 
     const pickWorldFromEvent = (e: MouseEvent): PickResult | null => {
       if (!splatMesh.visible) return null;
@@ -964,6 +1043,16 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         viewerAny.getRenderDimensions(renderDims);
       } else {
         renderDims.set(canvas.clientWidth, canvas.clientHeight);
+      }
+
+      if (!pickDimsLogged) {
+        pickDimsLogged = true;
+        console.log(
+          `[Pick:dims] renderDims=${renderDims.x}x${renderDims.y}`,
+          `canvas.client=${canvas.clientWidth}x${canvas.clientHeight}`,
+          `canvas.hw=${canvas.width}x${canvas.height}`,
+          `DPR=${window.devicePixelRatio}`,
+        );
       }
 
       const rect = canvas.getBoundingClientRect();
@@ -990,12 +1079,12 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
           const validHit = hits.find(h => isFinite(h.distance) && h.distance <= maxDist);
           if (validHit) {
             console.log(
-              `[Pick:lib] splat #${validHit.splatIndex} @ [${validHit.origin.x.toFixed(3)}, ${validHit.origin.y.toFixed(3)}, ${validHit.origin.z.toFixed(3)}] dist=${validHit.distance.toFixed(4)}`,
+              `[Pick:S1-lib] splat #${validHit.splatIndex} @ [${validHit.origin.x.toFixed(3)}, ${validHit.origin.y.toFixed(3)}, ${validHit.origin.z.toFixed(3)}] dist=${validHit.distance.toFixed(4)}`,
             );
             return { position: validHit.origin.clone(), isSnapped: true };
           }
         } catch (err) {
-          console.warn('[GS3D] Library raycaster failed (mid-sort?), trying center cache...', err);
+          console.warn('[Pick:S1-lib] failed (mid-sort?), trying center cache...', err);
         }
       }
 
@@ -1004,7 +1093,10 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       const centers = splatCentersRef.current;
       if (centers && centers.length >= 3) {
         const hit = nearestSplatCenterAlongRay(camera, ndcX, ndcY, centers, renderDims, maxDist);
-        if (hit) return { position: hit, isSnapped: true };
+        if (hit) {
+          console.log(`[Pick:S2-cache] hit`);
+          return { position: hit, isSnapped: true };
+        }
       }
 
       // Strategy 3: ground-plane fallback (hover-only, not valid for measurement)

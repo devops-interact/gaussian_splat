@@ -122,7 +122,7 @@ class PlyOptimizer:
 
             # ── 3b. Scale floor clamp ────────────────────────────────────
             # Clamp log-scale so every splat is at least ~4 mm per axis.
-            MIN_LOG_SCALE = -5.5
+            MIN_LOG_SCALE = -7.0
             if 'scale_0' in prop_names and len(data) > 0:
                 for s in ['scale_0', 'scale_1', 'scale_2']:
                     col = data[s].astype(np.float64)
