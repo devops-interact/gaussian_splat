@@ -22,8 +22,8 @@ const STATUS_LABELS: Record<JobStatusEnum, string> = {
 };
 
 const PRESET_LABELS: Record<string, string> = {
-  balanced: 'Balanced (~15-25 min)',
-  quality: 'Quality (~30-45 min)',
+  balanced: 'Balanced (~12 min est.)',
+  quality: 'Quality (~30 min est.)',
 };
 
 export default function JobStatus({ jobId, onComplete, embedded }: JobStatusProps) {

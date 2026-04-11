@@ -110,6 +110,22 @@ def normalize_vertex_f_rest_by_property_names(vertex, prop_names: List[str]) -> 
     return new_data, r
 
 
+def assert_ply_gaussian_splats3d_compatible(ply_path: Path) -> None:
+    """
+    Fail export if PLY vertex layout is unsafe for @mkkellogg/gaussian-splats-3d
+    (f_rest_* count must be 0 or a multiple of 3). Call after rewrite_ply_sanitize_f_rest_inplace.
+    """
+    plydata = PlyData.read(str(ply_path))
+    vertex = plydata["vertex"]
+    prop_names = [p.name for p in vertex.properties]
+    frest = _ordered_f_rest_property_names(prop_names)
+    if len(frest) > 0 and len(frest) % 3 != 0:
+        raise ValueError(
+            f"PLY incompatible with GaussianSplats3D: {len(frest)} f_rest_* properties "
+            f"(must be 0 or a multiple of 3) on {ply_path}"
+        )
+
+
 def rewrite_ply_sanitize_f_rest_inplace(ply_path: Path) -> bool:
     """
     If exported PLY has f_rest_* count not divisible by 3, rewrite file in place for web viewer.

@@ -6,7 +6,7 @@ A production web application that converts video footage of rooms into interacti
 
 ## Features
 
-- **Video upload** with quality preset selection (Fast / Balanced / Quality)
+- **Video upload** with quality preset selection (**Balanced** / **Quality**)
 - **LongSplat training** with MASt3R for automatic pose estimation (no COLMAP)
 - **3D Viewer** — orbit, walk-through, measurement tool, snapshot capture
 - **Points / Mesh toggle** — raw point cloud or Poisson-reconstructed GLB surface
@@ -86,11 +86,16 @@ Video (MP4)
 
 ### Quality Presets
 
-| Preset | FPS | Iterations | Est. Time | Use Case |
+Defined in `backend/core/config.py` (`QUALITY_PRESETS`). Sub-iterations and `convert_3dgs` steps scale in `backend/services/longsplat/train.py`.
+
+| Preset | FPS | LongSplat iterations | Est. time | Use case |
 |---|---|---|---|---|
-| **Fast** | 1.0 | 2,000 | 3-5 min | Quick preview |
-| **Balanced** | 2.0 | 5,000 | 8-12 min | Recommended |
-| **Quality** | 3.0 | 12,000 | 20-30 min | Production |
+| **Balanced** | 1.5 | 4,000 | ~12 min | Faster drafts |
+| **Quality** | 2.0 | 12,000 | ~30 min | Shareable quality |
+
+### 3D viewer (GaussianSplats3D)
+
+The scan viewer uses [`@mkkellogg/gaussian-splats-3d`](https://github.com/mkkellogg/GaussianSplats3D). The **Display** panel (bottom-right) exposes **min alpha** (reloads the splat scene), **SH level** 0/1/2, **splat scale**, and optional **Download .ksplat** in the browser (same idea as the [official demo / converter](https://projects.markkellogg.org/threejs/demo_gaussian_splats_3d.php)). For batch conversion without the app, clone GaussianSplats3D and run `node util/create-ksplat.js` (not included in the npm package). Jobs still export **PLY**; `.ksplat` is optional for faster reloads elsewhere.
 
 ---
 
@@ -141,7 +146,7 @@ Video (MP4)
   "status": "training",
   "progress": 0.65,
   "quality_preset": "balanced",
-  "estimated_minutes": 10,
+  "estimated_minutes": 12,
   "validation": {
     "duration": 45.2,
     "resolution": "1920x1080",
@@ -234,7 +239,7 @@ gaussian-room-reconstruction/
 
 | Issue | Solution |
 |---|---|
-| Long training times | Use "Fast" preset or shorter video (< 30 s) |
+| Long training times | Use **Balanced** preset, shorter clip, or lower FPS (fewer frames) |
 | Stale frontend after deploy | Hard-refresh (`Ctrl+Shift+R`) or redeploy on Vercel |
 | Training fails immediately | Check GPU availability, PYTHONPATH, frame count (30+) |
 | No PLY generated | Check `/app/storage/models/{job_id}/` and training logs |

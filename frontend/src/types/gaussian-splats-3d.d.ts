@@ -43,11 +43,14 @@ declare module '@mkkellogg/gaussian-splats-3d' {
       scenes: Array<{ path: string; options?: SplatSceneOptions }>,
       showLoadingUI?: boolean,
     ): Promise<void>;
+    removeSplatScene(index: number, showLoadingUI?: boolean): Promise<void>;
     start(): void;
     stop(): void;
     update(): void;
     render(): void;
     dispose(): void;
+    setSplatScale(scale?: number): void;
+    setActiveSphericalHarmonicsDegrees(degree: number): void;
 
     // Internal properties (accessible at runtime)
     camera: THREE.PerspectiveCamera;
@@ -64,6 +67,29 @@ declare module '@mkkellogg/gaussian-splats-3d' {
       intersectSplatMesh(splatMesh: THREE.Object3D, outHits?: Array<{ origin: THREE.Vector3; distance: number; splatIndex: number }>): Array<{ origin: THREE.Vector3; distance: number; splatIndex: number }>;
     };
     getRenderDimensions(outDimensions: THREE.Vector2): void;
+  }
+
+  /** Build .ksplat from PLY URL (browser); see library README. */
+  export class PlyLoader {
+    static loadFromURL(
+      fileName: string,
+      onProgress: ((...args: unknown[]) => void) | null | undefined,
+      progressiveLoadToSplatBuffer: boolean,
+      onProgressiveLoadSectionProgress: ((...args: unknown[]) => void) | null | undefined,
+      minimumAlpha: number,
+      compressionLevel: number,
+      optimizeSplatData?: boolean,
+      outSphericalHarmonicsDegree?: number,
+      headers?: unknown,
+      sectionSize?: number,
+      sceneCenter?: unknown,
+      blockSize?: number,
+      bucketSize?: number,
+    ): Promise<unknown>;
+  }
+
+  export class KSplatLoader {
+    static downloadFile(splatBuffer: { bufferData: ArrayBuffer }, fileName: string): void;
   }
 
   /**

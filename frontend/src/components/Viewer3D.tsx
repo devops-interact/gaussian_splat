@@ -1,7 +1,17 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import { Viewer, SceneRevealMode, LogLevel } from '@mkkellogg/gaussian-splats-3d';
+import { Viewer, SceneRevealMode, LogLevel, PlyLoader, KSplatLoader } from '@mkkellogg/gaussian-splats-3d';
 import { getApiBaseUrl } from '@/lib/apiBase';
+import {
+  buildCenterGridAcceleration,
+  buildSplatCenterWorldCache,
+  maxSplatPickDistance,
+  pickSplatMeasure,
+  type PickResult,
+  type SplatCenterGridAccel,
+  type SplatMeshWithCenters,
+} from '@/lib/splatPick';
+import { cn } from '@/lib/utils';
 import {
   Camera,
   Ruler,
@@ -12,6 +22,8 @@ import {
   Info,
   Trash2,
   CircleDot,
+  SlidersHorizontal,
+  Download,
 } from 'lucide-react';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -46,204 +58,8 @@ interface CalibrationState {
   scaleFactor: number;
 }
 
-/** Scene-scale max ray distance for accepting a splat hit (PLY axis-aligned bbox diagonal). */
-function maxSplatPickDistance(bbox: ModelMetadata['boundingBox']): number {
-  const dx = bbox.max[0] - bbox.min[0];
-  const dy = bbox.max[1] - bbox.min[1];
-  const dz = bbox.max[2] - bbox.min[2];
-  const diagonal = Math.sqrt(dx * dx + dy * dy + dz * dz);
-  return Math.max(diagonal * 4, 3);
-}
-
-const PICK_RADIUS_PX = 30;
-
-/**
- * Compute the scene's "up" direction via PCA on centered positions.
- * The eigenvector with the smallest eigenvalue (least variance = thinnest
- * spread) is the scene's vertical axis. Rooms/floors are wider than tall,
- * so this heuristic works well for indoor reconstructions.
- *
- * Returns a quaternion that rotates the detected up axis to Y-up [0,1,0].
- * If PCA fails or data is degenerate, returns identity (no rotation).
- */
-function computeOrientationFromPositions(positions: Float32Array): [number, number, number, number] {
-  const n = positions.length / 3;
-  if (n < 10) return [0, 0, 0, 1];
-
-  // 1. Build 3x3 covariance matrix (data is already centered by backend)
-  let cxx = 0, cxy = 0, cxz = 0, cyy = 0, cyz = 0, czz = 0;
-  for (let i = 0; i < n; i++) {
-    const x = positions[i * 3], y = positions[i * 3 + 1], z = positions[i * 3 + 2];
-    cxx += x * x; cxy += x * y; cxz += x * z;
-    cyy += y * y; cyz += y * z; czz += z * z;
-  }
-  const inv = 1 / n;
-  cxx *= inv; cxy *= inv; cxz *= inv; cyy *= inv; cyz *= inv; czz *= inv;
-
-  // 2. Jacobi eigenvalue iteration for symmetric 3x3 matrix
-  const a = [
-    [cxx, cxy, cxz],
-    [cxy, cyy, cyz],
-    [cxz, cyz, czz],
-  ];
-  const v = [
-    [1, 0, 0],
-    [0, 1, 0],
-    [0, 0, 1],
-  ];
-  for (let sweep = 0; sweep < 50; sweep++) {
-    const offDiag = Math.abs(a[0][1]) + Math.abs(a[0][2]) + Math.abs(a[1][2]);
-    if (offDiag < 1e-12) break;
-    for (const [p, q] of [[0, 1], [0, 2], [1, 2]] as [number, number][]) {
-      if (Math.abs(a[p][q]) < 1e-15) continue;
-      const theta = 0.5 * Math.atan2(2 * a[p][q], a[p][p] - a[q][q]);
-      const c = Math.cos(theta), s = Math.sin(theta);
-      const app = a[p][p], aqq = a[q][q], apq = a[p][q];
-      a[p][p] = c * c * app + 2 * s * c * apq + s * s * aqq;
-      a[q][q] = s * s * app - 2 * s * c * apq + c * c * aqq;
-      a[p][q] = 0; a[q][p] = 0;
-      for (let r = 0; r < 3; r++) {
-        if (r === p || r === q) continue;
-        const arp = a[r][p], arq = a[r][q];
-        a[r][p] = c * arp + s * arq; a[p][r] = a[r][p];
-        a[r][q] = -s * arp + c * arq; a[q][r] = a[r][q];
-      }
-      for (let r = 0; r < 3; r++) {
-        const vrp = v[r][p], vrq = v[r][q];
-        v[r][p] = c * vrp + s * vrq;
-        v[r][q] = -s * vrp + c * vrq;
-      }
-    }
-  }
-
-  // 3. Find eigenvector with smallest eigenvalue
-  const eigenvalues = [a[0][0], a[1][1], a[2][2]];
-  let minIdx = 0;
-  if (eigenvalues[1] < eigenvalues[minIdx]) minIdx = 1;
-  if (eigenvalues[2] < eigenvalues[minIdx]) minIdx = 2;
-
-  const up = new THREE.Vector3(v[0][minIdx], v[1][minIdx], v[2][minIdx]).normalize();
-  console.log(
-    `[GS3D] PCA up axis: [${up.x.toFixed(3)}, ${up.y.toFixed(3)}, ${up.z.toFixed(3)}]`,
-    `eigenvalues: [${eigenvalues.map(e => e.toFixed(4)).join(', ')}]`,
-  );
-
-  // Ensure the up vector points towards positive Y (flip if it points down)
-  if (up.y < 0) up.negate();
-
-  // 4. Build quaternion: rotate detected up → Y-up
-  const yUp = new THREE.Vector3(0, 1, 0);
-  if (Math.abs(up.dot(yUp)) > 0.999) {
-    return [0, 0, 0, 1];
-  }
-  const q = new THREE.Quaternion().setFromUnitVectors(up, yUp);
-  return [q.x, q.y, q.z, q.w];
-}
-
-type SplatMeshWithCenters = THREE.Object3D & {
-  getSplatCount?: (includeSinceLastBuild?: boolean) => number;
-  getSplatCenter?: (globalIndex: number, outCenter: THREE.Vector3, applySceneTransform?: boolean) => void;
-};
-
-function buildSplatCenterWorldCache(splatMesh: SplatMeshWithCenters): Float32Array | null {
-  const countFn = splatMesh.getSplatCount;
-  const centerFn = splatMesh.getSplatCenter;
-  if (!countFn || !centerFn) return null;
-  const n = countFn.call(splatMesh, false);
-  if (!n || n <= 0) return null;
-  const buf = new Float32Array(n * 3);
-  const p = new THREE.Vector3();
-  for (let i = 0; i < n; i++) {
-    // true = apply splat scene transform → same world space as camera.project / picking ray
-    centerFn.call(splatMesh, i, p, true);
-    buf[i * 3] = p.x;
-    buf[i * 3 + 1] = p.y;
-    buf[i * 3 + 2] = p.z;
-  }
-  return buf;
-}
-
-/** NDC for Three.js Raycaster; mousePos is top-left origin in same pixel units as renderDims (see getRenderDimensions). */
-function ndcFromMousePos(mousePos: THREE.Vector2, renderDims: THREE.Vector2): { ndcX: number; ndcY: number } {
-  const w = Math.max(1e-6, renderDims.x);
-  const h = Math.max(1e-6, renderDims.y);
-  return {
-    ndcX: (mousePos.x / w) * 2 - 1,
-    ndcY: -(mousePos.y / h) * 2 + 1,
-  };
-}
-
-/**
- * Primary measure/hover pick: nearest splat center to eye ray, gated by screen-space distance
- * to cursor. Picks the **nearest-depth** (smallest ray parameter `t`) splat among all candidates
- * that project within PICK_RADIUS_PX of the cursor — this ensures we pick the front-most visible
- * splat rather than one that happens to be closest perpendicularly but is actually behind others.
- *
- * renderDims must match the viewer render buffer (same as setFromCameraAndScreenPosition).
- */
-function nearestSplatCenterAlongRay(
-  camera: THREE.PerspectiveCamera,
-  ndcX: number,
-  ndcY: number,
-  centers: Float32Array,
-  renderDims: THREE.Vector2,
-  _maxRayPerpDist: number,
-): THREE.Vector3 | null {
-  const raycaster = new THREE.Raycaster();
-  raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
-  const ray = raycaster.ray;
-
-  // Screen-space tolerance: how far (in NDC) a splat's projected center can be from the click.
-  // Use PICK_RADIUS_PX on the shorter screen axis for a consistent pixel feel.
-  const shortAxis = Math.max(1, Math.min(renderDims.x, renderDims.y));
-  const ndcTolPerPx = 2 / shortAxis;
-  const ndcTol = PICK_RADIUS_PX * ndcTolPerPx;
-  const ndcTolSq = ndcTol * ndcTol;
-
-  const vProj = new THREE.Vector3();
-  // Pick by nearest DEPTH (smallest t along ray) for correct front-to-back ordering
-  let bestT = Infinity;
-  let bestI = -1;
-
-  const oc = new THREE.Vector3();
-  const count = centers.length / 3;
-  for (let i = 0; i < count; i++) {
-    const px = centers[i * 3];
-    const py = centers[i * 3 + 1];
-    const pz = centers[i * 3 + 2];
-
-    // --- Quick depth check: ray parameter t (projection onto ray direction) ---
-    oc.set(px - ray.origin.x, py - ray.origin.y, pz - ray.origin.z);
-    const t = oc.dot(ray.direction);
-    if (t <= 0.01) continue;           // behind camera or too close to near plane
-    if (t >= bestT) continue;          // already have a closer candidate — skip early
-
-    // --- 2-D gate: project the splat center to screen and check pixel distance ---
-    vProj.set(px, py, pz).project(camera);
-    // After project(): z in [-1,1] = inside frustum. z < -1 = behind camera.
-    if (vProj.z < -1 || vProj.z > 1) continue;
-    const dx = vProj.x - ndcX;
-    const dy = vProj.y - ndcY;
-    if (dx * dx + dy * dy > ndcTolSq) continue;   // outside cursor radius in screen pixels
-
-    // This splat is closer and under the cursor → new best
-    bestT = t;
-    bestI = i;
-  }
-
-  if (bestI < 0) return null;
-  const j = bestI * 3;
-  const result = new THREE.Vector3(centers[j], centers[j + 1], centers[j + 2]);
-  console.log(
-    `[Pick] splat #${bestI} @ [${result.x.toFixed(3)}, ${result.y.toFixed(3)}, ${result.z.toFixed(3)}] depth=${bestT.toFixed(4)}`,
-  );
-  return result;
-}
-
-interface PickResult {
-  position: THREE.Vector3;
-  isSnapped: boolean;
-}
+/** Use progressive PLY loading in GaussianSplats3D when splat count is high (trades peak perf for time-to-first-frame). */
+const PROGRESSIVE_VERTEX_THRESHOLD = 50_000;
 
 function removeMeasurePreviewFromScene(scene: THREE.Scene) {
   const toRemove: THREE.Object3D[] = [];
@@ -629,6 +445,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
 
   const metadataRef = useRef<ModelMetadata | null>(null);
   const splatCentersRef = useRef<Float32Array | null>(null);
+  const splatCenterGridRef = useRef<SplatCenterGridAccel | null>(null);
   const splatTreeReadyRef = useRef<boolean>(false);
   const onMetadataRef = useRef(onModelMetadata);
   onMetadataRef.current = onModelMetadata;
@@ -647,6 +464,24 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
   const [measuredDistance, setMeasuredDistance] = useState<number | null>(null);
 
   const visibleMeasurePoints = measurePhase === 'calibrate' ? calibPoints : measurePoints;
+
+  // Display / render tuning (GaussianSplats3D; see https://projects.markkellogg.org/threejs/demo_gaussian_splats_3d.php)
+  const [minAlpha, setMinAlpha] = useState(1);
+  const [loadMinAlpha, setLoadMinAlpha] = useState(1);
+  const [shDisplayDegree, setShDisplayDegree] = useState<0 | 1 | 2>(2);
+  const [splatScale, setSplatScale] = useState(1);
+  const [displayPanelOpen, setDisplayPanelOpen] = useState(false);
+  const [ksplatBusy, setKsplatBusy] = useState(false);
+  const [ksplatError, setKsplatError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const id = window.setTimeout(() => setLoadMinAlpha(minAlpha), 450);
+    return () => clearTimeout(id);
+  }, [minAlpha]);
+
+  useEffect(() => {
+    setKsplatError(null);
+  }, [modelUrl]);
 
   // ── Initialize Viewer ──────────────────────────────────────────────────
   useEffect(() => {
@@ -729,9 +564,25 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
           (bbMax[2] - bbMin[2]) ** 2,
         );
         const camDist = Math.max(diagonal * 1.2, 3);
-        const cameraUp: [number, number, number] = [0, 1, 0];
-        const orientation = computeOrientationFromPositions(meta.positions);
-        console.log(`[GS3D] BBox diagonal=${diagonal.toFixed(2)}, camDist=${camDist.toFixed(2)}, orientation=[${orientation.map(v => v.toFixed(4))}]`);
+        // MASt3R / OpenCV-style pipelines use Y-down vs Three.js Y-up; match library expectations.
+        const cameraUp: [number, number, number] = [0, -1, 0];
+        const orientation: [number, number, number, number] = [0, 0, 0, 1];
+        console.log(`[GS3D] BBox diagonal=${diagonal.toFixed(2)}, camDist=${camDist.toFixed(2)}, splatOrientation=identity`);
+
+        const isolated = globalThis.crossOriginIsolated === true;
+        const gpuAcceleratedSort = isolated;
+        const sharedMemoryForWorkers = isolated;
+        if (!isolated) {
+          console.info(
+            '[GS3D] crossOriginIsolated=false — gpuAcceleratedSort and sharedMemoryForWorkers disabled (see ARCHITECTURE.md COOP/COEP).',
+          );
+        }
+
+        const useProgressive = meta.vertexCount >= PROGRESSIVE_VERTEX_THRESHOLD;
+        const sceneRevealMode = useProgressive ? SceneRevealMode.Default : SceneRevealMode.Instant;
+        if (useProgressive) {
+          console.log(`[GS3D] progressiveLoad=true (${meta.vertexCount} >= ${PROGRESSIVE_VERTEX_THRESHOLD} verts)`);
+        }
 
         // 5. Create standalone Viewer (let library manage its own THREE.Scene)
         console.log(`[GS3D] Creating Viewer...`);
@@ -743,11 +594,13 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
           selfDrivenMode: true,
           useBuiltInControls: true,
           integerBasedSort: false,
-          sceneRevealMode: SceneRevealMode.Instant,
+          sceneRevealMode,
           antialiased: true,
           freeIntermediateSplatData: false,
           logLevel: LogLevel.Debug,
           sphericalHarmonicsDegree: 2,
+          gpuAcceleratedSort,
+          sharedMemoryForWorkers,
         } as Record<string, unknown>);
 
         // 6. Add grid + axes to the library-managed scene (depthWrite off to avoid occluding splats)
@@ -768,9 +621,9 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         // SceneFormat.Ply = 2; orientation is a valid runtime option but missing from TS types
         console.log('[GS3D] Adding splat scene from:', fullUrl);
         await viewer.addSplatScene(fullUrl, {
-          splatAlphaRemovalThreshold: 1,
+          splatAlphaRemovalThreshold: loadMinAlpha,
           showLoadingUI: false,
-          progressiveLoad: false,
+          progressiveLoad: useProgressive,
           format: 2,
           orientation,
         } as Record<string, unknown>);
@@ -778,8 +631,8 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
 
         // 8. Start rendering
         viewer.start();
-        // Sphere-mode gives larger hit volumes — better for noisy LongSplat data
-        viewer.raycaster.raycastAgainstTrueSplatEllipsoid = false;
+        // True ellipsoid hits align better with the rendered splat surface (measurement).
+        viewer.raycaster.raycastAgainstTrueSplatEllipsoid = true;
 
         console.log('[GS3D] splatMesh.visible:', viewer.splatMesh?.visible);
         console.log('[GS3D] renderer context:', (viewer as any).renderer?.getContext()?.constructor?.name);
@@ -812,11 +665,16 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
 
         // Build splat center cache only after SplatTree is ready (transforms are finalized)
         const rebuildCenterCache = () => {
-          splatCentersRef.current = buildSplatCenterWorldCache(
-            viewer.splatMesh as SplatMeshWithCenters,
-          );
-          if (splatCentersRef.current) {
-            console.log('[GS3D] Splat center cache built:', splatCentersRef.current.length / 3, 'points');
+          const buf = buildSplatCenterWorldCache(viewer.splatMesh as SplatMeshWithCenters);
+          splatCentersRef.current = buf;
+          splatCenterGridRef.current = buf ? buildCenterGridAcceleration(buf) : null;
+          if (buf) {
+            console.log(
+              '[GS3D] Splat center cache built:',
+              buf.length / 3,
+              'points',
+              splatCenterGridRef.current ? '(spatial grid on)' : '(linear pick)',
+            );
           } else {
             console.warn('[GS3D] Failed to build splat center cache');
           }
@@ -874,6 +732,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
     return () => {
       disposed = true;
       splatCentersRef.current = null;
+      splatCenterGridRef.current = null;
       splatTreeReadyRef.current = false;
       if (unhandledRejectionHandler) {
         window.removeEventListener('unhandledrejection', unhandledRejectionHandler);
@@ -897,7 +756,21 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modelUrl]);
+  }, [modelUrl, loadMinAlpha]);
+
+  useEffect(() => {
+    if (loading) return;
+    const v = viewerRef.current;
+    if (!v) return;
+    v.setActiveSphericalHarmonicsDegrees(shDisplayDegree);
+  }, [shDisplayDegree, loading]);
+
+  useEffect(() => {
+    if (loading) return;
+    const v = viewerRef.current;
+    if (!v) return;
+    v.setSplatScale(splatScale);
+  }, [splatScale, loading]);
 
   // ── Walkthrough Mode ───────────────────────────────────────────────────
   useEffect(() => {
@@ -1031,10 +904,14 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
     const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     let pickDimsLogged = false;
 
-    const pickWorldFromEvent = (e: MouseEvent): PickResult | null => {
-      if (!splatMesh.visible) return null;
-      if (typeof viewerAny.isLoading === 'function' && viewerAny.isLoading()) return null;
+    const gs3dAdapter = {
+      setFromCameraAndScreenPosition: gsRaycaster.setFromCameraAndScreenPosition.bind(gsRaycaster),
+      intersectSplatMesh: gsRaycaster.intersectSplatMesh.bind(gsRaycaster),
+      splatMesh,
+      isLoading: () => (typeof viewerAny.isLoading === 'function' ? viewerAny.isLoading() : false),
+    };
 
+    const pickWorldFromEvent = (e: MouseEvent): PickResult | null => {
       camera.updateMatrixWorld(true);
       camera.updateProjectionMatrix();
 
@@ -1070,47 +947,18 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         ? maxSplatPickDistance(metadataRef.current.boundingBox)
         : 100;
 
-      // Strategy 1: library raycaster (sphere-mode for better tolerance on noisy data)
-      if (splatTreeReadyRef.current) {
-        try {
-          gsRaycaster.setFromCameraAndScreenPosition(camera, mousePos, renderDims);
-          const hits: { origin: THREE.Vector3; distance: number; splatIndex: number }[] = [];
-          gsRaycaster.intersectSplatMesh(splatMesh, hits);
-          const validHit = hits.find(h => isFinite(h.distance) && h.distance <= maxDist);
-          if (validHit) {
-            console.log(
-              `[Pick:S1-lib] splat #${validHit.splatIndex} @ [${validHit.origin.x.toFixed(3)}, ${validHit.origin.y.toFixed(3)}, ${validHit.origin.z.toFixed(3)}] dist=${validHit.distance.toFixed(4)}`,
-            );
-            return { position: validHit.origin.clone(), isSnapped: true };
-          }
-        } catch (err) {
-          console.warn('[Pick:S1-lib] failed (mid-sort?), trying center cache...', err);
-        }
-      }
-
-      // Strategy 2: brute-force nearest-depth search across cached splat centers
-      const { ndcX, ndcY } = ndcFromMousePos(mousePos, renderDims);
-      const centers = splatCentersRef.current;
-      if (centers && centers.length >= 3) {
-        const hit = nearestSplatCenterAlongRay(camera, ndcX, ndcY, centers, renderDims, maxDist);
-        if (hit) {
-          console.log(`[Pick:S2-cache] hit`);
-          return { position: hit, isSnapped: true };
-        }
-      }
-
-      // Strategy 3: ground-plane fallback (hover-only, not valid for measurement)
-      const ndcRaycaster = new THREE.Raycaster();
-      ndcRaycaster.setFromCamera(new THREE.Vector2(
-        (mousePos.x / renderDims.x) * 2 - 1,
-        -(mousePos.y / renderDims.y) * 2 + 1,
-      ), camera);
-      const groundHit = new THREE.Vector3();
-      if (ndcRaycaster.ray.intersectPlane(groundPlane, groundHit)) {
-        return { position: groundHit, isSnapped: false };
-      }
-
-      return null;
+      return pickSplatMeasure({
+        camera,
+        mousePos,
+        renderDims,
+        maxDist,
+        splatMeshVisible: splatMesh.visible,
+        splatTreeReady: splatTreeReadyRef.current,
+        centers: splatCentersRef.current,
+        centerGrid: splatCenterGridRef.current,
+        gs3d: gs3dAdapter,
+        groundPlane,
+      });
     };
 
     const onClick = (e: MouseEvent) => {
@@ -1375,6 +1223,48 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
     handleResetCalibration();
   }, [handleResetCalibration]);
 
+  const handleDownloadKsplat = useCallback(async () => {
+    if (!modelUrl) return;
+    setKsplatError(null);
+    setKsplatBusy(true);
+    try {
+      const apiBase = getApiBaseUrl();
+      const fullUrl = modelUrl.startsWith('http') ? modelUrl : `${apiBase}${modelUrl}`;
+      const resp = await fetch(fullUrl);
+      if (!resp.ok) throw new Error(`Fetch failed: HTTP ${resp.status}`);
+      const buf = await resp.arrayBuffer();
+      const b0 = new Uint8Array(buf, 0, Math.min(3, buf.byteLength));
+      if (b0.length >= 2 && b0[0] === 0x1f && b0[1] === 0x8b) {
+        throw new Error('Need decompressed PLY (not raw .ply.gz) for browser .ksplat conversion.');
+      }
+      if (b0.length < 3 || b0[0] !== 0x70 || b0[1] !== 0x6c || b0[2] !== 0x79) {
+        throw new Error('Response is not a PLY file.');
+      }
+      const blobUrl = URL.createObjectURL(new Blob([buf], { type: 'application/octet-stream' }));
+      try {
+        const ma = Math.max(0, Math.min(255, Math.round(loadMinAlpha)));
+        const sh = Math.min(2, Math.max(0, shDisplayDegree)) as 0 | 1 | 2;
+        const splatBuffer = (await PlyLoader.loadFromURL(
+          blobUrl,
+          undefined,
+          false,
+          undefined,
+          ma,
+          1,
+          true,
+          sh,
+        )) as { bufferData: ArrayBuffer };
+        KSplatLoader.downloadFile(splatBuffer, `model-${Date.now()}.ksplat`);
+      } finally {
+        URL.revokeObjectURL(blobUrl);
+      }
+    } catch (e) {
+      setKsplatError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setKsplatBusy(false);
+    }
+  }, [modelUrl, loadMinAlpha, shDisplayDegree]);
+
   useEffect(() => { if (mode !== 'measure') { handleResetCalibration(); } }, [mode, handleResetCalibration]);
 
   if (!modelUrl) return null;
@@ -1398,6 +1288,101 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       {error && (
         <div className="absolute top-12 left-3 right-3 z-30 bg-red-900/80 backdrop-blur-md text-white text-xs p-3 rounded-lg border border-red-500/40 font-mono break-all">
           <span className="text-red-300 font-bold">Viewer Error: </span>{error}
+        </div>
+      )}
+
+      {!loading && !error && (
+        <div className="absolute bottom-4 right-3 z-20 flex flex-col items-end gap-2 max-w-[min(100vw-1.5rem,260px)]">
+          {ksplatError && (
+            <div className="text-[10px] text-red-300 font-mono bg-black/85 border border-red-500/30 rounded px-2 py-1">
+              {ksplatError}
+            </div>
+          )}
+          {displayPanelOpen && (
+            <div className="w-full min-w-[200px] bg-[#08080f]/95 backdrop-blur-md border border-white/[0.08] rounded-xl p-3 text-[10px] text-white/80 font-mono space-y-3">
+              <div className="text-white/45 text-[9px] leading-snug">
+                {globalThis.crossOriginIsolated === true
+                  ? 'crossOriginIsolated: GPU-accelerated sort + shared worker memory enabled.'
+                  : 'crossOriginIsolated=false: sort flags disabled (set COOP/COEP per ARCHITECTURE.md).'}
+              </div>
+              <label className="block space-y-1">
+                <span className="text-[#f5ec99]">Min alpha (PLY reload ~0.5s)</span>
+                <input
+                  type="range"
+                  min={1}
+                  max={255}
+                  value={minAlpha}
+                  onChange={(e) => setMinAlpha(Number(e.target.value))}
+                  className="w-full accent-[#efe752]"
+                />
+                <span className="text-white/40">{minAlpha}</span>
+              </label>
+              <div className="space-y-1">
+                <span className="text-[#f5ec99]">SH level (live)</span>
+                <div className="flex gap-1">
+                  {([0, 1, 2] as const).map((d) => (
+                    <button
+                      key={d}
+                      type="button"
+                      onClick={() => setShDisplayDegree(d)}
+                      className={cn(
+                        'flex-1 py-1 rounded border text-[10px] transition-colors',
+                        shDisplayDegree === d
+                          ? 'border-[#efe752] bg-[#efe752]/15 text-[#efe752]'
+                          : 'border-white/10 text-white/50 hover:border-white/20',
+                      )}
+                    >
+                      {d}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <label className="block space-y-1">
+                <span className="text-[#f5ec99]">Splat scale (live)</span>
+                <input
+                  type="range"
+                  min={0.5}
+                  max={3}
+                  step={0.05}
+                  value={splatScale}
+                  onChange={(e) => setSplatScale(Number(e.target.value))}
+                  className="w-full accent-[#efe752]"
+                />
+                <span className="text-white/40">{splatScale.toFixed(2)}</span>
+              </label>
+              <button
+                type="button"
+                disabled={ksplatBusy}
+                onClick={handleDownloadKsplat}
+                className="w-full flex items-center justify-center gap-1 py-1.5 rounded bg-[#efe752]/10 text-[#efe752] border border-[#efe752]/25 hover:bg-[#efe752]/20 disabled:opacity-40"
+              >
+                <Download className="w-3 h-3" /> {ksplatBusy ? 'Working…' : 'Download .ksplat'}
+              </button>
+              <p className="text-[9px] text-white/35 leading-snug">
+                Offline: clone{' '}
+                <a className="text-[#efe752]/80 underline" href="https://github.com/mmkellogg/GaussianSplats3D" target="_blank" rel="noreferrer">
+                  GaussianSplats3D
+                </a>{' '}
+                and run <code className="text-white/50">node util/create-ksplat.js …</code>. Web converter:{' '}
+                <a className="text-[#efe752]/80 underline" href="https://projects.markkellogg.org/threejs/demo_gaussian_splats_3d.php" target="_blank" rel="noreferrer">
+                  demo
+                </a>
+                .
+              </p>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setDisplayPanelOpen((o) => !o)}
+            className={cn(
+              'p-2 rounded-lg border font-mono text-xs flex items-center gap-2 shadow-lg',
+              displayPanelOpen
+                ? 'bg-[#efe752]/15 border-[#efe752]/30 text-[#efe752]'
+                : 'bg-black/75 border-white/[0.08] text-white/60 hover:text-white',
+            )}
+          >
+            <SlidersHorizontal className="w-4 h-4" /> Display
+          </button>
         </div>
       )}
 
@@ -1533,6 +1518,9 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
               <HelpItem icon={<Footprints className="w-3 h-3" />} title="Walk-Through">Click to lock cursor. WASD to move. Mouse to look. Space/Shift for up/down.</HelpItem>
               <HelpItem icon={<Ruler className="w-3 h-3" />} title="Measure">Step 1: Click two reference points and enter their known distance. Step 2: Measure any distance in meters.</HelpItem>
               <HelpItem icon={<Camera className="w-3 h-3" />} title="Snapshot">Captures the current view as a PNG image.</HelpItem>
+              <HelpItem icon={<SlidersHorizontal className="w-3 h-3" />} title="Display panel">
+                Min alpha culls faint splats (reloads scene). SH 0/1/2 and splat scale update the live render. Download .ksplat uses the same pipeline as the official GaussianSplats3D demo. If the page is not cross-origin isolated, GPU sort is disabled automatically.
+              </HelpItem>
             </div>
           </div>
         </div>

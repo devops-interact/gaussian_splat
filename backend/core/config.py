@@ -28,26 +28,26 @@ class PresetConfig(BaseModel):
     convert_3dgs_prune_ratio: float = 0.62
 
 
-# Quality preset definitions - Optimized for SPEED + DENSITY balance
+# Quality preset definitions - Optimized for faster turnaround vs full LongSplat defaults
 QUALITY_PRESETS: Dict[QualityPreset, PresetConfig] = {
     QualityPreset.BALANCED: PresetConfig(
         name="Balanced",
-        description="Good quality (~20-30 min). Recommended for most videos.",
+        description="Faster preview (~10–15 min). Good for drafts and short clips.",
         fps=1.5,
-        iterations=15000,
+        iterations=4000,
         resolution=1,
         init_frames_ratio=0.30,
-        estimated_minutes=25,
+        estimated_minutes=12,
         convert_3dgs_prune_ratio=0.58,
     ),
     QualityPreset.QUALITY: PresetConfig(
         name="Quality",
-        description="Best quality (~35-50 min). For final production renders.",
+        description="Higher fidelity (~25–35 min). Best default for shareable results.",
         fps=2.0,
-        iterations=25000,
+        iterations=12000,
         resolution=1,
         init_frames_ratio=0.25,
-        estimated_minutes=50,
+        estimated_minutes=30,
         convert_3dgs_prune_ratio=0.65,
     ),
 }

@@ -42,7 +42,7 @@ All CUDA extensions are built from LongSplat's own submodules. No external `gaus
 
 Parameters are tuned for efficiency while preserving reconstruction quality:
 
-- **Optimized iterations** — reduced incremental steps (~20 min vs 67 min baseline)
+- **Preset-tuned iterations** — main train (`--iterations` from `QUALITY_PRESETS`) plus scaled pose/local/global/post/init and `convert_3dgs` refinement (`quality_baseline=12000`, convert floor 3000 / cap 10000); see `backend/services/longsplat/train.py`
 - **Auto-centering** — post-processing ensures the output model is centered at (0, 0, 0) for immediate viewing
 - **Native color learning** — relies on the model's natural SH DC convergence rather than random initialization, preserving input video color fidelity
 

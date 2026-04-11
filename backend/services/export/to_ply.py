@@ -12,7 +12,10 @@ import re
 import shutil
 from pathlib import Path
 
-from services.longsplat.longsplat_to_3dgs_converter import rewrite_ply_sanitize_f_rest_inplace
+from services.longsplat.longsplat_to_3dgs_converter import (
+    assert_ply_gaussian_splats3d_compatible,
+    rewrite_ply_sanitize_f_rest_inplace,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +55,7 @@ async def export_to_ply(
         logger.info(f"Using converter output: {model_ply}")
         shutil.copy2(model_ply, output_ply)
         rewrite_ply_sanitize_f_rest_inplace(output_ply)
+        assert_ply_gaussian_splats3d_compatible(output_ply)
         _log_ply_color_info(output_ply)
         return output_ply
 
@@ -62,6 +66,7 @@ async def export_to_ply(
         logger.info(f"Using root PLY (no model.ply found): {source_ply}")
         shutil.copy2(source_ply, output_ply)
         rewrite_ply_sanitize_f_rest_inplace(output_ply)
+        assert_ply_gaussian_splats3d_compatible(output_ply)
         _log_ply_color_info(output_ply)
         return output_ply
 
@@ -72,6 +77,7 @@ async def export_to_ply(
         logger.warning(f"Using raw training PLY (may lack RGB): {source_ply}")
         shutil.copy2(source_ply, output_ply)
         rewrite_ply_sanitize_f_rest_inplace(output_ply)
+        assert_ply_gaussian_splats3d_compatible(output_ply)
         _log_ply_color_info(output_ply)
         return output_ply
 
@@ -82,6 +88,7 @@ async def export_to_ply(
         logger.warning(f"Fallback PLY: {source_ply}")
         shutil.copy2(source_ply, output_ply)
         rewrite_ply_sanitize_f_rest_inplace(output_ply)
+        assert_ply_gaussian_splats3d_compatible(output_ply)
         _log_ply_color_info(output_ply)
         return output_ply
 

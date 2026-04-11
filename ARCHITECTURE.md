@@ -131,8 +131,8 @@ Video (MP4)
 | Step | Duration | Output |
 |---|---|---|
 | Frame Extraction | 10-30 s | `/app/storage/frames/{job_id}/` |
-| LongSplat Training | 10-60 min | `model.ply` in models dir |
-| Scaffold Conversion & Post-Process | 1-2 min | Converted and centered `model.ply` |
+| LongSplat Training | ~8-35 min (preset-dependent) | `model.ply` in models dir |
+| Scaffold Conversion & Post-Process | ~3-15 min (scales with `convert_3dgs` iters) | Converted and centered `model.ply` |
 | PLY Export + Compress | 5-10 s | `{job_id}.ply`, `{job_id}.ply.gz` |
 | Mesh Reconstruction | 30-120 s | `{job_id}.obj` (Poisson → decimate → OBJ) |
 
@@ -154,8 +154,10 @@ Defined in [`backend/core/config.py`](backend/core/config.py) (`QUALITY_PRESETS`
 
 | Preset | FPS | LongSplat iterations | `convert_3dgs` prune ratio | Est. time | Use case |
 |---|---|---|---|---|---|
-| **Balanced** | 1.5 | 12,000 | 0.62 | ~20 min | Default previews |
-| **Quality** | 2.0 | 20,000 | 0.68 | ~38 min | Higher fidelity |
+| **Balanced** | 1.5 | 4,000 | 0.58 | ~12 min | Faster drafts |
+| **Quality** | 2.0 | 12,000 | 0.65 | ~30 min | Shareable quality |
+
+Sub-iteration counts and `convert_3dgs` refinement steps scale with main `iterations` in [`train.py`](backend/services/longsplat/train.py) (`quality_baseline=12000`, `convert_iters` floor 3000 / cap 10000 at full quality).
 
 Higher **prune ratio** keeps more Gaussians after Scaffold-GS → 3DGS conversion (less aggressive pruning). Tuning is per preset without code changes beyond `PresetConfig`.
 
@@ -186,6 +188,12 @@ where SH_C0 = 0.28209479177387814
 The backend converter also detects whether `f_dc` values are already in `[0,1]` or `[0,255]` range and handles each case.
 
 **Web viewer compatibility (`@mkkellogg/gaussian-splats-3d`):** The INRIA PLY path assumes the number of `f_rest_*` properties is **divisible by three** (SH coefficients per color channel). A partial tail (for example eleven `f_rest_0`…`f_rest_10` fields) makes the library use non-integer channel strides and can yield a **blank splat canvas** with no JS error. When building `model.ply`, [`longsplat_to_3dgs_converter.py`](backend/services/longsplat/longsplat_to_3dgs_converter.py) drops the trailing incomplete `f_rest_*` columns so the count is a multiple of three.
+
+**Export hard gate:** After sanitization, [`assert_ply_gaussian_splats3d_compatible`](backend/services/longsplat/longsplat_to_3dgs_converter.py) runs from [`to_ply.py`](backend/services/export/to_ply.py). If any `f_rest_*` remain and their count is **not** divisible by three, export **raises** so a broken PLY is not published.
+
+### PLY vs `.ksplat` / `.splat`
+
+The API still serves **`.ply`** (and `.ply.gz`). [GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D) also supports **`.ksplat`** and **`.splat`** for faster loads. In-app: use the viewer **Display** panel **Download .ksplat** (browser `PlyLoader` → `KSplatLoader`). Offline / batch: clone the upstream repo and run `node util/create-ksplat.js …`, or use the hosted [converter / demo](https://projects.markkellogg.org/threejs/demo_gaussian_splats_3d.php). The npm package does **not** ship `util/create-ksplat.js`.
 
 **Deployment checklist (Vercel + RunPod):** The SPA (Vercel) and the API/training image (Docker Hub → RunPod) should track the **same `main` commit** when you change PLY or viewer behavior. After merging backend fixes, run `./build-and-push.sh`, **recreate or pull** `interactdevops/gaussian-room-reconstruction:latest` on the pod, then run a **new job**. In container logs, successful normalization logs *Normalized f_rest for web viewer* and export diagnostics should show **9** (or 0) `f_rest_*` fields, not **11**. Old `model.ply` files on disk are not rewritten automatically.
 
@@ -220,7 +228,7 @@ Use this order to separate **data** issues from **runtime** issues:
 
 ### 3D Viewer (`Viewer3D.tsx`)
 
-- **Splat picking** — **Primary (measure + hover):** nearest splat center to the eye ray (brute force on cached centers), with NDC derived from the same `mousePos`/`renderDims` as `setFromCameraAndScreenPosition`, screen-space gate ~12px, max perpendicular distance from PLY bbox diagonal. Centers from `getSplatCenter(..., true)` so scene offsets from `addSplatScene` match world space. **Fallback:** if the center cache is missing, library raycaster (`intersectSplatMesh`, ellipsoid mode on). Reconstructions have no inherent metric scale—use **calibration** for real-world distances.
+- **Splat picking** — **Strategy 1:** library `intersectSplatMesh` with **`raycastAgainstTrueSplatEllipsoid: true`**, choosing the **minimum-distance** hit under the scene-scale `maxDist` (not the first hit in the buffer). **Strategy 2:** nearest splat **center** along the view ray (cached `getSplatCenter(..., true)`), same `mousePos`/`renderDims` / NDC as `setFromCameraAndScreenPosition`, **~12px** screen gate (`PICK_RADIUS_PX`), and the same **`maxDist`** cap on ray parameter `t`. Reconstructions have no inherent metric scale—use **calibration** for real-world distances.
 - **Orbit mode** — rotate, pan, zoom with OrbitControls
 - **Walk-through mode** — first-person WASD + mouse-look via pointer lock. Walk/Measure listeners attach after `loading` becomes false so they bind to the real canvas once the GaussianSplats3D viewer exists (avoids stuck modes and DOMExceptions from pointer lock on a disposed canvas).
 - **Measurement tool** — click two points on the splat cloud (A = lavender, B = green); **mousemove** shows a semi-transparent preview sphere on the splat under the cursor (throttled raycast). Displays calibrated distance after step 2.
@@ -228,13 +236,13 @@ Use this order to separate **data** issues from **runtime** issues:
 - **Snapshot** — capture current view as PNG
 - **Adaptive point size** — auto-calculated from bounding sphere, with manual +/- controls
 - **Gizmo** — axis indicator (bottom-right)
-- **Rendering** — `gpuAcceleratedSort: true`, `sharedMemoryForWorkers: true`, `sphericalHarmonicsDegree: 0`, `splatAlphaRemovalThreshold: 5`, `freeIntermediateSplatData: false`, `cameraUp: [0, -1, 0]` (MASt3R / OpenCV Y-down vs Three.js Y-up). After `addSplatScene` resolves, **`viewer.start()`** runs, then a **world-space splat center cache** is built for measurement fallback. Console: **`[GS3D] Splat count after load`** and **`[GS3D] Splat center cache:`**.
+- **Rendering / orientation** — Viewer ctor uses **`sphericalHarmonicsDegree: 2`**, **`freeIntermediateSplatData: false`**, **`cameraUp: [0, -1, 0]`** (MASt3R / OpenCV Y-down vs Three.js Y-up). **`gpuAcceleratedSort`** and **`sharedMemoryForWorkers`** are set to **`true`** only when **`globalThis.crossOriginIsolated === true`**; otherwise both are **`false`** (avoids `SharedArrayBuffer` worker errors; see console `[GS3D] crossOriginIsolated=false…`). Splat scene uses **identity** `orientation`. **`splatAlphaRemovalThreshold`** (min alpha 1–255) and **`progressiveLoad`** (when vertex count ≥ 50k) come from the **Display** panel / load heuristics. After `addSplatScene`, **`viewer.start()`**, then **`setActiveSphericalHarmonicsDegrees`** / **`setSplatScale`** for live tuning. **World-space splat center cache** for measurement. Console: **`[GS3D] Splat count after load`** and **`[GS3D] Splat center cache:`**.
+- **Display panel** — Min alpha (debounced → scene reload), SH 0/1/2 (live), splat scale (live), **Download .ksplat** (client-side), and a short cross-origin isolation hint.
 - **Blank splat canvas (grid/axes OK)** — Confirm PLY **`f_rest_*` count divisible by three** (see PLY Output Format). If isolation headers are missing, the library may fail worker SharedArrayBuffer paths: see **SharedArrayBuffer / GPU** below.
-- **Coordinate / SH tuning** — Raise `sphericalHarmonicsDegree` to `1` when `f_rest_*` is present; adjust `splatAlphaRemovalThreshold` only if needed.
 
 ### Viewer: SharedArrayBuffer / GPU-accelerated sort
 
-The SPA should send **`Cross-Origin-Opener-Policy: same-origin`** and **`Cross-Origin-Embedder-Policy: require-corp`** (see `frontend/vercel.json` on Vercel). The FastAPI app adds the same headers plus **`Cross-Origin-Resource-Policy: cross-origin`** on **all** responses so a COEP-isolated browser tab can still call the RunPod API and fetch **`GET /api/jobs/{id}/model`** (decompressed PLY + CORP). Static **`/static/models/...`** remains for `.ply.gz`, OBJ, etc. Without isolation, set viewer `gpuAcceleratedSort: false` and `sharedMemoryForWorkers: false` in code.
+The SPA should send **`Cross-Origin-Opener-Policy: same-origin`** and **`Cross-Origin-Embedder-Policy: require-corp`** (see `frontend/vercel.json` on Vercel). The FastAPI app adds the same headers plus **`Cross-Origin-Resource-Policy: cross-origin`** on **all** responses so a COEP-isolated browser tab can still call the RunPod API and fetch **`GET /api/jobs/{id}/model`** (decompressed PLY + CORP). Static **`/static/models/...`** remains for `.ply.gz`, OBJ, etc. `Viewer3D` **automatically** sets `gpuAcceleratedSort` and `sharedMemoryForWorkers` to false when `crossOriginIsolated` is false (no manual code change needed locally).
 
 ### CORS / proxy (Authorization)
 
@@ -383,11 +391,11 @@ Deploys automatically from the GitHub repository. Environment variable `VITE_API
 
 ## Performance Expectations (A40 48GB)
 
-| Video Length | Training Time | GPU Memory |
+| Video Length | Training time (typical, preset-dependent) | GPU memory |
 |---|---|---|
-| 30 s | ~10-15 min | 12-20 GB |
-| 60 s | ~20-30 min | 15-25 GB |
-| 120 s | ~40-60 min | 20-35 GB |
+| 30 s | ~8-18 min | 12-20 GB |
+| 60 s | ~15-30 min | 15-25 GB |
+| 120 s | ~28-50 min | 20-35 GB |
 
 Container memory: ~2-4 GB. Disk per job: ~500 MB (frames + models).
 

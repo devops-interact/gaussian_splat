@@ -10,14 +10,14 @@ const PRESETS = [
   {
     id: 'balanced',
     name: 'Balanced',
-    description: 'Good quality (~15-25 min). Recommended for most videos.',
-    time: '15-25 min'
+    description: 'Faster preview (~10–15 min). Good for drafts and short clips.',
+    time: '~12 min'
   },
   {
     id: 'quality',
     name: 'Quality',
-    description: 'Best quality (~30-45 min). For production renders.',
-    time: '30-45 min'
+    description: 'Higher fidelity (~25–35 min). Best default for shareable results.',
+    time: '~30 min'
   }
 ];
 
