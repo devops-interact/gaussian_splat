@@ -63,6 +63,18 @@ grep -q "@mkkellogg/gaussian-splats-3d" frontend/package.json || {
 }
 echo -e "${GREEN}✓ Viewer / GS3D splat picking sources OK${NC}"
 
+# Vite env template (Vercel / local); must document optional legacy GS3D worker path
+echo -e "${BLUE}Verifying frontend/.env.example...${NC}"
+if [ ! -f "frontend/.env.example" ]; then
+    echo -e "${RED}❌ Missing frontend/.env.example${NC}"
+    exit 1
+fi
+grep -q "VITE_GS3D_FORCE_LEGACY_WORKERS" frontend/.env.example || {
+    echo -e "${RED}❌ frontend/.env.example must mention VITE_GS3D_FORCE_LEGACY_WORKERS (see ARCHITECTURE.md viewer troubleshooting)${NC}"
+    exit 1
+}
+echo -e "${GREEN}✓ frontend/.env.example OK${NC}"
+
 # Verify key backend files exist (new optimized pipeline)
 echo -e "${BLUE}Verifying backend structure...${NC}"
 REQUIRED_FILES=(
@@ -71,6 +83,7 @@ REQUIRED_FILES=(
     "backend/services/longsplat/postprocess.py"
     "backend/services/longsplat/longsplat_to_3dgs_converter.py"
     "backend/services/longsplat/train.py"
+    "backend/services/viewer_initial_camera.py"
 )
 
 for f in "${REQUIRED_FILES[@]}"; do
@@ -79,6 +92,10 @@ for f in "${REQUIRED_FILES[@]}"; do
         exit 1
     fi
 done
+grep -q "initial_camera" backend/api/jobs.py || {
+    echo -e "${RED}❌ backend/api/jobs.py missing initial_camera route (viewer expects GET /api/jobs/{id}/initial_camera)${NC}"
+    exit 1
+}
 echo -e "${GREEN}✓ Backend structure OK${NC}"
 
 # Verify requirements.txt
@@ -158,8 +175,8 @@ if [ ${PIPESTATUS[0]} -eq 0 ]; then
     echo -e "  │ Expose HTTP Ports  │ 8000                                         │"
     echo -e "  └────────────────────┴──────────────────────────────────────────────┘"
     echo ""
-    echo -e "${PURPLE}Viewer: GaussianSplats3D (GPU sort + SharedArrayBuffer), COOP/COEP/CORP on API, PLY gzip fallback on /model, chartreuse UI${NC}"
-    echo -e "${BLUE}Vercel: ensure frontend/vercel.json COOP+COEP is deployed with the SPA (cross-origin isolation).${NC}"
+    echo -e "${PURPLE}Viewer: GaussianSplats3D — GPU-accelerated sort + SharedArrayBuffer workers when crossOriginIsolated; optional VITE_GS3D_FORCE_LEGACY_WORKERS forces them off. COOP/COEP/CORP on API; PLY gzip fallback on /model; chartreuse UI.${NC}"
+    echo -e "${BLUE}Vercel: deploy frontend/vercel.json (COOP+COEP) with the SPA. Set VITE_API_BASE_URL or same-origin /api rewrites per README. Optional VITE_GS3D_FORCE_LEGACY_WORKERS=true if splats hang on load — see frontend/.env.example + ARCHITECTURE.md (3D viewer troubleshooting).${NC}"
     echo -e "${BLUE}Tip: BUILD_NO_CACHE=1 ./build-and-push.sh for a full CUDA layer rebuild${NC}"
     echo ""
 else

@@ -1,7 +1,9 @@
+import json
+import logging
+from pathlib import Path
+
 import numpy as np
 from plyfile import PlyData, PlyElement
-from pathlib import Path
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +173,7 @@ class PlyOptimizer:
                 return False
 
             # ── 5. Center to (0, 0, 0) ──────────────────────────────────
+            ply_cx = ply_cy = ply_cz = 0.0
             x, y, z = data['x'], data['y'], data['z']
             cx = float(np.mean(x))
             cy = float(np.mean(y))
@@ -180,6 +183,7 @@ class PlyOptimizer:
                 data['x'] = x - cx
                 data['y'] = y - cy
                 data['z'] = z - cz
+                ply_cx, ply_cy, ply_cz = cx, cy, cz
             else:
                 logger.warning(
                     f"Centroid is NaN ({cx}, {cy}, {cz}), skipping centering"
@@ -196,6 +200,15 @@ class PlyOptimizer:
             new_vertex = PlyElement.describe(data, 'vertex')
             PlyData([new_vertex], text=False).write(str(output_path))
             logger.info(f"Saved optimized model to {output_path}")
+            try:
+                off_path = output_path.parent / "ply_center_offset.json"
+                off_path.write_text(
+                    json.dumps({"cx": ply_cx, "cy": ply_cy, "cz": ply_cz}),
+                    encoding="utf-8",
+                )
+                logger.info("Wrote %s for viewer / camera alignment", off_path)
+            except OSError as e:
+                logger.warning("Failed to write ply_center_offset.json: %s", e)
             return True
 
         except Exception as e:

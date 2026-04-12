@@ -198,6 +198,7 @@ export default function ScanView() {
             <div className="rounded-xl overflow-hidden border border-[#efe752]/[0.26] bg-black h-[400px] sm:h-[520px] lg:h-[calc(100vh-160px)] shadow-2xl shadow-[#efe752]/[0.03]">
               <Viewer3D
                 modelUrl={modelUrl}
+                jobId={jobId}
                 prefetchedJobModelMetadata={prefetchedJobModelMetadata}
                 onModelMetadata={handleModelMetadata}
               />

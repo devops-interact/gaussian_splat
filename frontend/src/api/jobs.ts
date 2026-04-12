@@ -74,6 +74,26 @@ export const getPreviewUrl = async (jobId: string): Promise<{ preview_url: strin
   return response.data;
 };
 
+export interface InitialCameraResponse {
+  position: [number, number, number];
+  target: [number, number, number];
+}
+
+const INITIAL_CAMERA_TIMEOUT_MS = 8000;
+
+/** Suggested viewer pose from first 24 LongSplat cameras + ply center offset (404 if unavailable). */
+export const getInitialCamera = async (
+  jobId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<InitialCameraResponse> => {
+  const response = await axios.get<InitialCameraResponse>(`${API_JOBS_URL}/${jobId}/initial_camera`, {
+    headers: { ...getAuthHeaders() },
+    timeout: INITIAL_CAMERA_TIMEOUT_MS,
+    signal: opts?.signal,
+  });
+  return response.data;
+};
+
 export interface PresetInfo {
   id: string;
   name: string;

@@ -24,6 +24,8 @@ docker system prune -af && docker builder prune -af
 ./build-and-push.sh
 ```
 
+The script runs a production **`npm run build`** in `frontend/`, checks COOP/COEP/CORP headers, **`frontend/.env.example`**, the **`initial_camera`** API wiring, and required viewer/backend files before Docker buildx push. Vercel-facing **`VITE_*`** variables are listed in **§ 3** and in [`frontend/.env.example`](frontend/.env.example).
+
 ### 2. Deploy Backend to RunPod
 
 | Setting | Value |
@@ -47,14 +49,18 @@ The SPA must reach your RunPod API over HTTPS. Pick **one** of these patterns:
 |---|---|
 | **A. Explicit API URL (simplest)** | In Vercel → Settings → Environment Variables → **Production**, set `VITE_API_BASE_URL` to your RunPod HTTPS origin with **no trailing slash**, e.g. `https://your-pod-id-8000.proxy.runpod.net`. Rebuild the project after changing env vars (Vite bakes this in at build time). |
 | **B. Same-origin `/api` proxy** | Leave `VITE_API_BASE_URL` **unset** for Production. The app then calls relative URLs like `/api/projects`. Merge the **`rewrites`** block from [`frontend/vercel.rewrites.example.json`](frontend/vercel.rewrites.example.json) into [`frontend/vercel.json`](frontend/vercel.json) (same JSON object as the existing `headers` array), replacing `YOUR_RUNPOD_ORIGIN` with your HTTPS origin (no trailing slash). |
+| **C. Viewer hangs on load (optional)** | In the same Vercel **Environment Variables** screen, add `VITE_GS3D_FORCE_LEGACY_WORKERS` = `true` (or `1`), then **redeploy**. This disables GPU-accelerated sort + shared worker memory in GaussianSplats3D when COEP isolation is on. See [`ARCHITECTURE.md`](ARCHITECTURE.md) § 3D viewer troubleshooting. Local copy: [`frontend/.env.example`](frontend/.env.example). |
 
 If Production is built **without** `VITE_API_BASE_URL` and **without** rewrites, the browser will request `/api/...` on the Vercel domain only — those routes will 404 unless you add rewrites or a serverless proxy.
 
-Example env (approach A):
+Example env (approach A); optional viewer flag if splats never finish loading:
 
 ```
 VITE_API_BASE_URL=https://your-pod-id-8000.proxy.runpod.net
+# VITE_GS3D_FORCE_LEGACY_WORKERS=true
 ```
+
+See [`frontend/.env.example`](frontend/.env.example) for all documented `VITE_*` keys.
 
 Vercel project settings:
 
@@ -98,6 +104,8 @@ Defined in `backend/core/config.py` (`QUALITY_PRESETS`). Sub-iterations and `con
 ### 3D viewer (GaussianSplats3D)
 
 The scan viewer uses [`@mkkellogg/gaussian-splats-3d`](https://github.com/mkkellogg/GaussianSplats3D). The **Display** panel (bottom-right) exposes **min alpha** (reloads the splat scene), **SH level** 0/1/2, **splat scale**, and optional **Download .ksplat** in the browser (same idea as the [official demo / converter](https://projects.markkellogg.org/threejs/demo_gaussian_splats_3d.php)). For batch conversion without the app, clone GaussianSplats3D and run `node util/create-ksplat.js` (not included in the npm package). Jobs still export **PLY**; `.ksplat` is optional for faster reloads elsewhere.
+
+If the viewer stays on **“Loading Gaussian Splats…”**, set **`VITE_GS3D_FORCE_LEGACY_WORKERS=true`** in Vercel env (or `frontend/.env.local` locally), redeploy / restart dev, and check **`[GS3D] phase:`** logs in the browser console — details in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
 ---
 

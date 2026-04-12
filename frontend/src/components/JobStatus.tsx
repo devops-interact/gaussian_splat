@@ -18,7 +18,7 @@ const STATUS_LABELS: Record<JobStatusEnum, string> = {
   [JobStatusEnum.TRAINING]: 'Training 3D Splats (this takes time)',
   [JobStatusEnum.EXPORTING]: 'Exporting PLY model',
   [JobStatusEnum.COMPRESSING]: 'Compressing output file',
-  [JobStatusEnum.COMPLETED]: 'Reconstruction Completed',
+  [JobStatusEnum.COMPLETED]: 'Completed',
   [JobStatusEnum.ERROR]: 'Processing Error',
 };
 
@@ -175,7 +175,7 @@ export default function JobStatus({ jobId, onComplete, embedded }: JobStatusProp
             </div>
 
             <div className="p-3 rounded-lg bg-black border border-white/[0.18]">
-              <span className="text-gray-500 block text-xs mb-1">Time Elapsed</span>
+              <span className="text-gray-500 block text-xs mb-1">Elapsed</span>
               <span className="text-xs font-mono text-white">{elapsedTime}</span>
             </div>
 

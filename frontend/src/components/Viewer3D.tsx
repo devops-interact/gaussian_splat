@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { Viewer, SceneRevealMode, LogLevel, PlyLoader, KSplatLoader } from '@mkkellogg/gaussian-splats-3d';
+import { isAxiosError, isCancel } from 'axios';
 import { getApiBaseUrl } from '@/lib/apiBase';
+import type { InitialCameraResponse } from '@/api/jobs';
+import { getInitialCamera } from '@/api/jobs';
 import type { ModelMetadataResponse } from '@/types/job';
 import {
   buildCenterGridAcceleration,
@@ -31,6 +34,8 @@ import {
 
 interface Viewer3DProps {
   modelUrl: string | null;
+  /** When set, viewer may load `/api/jobs/{jobId}/initial_camera` for pose-based default framing. */
+  jobId?: string | null;
   /** From job status API when the job completes — skips full PLY vertex parse for bbox/metadata. */
   prefetchedJobModelMetadata?: ModelMetadataResponse | null;
   onModelMetadata?: (meta: ModelMetadata) => void;
@@ -63,6 +68,21 @@ interface CalibrationState {
 
 /** Use progressive PLY loading in GaussianSplats3D when splat count is high (trades peak perf for time-to-first-frame). */
 const PROGRESSIVE_VERTEX_THRESHOLD = 50_000;
+
+const PLY_FETCH_TIMEOUT_MS = 120_000;
+const ADD_SPLAT_SCENE_TIMEOUT_MS = 90_000;
+
+function plyFetchAbortSignal(): AbortSignal | undefined {
+  if (typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal && typeof AbortSignal.timeout === 'function') {
+    return AbortSignal.timeout(PLY_FETCH_TIMEOUT_MS);
+  }
+  return undefined;
+}
+
+function forceLegacyGs3dWorkers(): boolean {
+  const v = import.meta.env.VITE_GS3D_FORCE_LEGACY_WORKERS;
+  return v === '1' || String(v).toLowerCase() === 'true';
+}
 
 function modelMetadataFromJobResponse(s: ModelMetadataResponse, fileSize: number): ModelMetadata {
   const bbox = s.bounding_box ?? {
@@ -513,6 +533,7 @@ function logPLYScaleOpacityDiag(buffer: ArrayBuffer) {
 
 export default function Viewer3D({
   modelUrl,
+  jobId = null,
   prefetchedJobModelMetadata = null,
   onModelMetadata,
 }: Viewer3DProps) {
@@ -588,16 +609,37 @@ export default function Viewer3D({
 
     setLoading(true);
     setError(null);
+    const initialCameraAbort = new AbortController();
 
     (async () => {
       try {
-        // 1. Fetch PLY
-        console.log('[GS3D] Fetching PLY:', fullUrl);
-        const response = await fetch(fullUrl);
+        console.log('[GS3D] phase: init chain start');
+        const initialCameraPromise: Promise<InitialCameraResponse | null> = jobId
+          ? getInitialCamera(jobId, { signal: initialCameraAbort.signal }).catch((e: unknown) => {
+              if (isCancel(e)) {
+                console.info('[GS3D] phase: initial_camera canceled');
+                return null;
+              }
+              if (
+                isAxiosError(e) &&
+                (e.code === 'ECONNABORTED' || (typeof e.message === 'string' && e.message.toLowerCase().includes('timeout')))
+              ) {
+                console.info('[GS3D] phase: initial_camera timed out — using bbox default');
+                return null;
+              }
+              console.info('[GS3D] phase: initial_camera unavailable — using bbox default');
+              return null;
+            })
+          : Promise.resolve(null);
+
+        // 1. Fetch PLY (runs in parallel with initial_camera when jobId is set)
+        console.log('[GS3D] phase: PLY fetch start', fullUrl);
+        const plySignal = plyFetchAbortSignal();
+        const response = await fetch(fullUrl, plySignal != null ? { signal: plySignal } : {});
         if (!response.ok) throw new Error(`Fetch failed: HTTP ${response.status}`);
         const buffer = await response.arrayBuffer();
         if (disposed) return;
-        console.log('[GS3D] PLY fetched:', buffer.byteLength, 'bytes');
+        console.log('[GS3D] phase: PLY fetch done', buffer.byteLength, 'bytes');
 
         const b0 = new Uint8Array(buffer, 0, Math.min(3, buffer.byteLength));
         if (b0.length >= 2 && b0[0] === 0x1f && b0[1] === 0x8b) {
@@ -663,6 +705,7 @@ export default function Viewer3D({
 
         metadataRef.current = modelMeta;
         onMetadataRef.current?.(modelMeta);
+        console.log('[GS3D] phase: metadata ready');
 
         // 3. MetaMask's lockdown-install.js (SES) logs DOMException errors when
         // OrbitControls touches domElement.style. These are cosmetic — the viewer
@@ -689,10 +732,42 @@ export default function Viewer3D({
         const orientation: [number, number, number, number] = [0, 0, 0, 1];
         console.log(`[GS3D] BBox diagonal=${diagonal.toFixed(2)}, camDist=${camDist.toFixed(2)}, splatOrientation=identity`);
 
+        let initialCameraPosition: [number, number, number] = [0, camDist * 0.35, camDist * 0.75];
+        let initialCameraLookAt: [number, number, number] = [0, 0, 0];
+        console.log('[GS3D] phase: await initial_camera (may already be resolved)');
+        const hint = await initialCameraPromise;
+        if (
+          !disposed &&
+          hint &&
+          Array.isArray(hint.position) &&
+          hint.position.length === 3 &&
+          Array.isArray(hint.target) &&
+          hint.target.length === 3
+        ) {
+          initialCameraPosition = [
+            Number(hint.position[0]),
+            Number(hint.position[1]),
+            Number(hint.position[2]),
+          ];
+          initialCameraLookAt = [
+            Number(hint.target[0]),
+            Number(hint.target[1]),
+            Number(hint.target[2]),
+          ];
+          console.log('[GS3D] phase: initial_camera applied (first 24 poses + offset)', hint);
+        } else if (!disposed && jobId) {
+          console.log('[GS3D] phase: initial_camera skipped (missing, error, or canceled)');
+        }
+
         const isolated = globalThis.crossOriginIsolated === true;
-        const gpuAcceleratedSort = isolated;
-        const sharedMemoryForWorkers = isolated;
-        if (!isolated) {
+        const forceLegacy = forceLegacyGs3dWorkers();
+        const gpuAcceleratedSort = isolated && !forceLegacy;
+        const sharedMemoryForWorkers = isolated && !forceLegacy;
+        if (forceLegacy && isolated) {
+          console.info(
+            '[GS3D] VITE_GS3D_FORCE_LEGACY_WORKERS: gpuAcceleratedSort and sharedMemoryForWorkers forced off (see ARCHITECTURE.md).',
+          );
+        } else if (!isolated) {
           console.info(
             '[GS3D] crossOriginIsolated=false — gpuAcceleratedSort and sharedMemoryForWorkers disabled (see ARCHITECTURE.md COOP/COEP).',
           );
@@ -707,11 +782,11 @@ export default function Viewer3D({
         }
 
         // 5. Create standalone Viewer (let library manage its own THREE.Scene)
-        console.log(`[GS3D] Creating Viewer...`);
+        console.log('[GS3D] phase: create Viewer');
         const viewer = new Viewer({
           cameraUp,
-          initialCameraPosition: [0, camDist * 0.35, camDist * 0.75],
-          initialCameraLookAt: [0, 0, 0],
+          initialCameraPosition,
+          initialCameraLookAt,
           rootElement: containerRef.current!,
           selfDrivenMode: true,
           useBuiltInControls: true,
@@ -742,21 +817,46 @@ export default function Viewer3D({
         // 7. Add splat scene from a blob URL so the library does not re-fetch the same PLY over the network
         const plyBlob = new Blob([buffer], { type: 'application/octet-stream' });
         const blobUrl = URL.createObjectURL(plyBlob);
+        let splatRaceTimer: number | undefined;
         try {
-          console.log('[GS3D] Adding splat scene from one-shot blob URL (single fetch)');
-          await viewer.addSplatScene(blobUrl, {
+          console.log('[GS3D] phase: addSplatScene start');
+          const splatLoad = viewer.addSplatScene(blobUrl, {
             splatAlphaRemovalThreshold: loadMinAlpha,
             showLoadingUI: false,
             progressiveLoad: useProgressive,
             format: 2,
             orientation,
           } as Record<string, unknown>);
+          const splatTimeout = new Promise<never>((_, reject) => {
+            splatRaceTimer = window.setTimeout(() => {
+              reject(
+                new Error(
+                  `Splat load timed out after ${ADD_SPLAT_SCENE_TIMEOUT_MS / 1000}s. Set VITE_GS3D_FORCE_LEGACY_WORKERS=true on Vercel and redeploy, or check COOP/COEP + CORP (ARCHITECTURE.md).`,
+                ),
+              );
+            }, ADD_SPLAT_SCENE_TIMEOUT_MS);
+          });
+          try {
+            await Promise.race([splatLoad, splatTimeout]);
+          } catch (splatErr) {
+            try {
+              viewer.dispose();
+            } catch {
+              /* ignore */
+            }
+            throw splatErr;
+          }
         } finally {
+          if (splatRaceTimer !== undefined) {
+            window.clearTimeout(splatRaceTimer);
+          }
           URL.revokeObjectURL(blobUrl);
         }
+        console.log('[GS3D] phase: addSplatScene done');
         if (disposed) return;
 
         // 8. Start rendering
+        console.log('[GS3D] phase: viewer.start');
         viewer.start();
         // True ellipsoid hits align better with the rendered splat surface (measurement).
         viewer.raycaster.raycastAgainstTrueSplatEllipsoid = true;
@@ -860,6 +960,7 @@ export default function Viewer3D({
 
         viewerRef.current = viewer;
         console.log('[GS3D] Viewer started successfully');
+        console.log('[GS3D] phase: init chain complete');
         setLoading(false);
       } catch (err: unknown) {
         if (!disposed) {
@@ -873,6 +974,7 @@ export default function Viewer3D({
 
     return () => {
       disposed = true;
+      initialCameraAbort.abort();
       splatCentersRef.current = null;
       splatCenterGridRef.current = null;
       splatTreeReadyRef.current = false;
@@ -898,7 +1000,7 @@ export default function Viewer3D({
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modelUrl, loadMinAlpha, prefetchedJobModelMetadata]);
+  }, [modelUrl, jobId, loadMinAlpha, prefetchedJobModelMetadata]);
 
   useEffect(() => {
     if (loading) {
@@ -1483,9 +1585,11 @@ export default function Viewer3D({
           {displayPanelOpen && (
             <div className="w-full min-w-[200px] bg-black/95 backdrop-blur-md border border-white/[0.22] rounded-xl p-3 text-[10px] text-white/80 font-mono space-y-3">
               <div className="text-white/45 text-[9px] leading-snug">
-                {globalThis.crossOriginIsolated === true
-                  ? 'crossOriginIsolated: GPU-accelerated sort + shared worker memory enabled.'
-                  : 'crossOriginIsolated=false: sort flags disabled (set COOP/COEP per ARCHITECTURE.md).'}
+                {forceLegacyGs3dWorkers()
+                  ? 'VITE_GS3D_FORCE_LEGACY_WORKERS: GPU sort + shared worker memory off (override).'
+                  : globalThis.crossOriginIsolated === true
+                    ? 'crossOriginIsolated: GPU-accelerated sort + shared worker memory enabled.'
+                    : 'crossOriginIsolated=false: sort flags disabled (set COOP/COEP per ARCHITECTURE.md).'}
               </div>
               <label className="block space-y-1">
                 <span className="text-[#f5ec99]">Min alpha (PLY reload ~0.5s)</span>

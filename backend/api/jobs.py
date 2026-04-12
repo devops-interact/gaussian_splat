@@ -2,6 +2,7 @@
 API endpoints for job management
 """
 import gzip
+import json
 import logging
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Form, Depends, Request
 from fastapi.responses import FileResponse, Response
@@ -14,6 +15,7 @@ from core.config import get_settings, QualityPreset, QUALITY_PRESETS
 from core.pipeline import process_job
 from jobs.job_manager import get_job_manager
 from services.video.validate import validate_video, get_video_info
+from services.viewer_initial_camera import compute_initial_camera_from_paths
 from database import get_db
 from models.db_models import Project, Scan
 from api.auth import get_current_user_optional
@@ -289,6 +291,39 @@ async def get_job_cameras(job_id: str):
         raise HTTPException(status_code=404, detail="Camera file not found")
     return Response(
         content=cam_path.read_text(encoding="utf-8"),
+        media_type="application/json",
+        headers={"Cross-Origin-Resource-Policy": "cross-origin"},
+    )
+
+
+@router.get("/{job_id}/initial_camera")
+async def get_initial_camera(job_id: str):
+    """
+    Suggested viewer camera from the first 24 LongSplat poses + ply center offset.
+    Requires cameras_all.json and ply_center_offset.json under the job model directory.
+    """
+    job_manager = get_job_manager()
+    job = await job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    model_dir = settings.MODELS_DIR / job_id
+    cameras_path = model_dir / "cameras_all.json"
+    offset_path = model_dir / "ply_center_offset.json"
+    ply_path = (settings.MODELS_DIR / job.model_filename) if job.model_filename else None
+
+    result = compute_initial_camera_from_paths(
+        cameras_path=cameras_path,
+        offset_path=offset_path,
+        ply_path=ply_path,
+    )
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Initial camera not available (missing cameras_all.json, ply_center_offset.json, or invalid data)",
+        )
+    return Response(
+        content=json.dumps(result),
         media_type="application/json",
         headers={"Cross-Origin-Resource-Policy": "cross-origin"},
     )
