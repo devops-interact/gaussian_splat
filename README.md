@@ -107,6 +107,8 @@ The scan viewer uses [`@mkkellogg/gaussian-splats-3d`](https://github.com/mkkell
 
 If the viewer stays on **“Loading Gaussian Splats…”**, set **`VITE_GS3D_FORCE_LEGACY_WORKERS=true`** in Vercel env (or `frontend/.env.local` locally), redeploy / restart dev, and check **`[GS3D] phase:`** logs in the browser console — details in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
+If the room looks **upside-down** with pose-based framing, or orbit feels **choppy** while legacy workers are on, or you see **`lockdown-install.js` / SES** `DOMException` spam, see **§ 3D viewer troubleshooting** items **7–9** in [`ARCHITECTURE.md`](ARCHITECTURE.md) (camera up for `initial_camera`, legacy-worker tradeoff, MetaMask / extensions).
+
 ---
 
 ## Tech Stack

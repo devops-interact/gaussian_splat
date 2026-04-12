@@ -69,6 +69,11 @@ interface CalibrationState {
 /** Use progressive PLY loading in GaussianSplats3D when splat count is high (trades peak perf for time-to-first-frame). */
 const PROGRESSIVE_VERTEX_THRESHOLD = 50_000;
 
+/** Measure-mode hover: ms between picks; larger reduces main-thread / scene churn. */
+const MEASURE_HOVER_MIN_MS = 100;
+/** Skip rebuilding measure preview if pick moved less than this (world units). */
+const MEASURE_PREVIEW_MOVE_EPS = 0.03;
+
 const PLY_FETCH_TIMEOUT_MS = 120_000;
 const ADD_SPLAT_SCENE_TIMEOUT_MS = 90_000;
 
@@ -728,8 +733,9 @@ export default function Viewer3D({
           (bbMax[2] - bbMin[2]) ** 2,
         );
         const camDist = Math.max(diagonal * 1.2, 3);
-        // MASt3R / OpenCV-style pipelines use Y-down vs Three.js Y-up; match library expectations.
-        const cameraUp: [number, number, number] = [0, -1, 0];
+        // Bbox fallback is tuned with Y-flipped up (MASt3R / OpenCV-style). Pose-derived eye/target from
+        // LongSplat world use standard Y-up with initial_camera — see ARCHITECTURE.md.
+        let cameraUp: [number, number, number] = [0, -1, 0];
         const orientation: [number, number, number, number] = [0, 0, 0, 1];
         console.log(`[GS3D] BBox diagonal=${diagonal.toFixed(2)}, camDist=${camDist.toFixed(2)}, splatOrientation=identity`);
 
@@ -755,7 +761,11 @@ export default function Viewer3D({
             Number(hint.target[1]),
             Number(hint.target[2]),
           ];
-          console.log('[GS3D] phase: initial_camera applied (first 24 poses + offset)', hint);
+          cameraUp = [0, 1, 0];
+          console.log(
+            '[GS3D] phase: initial_camera applied (first 24 poses + offset); cameraUp=[0,1,0]',
+            hint,
+          );
         } else if (!disposed && jobId) {
           console.log('[GS3D] phase: initial_camera skipped (missing, error, or canceled)');
         }
@@ -1147,9 +1157,13 @@ export default function Viewer3D({
   useEffect(() => {
     const canvas = containerRef.current?.querySelector('canvas');
     if (!canvas) return;
-    if (mode === 'measure') canvas.style.cursor = 'crosshair';
-    else if (mode === 'walkthrough') canvas.style.cursor = 'none';
-    else canvas.style.cursor = 'grab';
+    try {
+      if (mode === 'measure') canvas.style.cursor = 'crosshair';
+      else if (mode === 'walkthrough') canvas.style.cursor = 'none';
+      else canvas.style.cursor = 'grab';
+    } catch {
+      /* MetaMask SES / lockdown can throw on domElement.style — ignore */
+    }
   }, [mode, loading]);
 
   // ── Measurement Click Handler (effect below, after handleAddMeasurePoint) ──
@@ -1256,7 +1270,6 @@ export default function Viewer3D({
 
     const pickWorldFromEvent = (e: MouseEvent): PickResult | null => {
       camera.updateMatrixWorld(true);
-      camera.updateProjectionMatrix();
 
       const renderDims = new THREE.Vector2();
       if (viewerAny.getRenderDimensions) {
@@ -1321,9 +1334,12 @@ export default function Viewer3D({
     };
 
     let lastHoverMs = 0;
+    const lastPreviewWorld = new THREE.Vector3();
+    let hasLastPreviewWorld = false;
+
     const onMove = (e: MouseEvent) => {
       const now = performance.now();
-      if (now - lastHoverMs < 50) return;
+      if (now - lastHoverMs < MEASURE_HOVER_MIN_MS) return;
       lastHoverMs = now;
       try {
         const pick = pickWorldFromEvent(e);
@@ -1331,6 +1347,24 @@ export default function Viewer3D({
         const visible = ctx.measurePhase === 'calibrate' ? ctx.calibPoints : ctx.measurePoints;
         const previousWorld =
           visible.length > 0 ? visible[visible.length - 1].position.clone() : null;
+
+        if (pick && hasLastPreviewWorld && lastPreviewWorld.distanceTo(pick.position) < MEASURE_PREVIEW_MOVE_EPS) {
+          const hint = buildMeasurePickHint(
+            ctx.measurePhase,
+            ctx.calibPoints.length,
+            ctx.measurePoints.length,
+            pick,
+          );
+          setMeasurePickHint((prev) => (prev === hint ? prev : hint));
+          return;
+        }
+        if (pick) {
+          lastPreviewWorld.copy(pick.position);
+          hasLastPreviewWorld = true;
+        } else {
+          hasLastPreviewWorld = false;
+        }
+
         setMeasurePreviewInScene(threeScene, pick, camera, { previousWorld });
         const hint = buildMeasurePickHint(
           ctx.measurePhase,
@@ -1342,10 +1376,12 @@ export default function Viewer3D({
       } catch {
         removeMeasurePreviewFromScene(threeScene);
         setMeasurePickHint(MEASURE_PICK_HINT_IDLE);
+        hasLastPreviewWorld = false;
       }
     };
 
     const onLeave = () => {
+      hasLastPreviewWorld = false;
       removeMeasurePreviewFromScene(threeScene);
       setMeasurePickHint(MEASURE_PICK_HINT_IDLE);
     };
