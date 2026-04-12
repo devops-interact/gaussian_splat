@@ -602,6 +602,7 @@ export default function Viewer3D({
   useEffect(() => {
     if (!containerRef.current || !modelUrl) return;
     let disposed = false;
+    let splatSafetyPollTimer: number | undefined;
     let unhandledRejectionHandler: ((e: PromiseRejectionEvent) => void) | null = null;
 
     const apiBase = getApiBaseUrl();
@@ -947,8 +948,9 @@ export default function Viewer3D({
         }
 
         // Safety re-check: if SplatTree callback was missed, poll after 5s
-        setTimeout(() => {
+        splatSafetyPollTimer = window.setTimeout(() => {
           if (disposed || splatTreeReadyRef.current) return;
+          if (viewerRef.current !== viewer) return;
           if (splatMeshInternal.getSplatTree?.()) {
             splatTreeReadyRef.current = true;
             rebuildCenterCache();
@@ -974,6 +976,10 @@ export default function Viewer3D({
 
     return () => {
       disposed = true;
+      if (splatSafetyPollTimer !== undefined) {
+        window.clearTimeout(splatSafetyPollTimer);
+        splatSafetyPollTimer = undefined;
+      }
       initialCameraAbort.abort();
       splatCentersRef.current = null;
       splatCenterGridRef.current = null;
@@ -1069,6 +1075,8 @@ export default function Viewer3D({
     const camera = (viewer as unknown as { camera?: THREE.PerspectiveCamera }).camera;
     if (!camera) return;
 
+    const viewerInstance = viewer;
+
     const onKeyDown = (e: KeyboardEvent) => wt.keys.add(e.code);
     const onKeyUp = (e: KeyboardEvent) => wt.keys.delete(e.code);
     const onClick = () => {
@@ -1082,6 +1090,7 @@ export default function Viewer3D({
     const onPLC = () => { wt.isLocked = document.pointerLockElement === canvas; };
     const onMM = (e: MouseEvent) => {
       if (!wt.isLocked) return;
+      if (viewerRef.current !== viewerInstance || !canvas.isConnected) return;
       wt.euler.setFromQuaternion(camera.quaternion);
       wt.euler.y -= e.movementX * 0.002;
       wt.euler.x -= e.movementY * 0.002;
@@ -1092,6 +1101,10 @@ export default function Viewer3D({
     let lastTime = performance.now();
     const animate = () => {
       if (!wt.active) return;
+      if (viewerRef.current !== viewerInstance || !canvas.isConnected) {
+        wt.rafId = null;
+        return;
+      }
       const now = performance.now();
       const delta = (now - lastTime) / 1000;
       lastTime = now;
@@ -1174,9 +1187,14 @@ export default function Viewer3D({
     }
 
     return () => {
-      const removalList: THREE.Object3D[] = [];
-      scene.traverse((o) => { if (o.userData.__measure) removalList.push(o); });
-      removalList.forEach(o => scene.remove(o));
+      if (viewerRef.current !== viewer) return;
+      try {
+        const removalList: THREE.Object3D[] = [];
+        scene.traverse((o) => { if (o.userData.__measure) removalList.push(o); });
+        removalList.forEach((o) => scene.remove(o));
+      } catch {
+        /* scene may be disposed with viewer */
+      }
     };
   }, [visibleMeasurePoints]);
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { JobStatus as JobStatusEnum, JobStatusResponse, type ModelMetadataResponse } from '../types/job';
 import { getJobStatus } from '../api/jobs';
@@ -43,6 +43,11 @@ function backoffMsAfterFailure(consecutiveFailures: number): number {
 }
 
 export default function JobStatus({ jobId, onComplete, embedded }: JobStatusProps) {
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+  /** Avoid calling onComplete again when the poll effect restarts (e.g. parent re-render); resets when jobId changes. */
+  const completionNotifiedForJobIdRef = useRef<string | null>(null);
+
   const [status, setStatus] = useState<JobStatusEnum>(JobStatusEnum.UPLOADED);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -105,11 +110,14 @@ export default function JobStatus({ jobId, onComplete, embedded }: JobStatusProp
           if (response.quality_preset) setQualityPreset(response.quality_preset);
           if (response.estimated_minutes) setEstimatedMinutes(response.estimated_minutes);
           if (response.status === JobStatusEnum.COMPLETED && response.model_url) {
-            onComplete(
-              response.model_url,
-              response.model_url_obj ?? undefined,
-              response.model_metadata,
-            );
+            if (completionNotifiedForJobIdRef.current !== jobId) {
+              completionNotifiedForJobIdRef.current = jobId;
+              onCompleteRef.current(
+                response.model_url,
+                response.model_url_obj ?? undefined,
+                response.model_metadata,
+              );
+            }
             return;
           }
           if (response.status === JobStatusEnum.ERROR) {
@@ -135,7 +143,7 @@ export default function JobStatus({ jobId, onComplete, embedded }: JobStatusProp
       cancelled = true;
       ac.abort();
     };
-  }, [jobId, onComplete]);
+  }, [jobId]);
 
   const isComplete = status === JobStatusEnum.COMPLETED;
   const isError = status === JobStatusEnum.ERROR;

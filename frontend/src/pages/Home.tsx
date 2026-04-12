@@ -44,11 +44,11 @@ export default function Home() {
     setPrefetchedJobModelMetadata(null);
   };
 
-  const handleProcessingComplete = (url: string, objUrlResp?: string, jobMeta?: ModelMetadataResponse) => {
+  const handleProcessingComplete = useCallback((url: string, objUrlResp?: string, jobMeta?: ModelMetadataResponse) => {
     setModelUrl(url);
     setObjUrl(objUrlResp ?? null);
     setPrefetchedJobModelMetadata(jobMeta ?? null);
-  };
+  }, []);
 
   const handleModelMetadata = useCallback((meta: ModelMetadata) => {
     setModelMetadata(meta);
