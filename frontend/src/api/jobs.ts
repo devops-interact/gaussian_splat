@@ -48,8 +48,13 @@ export const uploadVideo = async (
   return response.data;
 };
 
-export const getJobStatus = async (jobId: string): Promise<JobStatusResponse> => {
-  const response = await axios.get(`${API_JOBS_URL}/${jobId}/status`);
+export const getJobStatus = async (
+  jobId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<JobStatusResponse> => {
+  const response = await axios.get(`${API_JOBS_URL}/${jobId}/status`, {
+    signal: opts?.signal,
+  });
   return response.data;
 };
 

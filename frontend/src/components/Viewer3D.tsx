@@ -96,10 +96,17 @@ function removeMeasurePreviewFromScene(scene: THREE.Scene) {
   }
 }
 
+const MEASURE_PICK_HINT_IDLE = 'Move over the model…';
+
+interface MeasurePreviewOptions {
+  previousWorld?: THREE.Vector3 | null;
+}
+
 function setMeasurePreviewInScene(
   scene: THREE.Scene,
   pick: PickResult | null,
   camera: THREE.PerspectiveCamera,
+  options?: MeasurePreviewOptions,
 ) {
   removeMeasurePreviewFromScene(scene);
   if (!pick) return;
@@ -172,6 +179,56 @@ function setMeasurePreviewInScene(
   dot.position.copy(position);
   dot.userData.__measurePreview = true;
   scene.add(dot);
+
+  if (isSnapped) {
+    const ghostGeo = new THREE.SphereGeometry(0.012, 12, 12);
+    const ghostMat = new THREE.MeshBasicMaterial({
+      color: 0xefe752,
+      transparent: true,
+      opacity: 0.34,
+      depthTest: false,
+      depthWrite: false,
+    });
+    const ghost = new THREE.Mesh(ghostGeo, ghostMat);
+    ghost.position.copy(position);
+    ghost.userData.__measurePreview = true;
+    scene.add(ghost);
+  }
+
+  const prev = options?.previousWorld;
+  if (isSnapped && prev) {
+    const dashGeo = new THREE.BufferGeometry().setFromPoints([prev.clone(), position.clone()]);
+    const dashMat = new THREE.LineDashedMaterial({
+      color: 0xf5ec99,
+      dashSize: 0.045,
+      gapSize: 0.03,
+      transparent: true,
+      opacity: 0.55,
+      depthTest: false,
+    });
+    const dashLine = new THREE.Line(dashGeo, dashMat);
+    dashLine.computeLineDistances();
+    dashLine.userData.__measurePreview = true;
+    scene.add(dashLine);
+  }
+}
+
+function buildMeasurePickHint(
+  measurePhase: MeasurePhase,
+  calibLen: number,
+  measureLen: number,
+  pick: PickResult | null,
+): string {
+  if (!pick) return MEASURE_PICK_HINT_IDLE;
+  if (!pick.isSnapped) return 'No splat under cursor — move over the reconstruction to preview a point.';
+  if (measurePhase === 'calibrate') {
+    if (calibLen === 0) return 'Preview: calibration A · click to place';
+    if (calibLen === 1) return 'Preview: calibration B · click to place';
+    return 'Preview: click replaces calibration (new A).';
+  }
+  if (measureLen === 0) return 'Preview: measure A · click to place';
+  if (measureLen === 1) return 'Preview: measure B · click to place';
+  return 'Preview: click starts a new pair (new A).';
 }
 
 /** Avoid innerHTML + Viewer.dispose() both touching the same nodes (removeChild DOMException). */
@@ -485,8 +542,12 @@ export default function Viewer3D({
   const [meterInput, setMeterInput] = useState('1.0');
   const [measurePoints, setMeasurePoints] = useState<MeasurePoint[]>([]);
   const [measuredDistance, setMeasuredDistance] = useState<number | null>(null);
+  const [measurePickHint, setMeasurePickHint] = useState(MEASURE_PICK_HINT_IDLE);
 
   const visibleMeasurePoints = measurePhase === 'calibrate' ? calibPoints : measurePoints;
+
+  const measurePickCtxRef = useRef({ measurePhase, calibPoints, measurePoints });
+  measurePickCtxRef.current = { measurePhase, calibPoints, measurePoints };
 
   // Display / render tuning (GaussianSplats3D; see https://projects.markkellogg.org/threejs/demo_gaussian_splats_3d.php)
   const [minAlpha, setMinAlpha] = useState(1);
@@ -511,6 +572,10 @@ export default function Viewer3D({
   useEffect(() => {
     setKsplatError(null);
   }, [modelUrl]);
+
+  useEffect(() => {
+    if (mode !== 'measure') setMeasurePickHint(MEASURE_PICK_HINT_IDLE);
+  }, [mode]);
 
   // ── Initialize Viewer ──────────────────────────────────────────────────
   useEffect(() => {
@@ -972,8 +1037,68 @@ export default function Viewer3D({
     else canvas.style.cursor = 'grab';
   }, [mode, loading]);
 
-  // ── Measurement Click Handler ──────────────────────────────────────────
+  // ── Measurement Click Handler (effect below, after handleAddMeasurePoint) ──
   const lastClickTimeRef = useRef<number>(0);
+
+  // ── Measurement Visuals (add/remove spheres and lines in the threeScene) ──
+  useEffect(() => {
+    const viewer = viewerRef.current;
+    if (!viewer) return;
+    const scene = (viewer as unknown as { threeScene?: THREE.Scene }).threeScene;
+    if (!scene) return;
+
+    // Remove old measurement visuals
+    const toRemove: THREE.Object3D[] = [];
+    scene.traverse((o) => { if (o.userData.__measure) toRemove.push(o); });
+    toRemove.forEach(o => { scene.remove(o); });
+
+    const sphereGeo = new THREE.SphereGeometry(0.012, 12, 12);
+    const primaryMat = new THREE.MeshBasicMaterial({ color: '#efe752' });
+    const secondaryMat = new THREE.MeshBasicMaterial({ color: '#f5ec99' });
+
+    visibleMeasurePoints.forEach((pt, i) => {
+      const mesh = new THREE.Mesh(sphereGeo, i === 0 ? secondaryMat : primaryMat);
+      mesh.position.copy(pt.position);
+      mesh.userData.__measure = true;
+      scene.add(mesh);
+    });
+
+    if (visibleMeasurePoints.length === 2) {
+      const lineGeo = new THREE.BufferGeometry().setFromPoints(visibleMeasurePoints.map(p => p.position));
+      const lineMat = new THREE.LineBasicMaterial({ color: '#efe752', linewidth: 2 });
+      const line = new THREE.Line(lineGeo, lineMat);
+      line.userData.__measure = true;
+      scene.add(line);
+    }
+
+    return () => {
+      const removalList: THREE.Object3D[] = [];
+      scene.traverse((o) => { if (o.userData.__measure) removalList.push(o); });
+      removalList.forEach(o => scene.remove(o));
+    };
+  }, [visibleMeasurePoints]);
+
+  // ── Measurement Callbacks ──────────────────────────────────────────────
+
+  const handleAddMeasurePoint = useCallback((point: THREE.Vector3) => {
+    if (measurePhase === 'calibrate') {
+      setCalibPoints(prev => {
+        if (prev.length >= 2) return [{ position: point }];
+        return [...prev, { position: point }];
+      });
+    } else {
+      setMeasurePoints(prev => {
+        const next = prev.length >= 2 ? [{ position: point }] : [...prev, { position: point }];
+        if (next.length === 2 && calibration) {
+          const rawDist = next[0].position.distanceTo(next[1].position);
+          setMeasuredDistance(rawDist * calibration.scaleFactor);
+        } else {
+          setMeasuredDistance(null);
+        }
+        return next;
+      });
+    }
+  }, [measurePhase, calibration]);
 
   useEffect(() => {
     if (mode !== 'measure') return;
@@ -981,8 +1106,6 @@ export default function Viewer3D({
     const canvas = containerRef.current?.querySelector('canvas');
     if (loading || !viewer || !canvas) return;
 
-    // Access the library's built-in raycaster and splatMesh
-    // These operate in the correct coordinate space matching the rendered scene
     const viewerAny = viewer as unknown as {
       camera?: THREE.PerspectiveCamera;
       threeScene?: THREE.Scene;
@@ -1084,80 +1207,39 @@ export default function Viewer3D({
       lastHoverMs = now;
       try {
         const pick = pickWorldFromEvent(e);
-        setMeasurePreviewInScene(threeScene, pick, camera);
+        const ctx = measurePickCtxRef.current;
+        const visible = ctx.measurePhase === 'calibrate' ? ctx.calibPoints : ctx.measurePoints;
+        const previousWorld =
+          visible.length > 0 ? visible[visible.length - 1].position.clone() : null;
+        setMeasurePreviewInScene(threeScene, pick, camera, { previousWorld });
+        const hint = buildMeasurePickHint(
+          ctx.measurePhase,
+          ctx.calibPoints.length,
+          ctx.measurePoints.length,
+          pick,
+        );
+        setMeasurePickHint((prev) => (prev === hint ? prev : hint));
       } catch {
         removeMeasurePreviewFromScene(threeScene);
+        setMeasurePickHint(MEASURE_PICK_HINT_IDLE);
       }
+    };
+
+    const onLeave = () => {
+      removeMeasurePreviewFromScene(threeScene);
+      setMeasurePickHint(MEASURE_PICK_HINT_IDLE);
     };
 
     canvas.addEventListener('click', onClick);
     canvas.addEventListener('mousemove', onMove);
+    canvas.addEventListener('pointerleave', onLeave);
     return () => {
       canvas.removeEventListener('click', onClick);
       canvas.removeEventListener('mousemove', onMove);
+      canvas.removeEventListener('pointerleave', onLeave);
       removeMeasurePreviewFromScene(threeScene);
     };
-  }, [mode, measurePhase, calibration, loading]);
-
-  // ── Measurement Visuals (add/remove spheres and lines in the threeScene) ──
-  useEffect(() => {
-    const viewer = viewerRef.current;
-    if (!viewer) return;
-    const scene = (viewer as unknown as { threeScene?: THREE.Scene }).threeScene;
-    if (!scene) return;
-
-    // Remove old measurement visuals
-    const toRemove: THREE.Object3D[] = [];
-    scene.traverse((o) => { if (o.userData.__measure) toRemove.push(o); });
-    toRemove.forEach(o => { scene.remove(o); });
-
-    const sphereGeo = new THREE.SphereGeometry(0.012, 12, 12);
-    const primaryMat = new THREE.MeshBasicMaterial({ color: '#efe752' });
-    const secondaryMat = new THREE.MeshBasicMaterial({ color: '#f5ec99' });
-
-    visibleMeasurePoints.forEach((pt, i) => {
-      const mesh = new THREE.Mesh(sphereGeo, i === 0 ? secondaryMat : primaryMat);
-      mesh.position.copy(pt.position);
-      mesh.userData.__measure = true;
-      scene.add(mesh);
-    });
-
-    if (visibleMeasurePoints.length === 2) {
-      const lineGeo = new THREE.BufferGeometry().setFromPoints(visibleMeasurePoints.map(p => p.position));
-      const lineMat = new THREE.LineBasicMaterial({ color: '#efe752', linewidth: 2 });
-      const line = new THREE.Line(lineGeo, lineMat);
-      line.userData.__measure = true;
-      scene.add(line);
-    }
-
-    return () => {
-      const removalList: THREE.Object3D[] = [];
-      scene.traverse((o) => { if (o.userData.__measure) removalList.push(o); });
-      removalList.forEach(o => scene.remove(o));
-    };
-  }, [visibleMeasurePoints]);
-
-  // ── Measurement Callbacks ──────────────────────────────────────────────
-
-  const handleAddMeasurePoint = useCallback((point: THREE.Vector3) => {
-    if (measurePhase === 'calibrate') {
-      setCalibPoints(prev => {
-        if (prev.length >= 2) return [{ position: point }];
-        return [...prev, { position: point }];
-      });
-    } else {
-      setMeasurePoints(prev => {
-        const next = prev.length >= 2 ? [{ position: point }] : [...prev, { position: point }];
-        if (next.length === 2 && calibration) {
-          const rawDist = next[0].position.distanceTo(next[1].position);
-          setMeasuredDistance(rawDist * calibration.scaleFactor);
-        } else {
-          setMeasuredDistance(null);
-        }
-        return next;
-      });
-    }
-  }, [measurePhase, calibration]);
+  }, [mode, measurePhase, calibration, loading, handleAddMeasurePoint]);
 
   const handleConfirmCalibration = useCallback(() => {
     if (calibPoints.length !== 2) return;
@@ -1399,7 +1481,7 @@ export default function Viewer3D({
             </div>
           )}
           {displayPanelOpen && (
-            <div className="w-full min-w-[200px] bg-black/95 backdrop-blur-md border border-white/[0.10] rounded-xl p-3 text-[10px] text-white/80 font-mono space-y-3">
+            <div className="w-full min-w-[200px] bg-black/95 backdrop-blur-md border border-white/[0.22] rounded-xl p-3 text-[10px] text-white/80 font-mono space-y-3">
               <div className="text-white/45 text-[9px] leading-snug">
                 {globalThis.crossOriginIsolated === true
                   ? 'crossOriginIsolated: GPU-accelerated sort + shared worker memory enabled.'
@@ -1433,7 +1515,7 @@ export default function Viewer3D({
                         !liveViewerApis.sh && 'opacity-40 cursor-not-allowed',
                         shDisplayDegree === d
                           ? 'border-[#efe752]/75 bg-[#efe752]/15 text-[#efe752]'
-                          : 'border-white/[0.13] text-white/50 hover:border-white/[0.19]',
+                          : 'border-white/[0.26] text-white/50 hover:border-white/[0.34]',
                       )}
                     >
                       {d}
@@ -1467,7 +1549,7 @@ export default function Viewer3D({
                 type="button"
                 disabled={ksplatBusy}
                 onClick={handleDownloadKsplat}
-                className="w-full flex items-center justify-center gap-1 py-1.5 rounded bg-[#efe752]/10 text-[#efe752] border border-[#efe752]/31 hover:bg-[#efe752]/20 disabled:opacity-40"
+                className="w-full flex items-center justify-center gap-1 py-1.5 rounded bg-[#efe752]/10 text-[#efe752] border border-[#efe752]/48 hover:bg-[#efe752]/20 disabled:opacity-40"
               >
                 <Download className="w-3 h-3" /> {ksplatBusy ? 'Working…' : 'Download .ksplat'}
               </button>
@@ -1491,7 +1573,7 @@ export default function Viewer3D({
               'p-2 rounded-lg border font-mono text-xs flex items-center gap-2 shadow-lg',
               displayPanelOpen
                 ? 'bg-[#efe752]/15 border-[#efe752]/35 text-[#efe752]'
-                : 'bg-black/75 border-white/[0.08] text-white/60 hover:text-white',
+                : 'bg-black/75 border-white/[0.18] text-white/60 hover:text-white',
             )}
           >
             <SlidersHorizontal className="w-4 h-4" /> Display
@@ -1501,7 +1583,7 @@ export default function Viewer3D({
 
       {/* ── Top-Left: Mode Indicator ─────────────────────────────────────── */}
       <div className="absolute top-3 left-3 z-10">
-        <div className="bg-black/70 backdrop-blur-md text-white/80 text-xs px-3 py-1.5 rounded-lg border border-white/[0.08] font-mono flex items-center gap-2">
+        <div className="bg-black/70 backdrop-blur-md text-white/80 text-xs px-3 py-1.5 rounded-lg border border-white/[0.18] font-mono flex items-center gap-2">
           {mode === 'orbit' && <><MousePointer className="w-3 h-3" /> Orbit</>}
           {mode === 'walkthrough' && <><Footprints className="w-3 h-3" /> Walk-Through</>}
           {mode === 'measure' && <><Ruler className="w-3 h-3" /> Measure</>}
@@ -1514,7 +1596,7 @@ export default function Viewer3D({
         <ToolbarButton icon={<Footprints className="w-3.5 h-3.5" />} label="Walk" active={mode === 'walkthrough'} onClick={() => setMode('walkthrough')} />
         <ToolbarButton icon={<Ruler className="w-3.5 h-3.5" />} label="Measure" active={mode === 'measure'} onClick={() => setMode('measure')} />
 
-        <div className="border-t border-white/[0.08] my-1" />
+        <div className="border-t border-white/[0.18] my-1" />
 
         <ToolbarButton icon={<Camera className="w-3.5 h-3.5" />} label="Snapshot" onClick={handleSnapshot} />
         <ToolbarButton icon={<RotateCcw className="w-3.5 h-3.5" />} label="Reset" onClick={handleReset} />
@@ -1523,12 +1605,13 @@ export default function Viewer3D({
 
       {/* ── Measure Sub-Controls ──────────────────────────────────────────── */}
       {mode === 'measure' && (
-        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10">
-          <div className="bg-black/80 backdrop-blur-md border border-white/[0.08] rounded-xl px-4 py-2.5 flex items-center gap-3 font-mono text-xs">
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 max-w-[min(100vw-1.5rem,42rem)]">
+          <div className="bg-black/80 backdrop-blur-md border border-white/[0.18] rounded-xl px-4 py-2.5 flex flex-col gap-1.5 font-mono text-xs">
+            <div className="flex flex-wrap items-center gap-3">
             <span className={`text-[10px] px-1.5 py-0.5 rounded ${measurePhase === 'calibrate' ? 'bg-[#f5ec99]/15 text-[#f5ec99]' : 'bg-[#efe752]/15 text-[#efe752]'}`}>
               {measurePhase === 'calibrate' ? 'STEP 1: Calibrate' : 'STEP 2: Measure'}
             </span>
-            <div className="border-l border-white/[0.08] h-5" />
+            <div className="border-l border-white/[0.18] h-5" />
 
             {measurePhase === 'calibrate' ? (
               <>
@@ -1543,7 +1626,7 @@ export default function Viewer3D({
                 </div>
                 {calibPoints.length === 2 && (
                   <>
-                    <div className="border-l border-white/[0.08] h-5" />
+                    <div className="border-l border-white/[0.18] h-5" />
                     <div className="flex items-center gap-1.5">
                       <span className="text-white/40">=</span>
                       <input
@@ -1552,13 +1635,13 @@ export default function Viewer3D({
                         min="0.01"
                         value={meterInput}
                         onChange={e => setMeterInput(e.target.value)}
-                        className="w-16 bg-black border border-white/[0.10] rounded px-1.5 py-0.5 text-white text-xs font-mono text-center focus:border-[#efe752]/40 focus:outline-none"
+                        className="w-16 bg-black border border-white/[0.22] rounded px-1.5 py-0.5 text-white text-xs font-mono text-center focus:border-[#efe752]/40 focus:outline-none"
                       />
                       <span className="text-white/40">m</span>
                     </div>
                     <button
                       onClick={handleConfirmCalibration}
-                      className="px-2 py-0.5 rounded bg-[#efe752]/15 text-[#efe752] border border-[#efe752]/25 hover:bg-[#efe752]/25 transition-colors"
+                      className="px-2 py-0.5 rounded bg-[#efe752]/15 text-[#efe752] border border-[#efe752]/40 hover:bg-[#efe752]/25 transition-colors"
                     >
                       Confirm
                     </button>
@@ -1578,7 +1661,7 @@ export default function Viewer3D({
                 </div>
                 {measuredDistance !== null && (
                   <>
-                    <div className="border-l border-white/[0.08] h-5" />
+                    <div className="border-l border-white/[0.18] h-5" />
                     <div className="flex items-center gap-2">
                       <Ruler className="w-3.5 h-3.5 text-[#efe752]" />
                       <span className="text-[#efe752] text-sm font-semibold">{measuredDistance.toFixed(3)}</span>
@@ -1588,13 +1671,13 @@ export default function Viewer3D({
                 )}
                 {measurePoints.length > 0 && (
                   <>
-                    <div className="border-l border-white/[0.08] h-5" />
+                    <div className="border-l border-white/[0.18] h-5" />
                     <button onClick={handleClearMeasure} className="flex items-center gap-1 text-white/40 hover:text-white transition-colors">
                       <Trash2 className="w-3 h-3" /> Clear
                     </button>
                   </>
                 )}
-                <div className="border-l border-white/[0.08] h-5" />
+                <div className="border-l border-white/[0.18] h-5" />
                 <button onClick={handleResetCalibration} className="flex items-center gap-1 text-[#f5ec99]/60 hover:text-[#f5ec99] transition-colors text-[10px]">
                   Recalibrate
                 </button>
@@ -1605,23 +1688,27 @@ export default function Viewer3D({
                 )}
               </>
             )}
+            </div>
+            <p className="text-[10px] text-white/45 leading-snug pl-0.5">{measurePickHint}</p>
           </div>
         </div>
       )}
 
       {/* ── Bottom-Center: Context Help ───────────────────────────────────── */}
       <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-10">
-        <div className="bg-black/70 backdrop-blur-md text-white/50 text-[10px] px-3 py-1.5 rounded-lg border border-white/[0.08] font-mono">
+        <div className="bg-black/70 backdrop-blur-md text-white/50 text-[10px] px-3 py-1.5 rounded-lg border border-white/[0.18] font-mono">
           {mode === 'orbit' && 'Left: Rotate  |  Right: Pan  |  Scroll: Zoom'}
           {mode === 'walkthrough' && 'Click to lock  |  WASD: Move  |  Space/Shift: Up/Down  |  ESC: Unlock'}
-          {mode === 'measure' && (measurePhase === 'calibrate' ? 'Click two reference points, then enter their real distance in meters' : 'Click two points to measure the calibrated distance')}
+          {mode === 'measure' && (measurePhase === 'calibrate'
+            ? 'Hover previews the pick; click two reference points, then enter their real distance in meters'
+            : 'Hover previews the pick; click two points to measure the calibrated distance')}
         </div>
       </div>
 
       {/* ── Help Panel ────────────────────────────────────────────────────── */}
       {showHelp && (
         <div className="absolute top-14 right-3 z-20 w-64">
-          <div className="bg-black/95 backdrop-blur-md border border-white/[0.08] rounded-xl p-4 text-xs text-white/70 space-y-3">
+          <div className="bg-black/95 backdrop-blur-md border border-white/[0.18] rounded-xl p-4 text-xs text-white/70 space-y-3">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-white text-sm">Viewer Controls</span>
               <button onClick={() => setShowHelp(false)} className="text-white/40 hover:text-white"><X className="w-3 h-3" /></button>
@@ -1648,8 +1735,8 @@ function ToolbarButton({ icon, label, active, onClick }: {
   icon: React.ReactNode; label: string; active?: boolean; onClick: () => void;
 }) {
   const color = active
-    ? 'bg-[#efe752]/15 text-[#efe752] border-[#efe752]/25'
-    : 'bg-black/70 text-white/50 border-white/[0.10] hover:text-white hover:bg-white/[0.06]';
+    ? 'bg-[#efe752]/15 text-[#efe752] border-[#efe752]/40'
+    : 'bg-black/70 text-white/50 border-white/[0.22] hover:text-white hover:bg-white/[0.06]';
   return (
     <button
       onClick={onClick}

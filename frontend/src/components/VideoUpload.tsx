@@ -111,7 +111,7 @@ export default function VideoUpload({ onUploadSuccess, jobStarted = false, proje
 
   const videoSummary =
     videoInfo && (
-      <div className="flex items-center p-3 rounded-lg bg-[#efe752]/[0.06] border border-[#efe752]/31 text-[#f5ec99] text-sm font-mono">
+      <div className="flex items-center p-3 rounded-lg bg-[#efe752]/[0.06] border border-[#efe752]/48 text-[#f5ec99] text-sm font-mono">
         <FileVideo className="w-4 h-4 mr-2 shrink-0 text-[#efe752]/80" />
         <span>
           Video: {videoInfo.duration.toFixed(1)}s • {videoInfo.resolution} • {videoInfo.fps.toFixed(1)} fps
@@ -121,7 +121,7 @@ export default function VideoUpload({ onUploadSuccess, jobStarted = false, proje
 
   const warningsBlock =
     warnings.length > 0 && (
-      <div className="p-3 rounded-lg bg-yellow-500/[0.06] border border-yellow-500/[0.15] text-yellow-400 text-sm">
+      <div className="p-3 rounded-lg bg-yellow-500/[0.06] border border-yellow-500/[0.28] text-yellow-400 text-sm">
         <div className="flex items-center font-semibold mb-1">
           <AlertTriangle className="w-4 h-4 mr-2" />
           Warnings
@@ -136,7 +136,7 @@ export default function VideoUpload({ onUploadSuccess, jobStarted = false, proje
 
   const errorBlock =
     error && (
-      <div className="p-3 rounded-lg bg-red-500/[0.06] border border-red-500/15 text-red-400 text-sm flex items-center">
+      <div className="p-3 rounded-lg bg-red-500/[0.06] border border-red-500/28 text-red-400 text-sm flex items-center">
         <AlertTriangle className="w-4 h-4 mr-2 shrink-0" />
         {error}
       </div>
@@ -173,8 +173,8 @@ export default function VideoUpload({ onUploadSuccess, jobStarted = false, proje
                 className={cn(
                   'flex flex-col items-start p-3 rounded-lg border text-left transition-all duration-200',
                   selectedPreset === preset.id
-                    ? 'border-[#efe752]/31 bg-[#efe752]/[0.06] text-[#efe752]'
-                    : 'border-white/[0.10] bg-black/50 text-gray-400 hover:border-[#efe752]/[0.15] hover:bg-white/[0.06]',
+                    ? 'border-[#efe752]/48 bg-[#efe752]/[0.06] text-[#efe752]'
+                    : 'border-white/[0.22] bg-black/50 text-gray-400 hover:border-[#efe752]/[0.32] hover:bg-white/[0.06]',
                   uploading && 'opacity-50 cursor-not-allowed'
                 )}
               >
@@ -195,11 +195,11 @@ export default function VideoUpload({ onUploadSuccess, jobStarted = false, proje
         <div
           className={cn(
             'border-2 border-dashed rounded-xl p-5 flex flex-col items-center justify-center text-center transition-all',
-            'border-white/[0.10] bg-black/40 hover:bg-white/[0.08] hover:border-[#efe752]/[0.19]',
+            'border-white/[0.22] bg-black/40 hover:bg-white/[0.08] hover:border-[#efe752]/[0.38]',
             uploading && 'opacity-50 pointer-events-none'
           )}
         >
-          <div className="w-10 h-10 rounded-full bg-black flex items-center justify-center mb-3 border border-white/[0.08]">
+          <div className="w-10 h-10 rounded-full bg-black flex items-center justify-center mb-3 border border-white/[0.18]">
             <Upload className="w-5 h-5 text-gray-400" />
           </div>
 

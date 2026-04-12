@@ -72,7 +72,7 @@ export default function TechnicalDetails({ metadata, jobInfo, embedded }: Techni
           </CardTitle>
           {/* Status indicator */}
           {metadata ? (
-            <span className="flex items-center gap-1.5 text-[10px] font-mono text-[#efe752] bg-[#efe752]/[0.08] px-2 py-0.5 rounded border border-[#efe752]/[0.19]">
+            <span className="flex items-center gap-1.5 text-[10px] font-mono text-[#efe752] bg-[#efe752]/[0.08] px-2 py-0.5 rounded border border-[#efe752]/[0.38]">
               <CheckCircle className="w-3 h-3" />
               Ready
             </span>
@@ -82,7 +82,7 @@ export default function TechnicalDetails({ metadata, jobInfo, embedded }: Techni
               Processing
             </span>
           ) : (
-            <span className="flex items-center gap-1.5 text-[10px] font-mono text-gray-500 bg-white/[0.03] px-2 py-0.5 rounded border border-white/[0.08]">
+            <span className="flex items-center gap-1.5 text-[10px] font-mono text-gray-500 bg-white/[0.03] px-2 py-0.5 rounded border border-white/[0.18]">
               Idle
             </span>
           )}

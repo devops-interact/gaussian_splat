@@ -37,6 +37,8 @@ docker system prune -af && docker builder prune -af
 
 > Build is compiled for NVIDIA A40 (`sm_86`). Other GPUs are not supported.
 
+**Long jobs — persistence and uptime:** Job state is persisted to `storage/logs/jobs.json` (and models under `storage/models/`). The volume mount at **`/app/storage`** must stay attached so a **restart or replacement pod** does not lose job rows (otherwise `GET /api/jobs/{id}/status` returns **404 Job not found** even though training finished on disk elsewhere). Configure RunPod so the instance stays **reachable for the whole preset duration** (aggressive idle stop or changing proxy URLs mid-job produces **404** or empty responses while the UI is still polling).
+
 ### 3. Deploy Frontend to Vercel
 
 The SPA must reach your RunPod API over HTTPS. Pick **one** of these patterns:
@@ -44,7 +46,7 @@ The SPA must reach your RunPod API over HTTPS. Pick **one** of these patterns:
 | Approach | What to do |
 |---|---|
 | **A. Explicit API URL (simplest)** | In Vercel → Settings → Environment Variables → **Production**, set `VITE_API_BASE_URL` to your RunPod HTTPS origin with **no trailing slash**, e.g. `https://your-pod-id-8000.proxy.runpod.net`. Rebuild the project after changing env vars (Vite bakes this in at build time). |
-| **B. Same-origin `/api` proxy** | Leave `VITE_API_BASE_URL` **unset** for Production. The app then calls relative URLs like `/api/projects`. Add **rewrites** in `frontend/vercel.json` so `/api/:path*` is forwarded to your RunPod URL (replace the destination with your pod): `{"source": "/api/:path*", "destination": "https://YOUR_RUNPOD_HOST/api/:path*"}` alongside the existing `headers` block. |
+| **B. Same-origin `/api` proxy** | Leave `VITE_API_BASE_URL` **unset** for Production. The app then calls relative URLs like `/api/projects`. Merge the **`rewrites`** block from [`frontend/vercel.rewrites.example.json`](frontend/vercel.rewrites.example.json) into [`frontend/vercel.json`](frontend/vercel.json) (same JSON object as the existing `headers` array), replacing `YOUR_RUNPOD_ORIGIN` with your HTTPS origin (no trailing slash). |
 
 If Production is built **without** `VITE_API_BASE_URL` and **without** rewrites, the browser will request `/api/...` on the Vercel domain only — those routes will 404 unless you add rewrites or a serverless proxy.
 

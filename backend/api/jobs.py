@@ -3,7 +3,7 @@ API endpoints for job management
 """
 import gzip
 import logging
-from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Form, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Form, Depends, Request
 from fastapi.responses import FileResponse, Response
 from pathlib import Path
 from typing import Optional
@@ -166,14 +166,22 @@ async def upload_video(
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 @router.get("/{job_id}/status")
-async def get_job_status(job_id: str):
+async def get_job_status(job_id: str, request: Request):
     """
     Get the current status of a job
     """
     job_manager = get_job_manager()
     job = await job_manager.get_job(job_id)
-    
+
     if not job:
+        client = request.client.host if request.client else None
+        logger.warning(
+            "job_status_miss job_id=%s client_host=%s path=%s jobs_file=%s",
+            job_id,
+            client,
+            request.url.path,
+            job_manager.jobs_file,
+        )
         raise HTTPException(status_code=404, detail="Job not found")
     
     response = {

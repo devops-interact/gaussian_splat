@@ -86,7 +86,7 @@ export default function Dashboard() {
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="rounded-xl border border-white/[0.10] bg-black p-4"
+          className="rounded-xl border border-white/[0.22] bg-black p-4"
         >
           <form onSubmit={handleCreate} className="flex gap-3">
             <input
@@ -94,7 +94,7 @@ export default function Dashboard() {
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
               placeholder="Project name"
-              className="flex-1 px-4 py-2 rounded-lg bg-black border border-white/[0.10] text-white placeholder-gray-500 font-mono text-sm focus:border-[#efe752]/50 outline-none"
+              className="flex-1 px-4 py-2 rounded-lg bg-black border border-white/[0.22] text-white placeholder-gray-500 font-mono text-sm focus:border-[#efe752]/50 outline-none"
               autoFocus
             />
             <button
@@ -107,7 +107,7 @@ export default function Dashboard() {
             <button
               type="button"
               onClick={() => { setShowCreate(false); setNewName(''); }}
-              className="px-4 py-2 rounded-lg border border-white/[0.10] text-gray-400 hover:text-white font-mono"
+              className="px-4 py-2 rounded-lg border border-white/[0.22] text-gray-400 hover:text-white font-mono"
             >
               Cancel
             </button>
@@ -118,7 +118,7 @@ export default function Dashboard() {
       {loading ? (
         <div className="text-gray-500 font-mono text-sm">Loading projects...</div>
       ) : projects.length === 0 ? (
-        <div className="rounded-xl border-2 border-dashed border-white/[0.10] bg-black/50 p-12 text-center">
+        <div className="rounded-xl border-2 border-dashed border-white/[0.22] bg-black/50 p-12 text-center">
           <FolderOpen className="w-12 h-12 text-gray-600 mx-auto mb-4" />
           <p className="text-gray-500 font-mono mb-2">No projects yet</p>
           <p className="text-gray-600 text-sm mb-4">Create a project to start adding 3D scans</p>
@@ -139,7 +139,7 @@ export default function Dashboard() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
                 transition={{ delay: i * 0.05 }}
-                className="relative rounded-xl border border-white/[0.10] bg-black p-4 hover:border-[#efe752]/[0.19] transition-colors group"
+                className="relative rounded-xl border border-white/[0.22] bg-black p-4 hover:border-[#efe752]/[0.38] transition-colors group"
               >
                 <button
                   onClick={() => navigate(`/projects/${p.id}`)}
@@ -160,7 +160,7 @@ export default function Dashboard() {
                   </p>
                 </button>
                 {menuOpen === p.id && (
-                  <div className="absolute right-2 top-12 z-10 rounded-lg bg-black border border-white/[0.10] shadow-xl py-1 min-w-[120px]">
+                  <div className="absolute right-2 top-12 z-10 rounded-lg bg-black border border-white/[0.22] shadow-xl py-1 min-w-[120px]">
                     <button
                       onClick={() => handleDelete(p.id)}
                       className="w-full flex items-center gap-2 px-3 py-2 text-red-400 hover:bg-red-500/10 text-sm font-mono"

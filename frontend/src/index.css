@@ -85,11 +85,11 @@
 /* Custom Utilities */
 @layer utilities {
   .glass-panel {
-    @apply bg-black/40 backdrop-blur-md border border-white/[0.08];
+    @apply bg-black/40 backdrop-blur-md border border-white/[0.18];
   }
 
   .glass-button {
-    @apply bg-white/5 hover:bg-white/8 border border-white/[0.08] transition-all duration-200;
+    @apply bg-white/5 hover:bg-white/8 border border-white/[0.18] transition-all duration-200;
   }
 
   .scrollbar-thin {
