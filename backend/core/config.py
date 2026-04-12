@@ -88,7 +88,13 @@ class Settings(BaseSettings):
     
     # Compression settings
     COMPRESS_OUTPUT: bool = True
-    
+    # 1–9; lower = faster gzip encode, same lossless PLY after decompress (default 3 vs old 6).
+    GZIP_COMPRESS_LEVEL: int = 3
+
+    # Trimesh OBJ export is very slow on dense Gaussian PLYs; PLY path is unchanged when false.
+    # Set EXPORT_OBJ=true to restore optional OBJ sidecar.
+    EXPORT_OBJ: bool = False
+
     class Config:
         env_file = ".env"
         case_sensitive = True

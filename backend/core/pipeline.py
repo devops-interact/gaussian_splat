@@ -81,7 +81,15 @@ async def process_job(job: Job) -> Job:
         
         logger.info(f"Processing job {job.job_id} with preset: {preset.value}")
         logger.info(f"Preset config: FPS={preset_config.fps}, iterations={preset_config.iterations}, resolution={preset_config.resolution}")
-        
+        phase_times: dict[str, float] = {}
+        phase_t0 = time.perf_counter()
+
+        def _phase(name: str) -> None:
+            nonlocal phase_t0
+            now = time.perf_counter()
+            phase_times[name] = now - phase_t0
+            phase_t0 = now
+
         # Update job status
         job.status = JobStatus.EXTRACTING_FRAMES
         job.progress = 0.1
@@ -92,7 +100,9 @@ async def process_job(job: Job) -> Job:
         frames_dir = settings.FRAMES_DIR / job.job_id
         
         logger.info(f"Extracting frames from {video_path} at {preset_config.fps} FPS")
+        phase_t0 = time.perf_counter()
         frames_dir = await extract_frames(video_path, frames_dir, preset_config.fps)
+        _phase("extract_frames")
         
         job.status = JobStatus.TRAINING
         job.progress = 0.3
@@ -111,6 +121,7 @@ async def process_job(job: Job) -> Job:
             init_ratio=preset_config.init_frames_ratio,
             convert_prune_ratio=preset_config.convert_3dgs_prune_ratio,
         )
+        _phase("train_longsplat")
         
         if not training_success:
             raise Exception("LongSplat training failed. Check logs for details.")
@@ -122,6 +133,7 @@ async def process_job(job: Job) -> Job:
         # Step 3: Export to PLY (LongSplat already generates PLY, just copy it)
         logger.info(f"Exporting model to PLY for job {job.job_id}")
         ply_path = await export_to_ply(longsplat_output_dir, job.job_id)
+        _phase("export_to_ply")
         
         if not ply_path:
             raise Exception("Failed to export PLY file")
@@ -141,23 +153,30 @@ async def process_job(job: Job) -> Job:
                 logger.info(f"Compressed model saved to {compressed_path}")
             except Exception as e:
                 logger.warning(f"Compression failed (optional): {e}")
+        _phase("compress_gzip")
         
-        # Step 5: Optionally export to OBJ (experimental)
+        # Step 5: Optionally export to OBJ (experimental; slow on dense PLYs)
         job.progress = 0.96
         await job_manager.update_job(job)
 
-        try:
-            obj_path = await export_to_obj(ply_path, longsplat_output_dir / f"{job.job_id}.obj")
-            job.model_url_obj = f"/static/models/{job.job_id}/{job.job_id}.obj"
-            logger.info(f"Exported OBJ to {obj_path}")
-        except Exception as e:
-            logger.warning(f"OBJ export failed (optional): {e}")
+        job.model_url_obj = None
+        if settings.EXPORT_OBJ:
+            try:
+                obj_path = await export_to_obj(ply_path, longsplat_output_dir / f"{job.job_id}.obj")
+                job.model_url_obj = f"/static/models/{job.job_id}/{job.job_id}.obj"
+                logger.info(f"Exported OBJ to {obj_path}")
+            except Exception as e:
+                logger.warning(f"OBJ export failed (optional): {e}")
+        else:
+            logger.info("Skipping OBJ export (EXPORT_OBJ=false); set EXPORT_OBJ=true to enable.")
+        _phase("export_obj")
 
         # Extract PLY metadata
         job.progress = 0.98
         await job_manager.update_job(job)
         
         metadata = _extract_ply_metadata(ply_path)
+        _phase("ply_metadata")
         if metadata:
             job.model_metadata = metadata
             logger.info(f"Model metadata: {metadata.point_count} points, {metadata.file_size} bytes, colors={metadata.has_colors}")
@@ -170,7 +189,9 @@ async def process_job(job: Job) -> Job:
         job.model_url = f"/api/jobs/{job.job_id}/model"
         job.processing_time_seconds = round(time.time() - start_time, 1)
         await job_manager.update_job(job)
-        
+
+        parts = ", ".join(f"{k}={v:.1f}s" for k, v in sorted(phase_times.items(), key=lambda x: -x[1]))
+        logger.info(f"Job {job.job_id} phase timings: {parts} (total {job.processing_time_seconds}s)")
         logger.info(f"Job {job.job_id} completed successfully in {job.processing_time_seconds}s")
         return job
         

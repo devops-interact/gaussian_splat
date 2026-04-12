@@ -29,8 +29,12 @@ def compress_ply_gzip(input_path: Path, output_path: Optional[Path] = None) -> P
     try:
         original_size = input_path.stat().st_size
         
+        from core.config import get_settings
+        level = get_settings().GZIP_COMPRESS_LEVEL
+        level = max(1, min(9, int(level)))
+
         with open(input_path, 'rb') as f_in:
-            with gzip.open(output_path, 'wb', compresslevel=6) as f_out:
+            with gzip.open(output_path, 'wb', compresslevel=level) as f_out:
                 shutil.copyfileobj(f_in, f_out)
         
         compressed_size = output_path.stat().st_size

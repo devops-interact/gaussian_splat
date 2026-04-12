@@ -33,6 +33,7 @@ async def extract_frames(
     cmd = [
         "ffmpeg",
         "-y",  # Overwrite without asking
+        "-threads", "0",  # use all cores for decode/scale where supported
         "-i", str(video_path),
         "-vf", f"fps={fps},scale='min(1920,iw)':-2",
         str(frame_pattern)
