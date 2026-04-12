@@ -31,8 +31,8 @@ const config: Config = {
                     elevated: '#000000',
                 },
                 border: {
-                    primary: 'rgba(255, 255, 255, 0.08)',
-                    secondary: 'rgba(255, 255, 255, 0.04)',
+                    primary: 'rgba(255, 255, 255, 0.075)',
+                    secondary: 'rgba(255, 255, 255, 0.05)',
                     accent: '#efe752',
                 },
                 secondary: {
@@ -64,8 +64,8 @@ const config: Config = {
                 'app-card': '#000000',
             },
             borderColor: {
-                'app-primary': 'rgba(255, 255, 255, 0.08)',
-                'app-secondary': 'rgba(255, 255, 255, 0.04)',
+                'app-primary': 'rgba(255, 255, 255, 0.075)',
+                'app-secondary': 'rgba(255, 255, 255, 0.05)',
                 'app-accent': '#efe752',
             },
             animation: {

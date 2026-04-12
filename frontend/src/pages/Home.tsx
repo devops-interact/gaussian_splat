@@ -6,6 +6,7 @@ import JobStatus from '@/components/JobStatus';
 import Viewer3D from '@/components/Viewer3D';
 import TechnicalDetails from '@/components/TechnicalDetails';
 import type { ModelMetadata } from '@/components/Viewer3D';
+import type { ModelMetadataResponse } from '@/types/job';
 import { Card, CardContent } from '@/components/ui/card';
 import { Box, Download, ChevronDown, FileBox, FileArchive, FileCode } from 'lucide-react';
 import { downloadModel } from '@/api/jobs';
@@ -16,6 +17,7 @@ export default function Home() {
   const [modelUrl, setModelUrl] = useState<string | null>(null);
   const [objUrl, setObjUrl] = useState<string | null>(null);
   const [modelMetadata, setModelMetadata] = useState<ModelMetadata | null>(null);
+  const [prefetchedJobModelMetadata, setPrefetchedJobModelMetadata] = useState<ModelMetadataResponse | null>(null);
   const [qualityPreset] = useState<string>('balanced');
   const [elapsedTime] = useState<string>('--');
   const [downloading, setDownloading] = useState(false);
@@ -39,11 +41,13 @@ export default function Home() {
     setModelUrl(null);
     setObjUrl(null);
     setModelMetadata(null);
+    setPrefetchedJobModelMetadata(null);
   };
 
-  const handleProcessingComplete = (url: string, objUrlResp?: string) => {
+  const handleProcessingComplete = (url: string, objUrlResp?: string, jobMeta?: ModelMetadataResponse) => {
     setModelUrl(url);
     setObjUrl(objUrlResp ?? null);
+    setPrefetchedJobModelMetadata(jobMeta ?? null);
   };
 
   const handleModelMetadata = useCallback((meta: ModelMetadata) => {
@@ -103,7 +107,7 @@ export default function Home() {
             <button
               onClick={() => setDownloadOpen(!downloadOpen)}
               disabled={downloading}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-[#efe752]/[0.1] text-[#efe752] border border-[#efe752]/20 hover:bg-[#efe752]/[0.18] hover:border-[#efe752]/30 transition-all duration-200 text-sm font-mono font-medium disabled:opacity-50"
+              className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-[#efe752]/[0.1] text-[#efe752] border border-[#efe752]/25 hover:bg-[#efe752]/[0.18] hover:border-[#efe752]/38 transition-all duration-200 text-sm font-mono font-medium disabled:opacity-50"
             >
               <Download className="w-4 h-4" />
               <span className="hidden sm:inline">Export</span>
@@ -111,7 +115,7 @@ export default function Home() {
             </button>
 
             {downloadOpen && (
-              <div className="absolute right-0 top-full mt-2 w-56 rounded-xl bg-black border border-white/[0.08] shadow-2xl shadow-black/50 backdrop-blur-xl z-50 overflow-hidden">
+              <div className="absolute right-0 top-full mt-2 w-56 rounded-xl bg-black border border-white/[0.10] shadow-2xl shadow-black/50 backdrop-blur-xl z-50 overflow-hidden">
                 <div className="p-1.5">
                   <button
                     onClick={() => handleDownload(false)}
@@ -159,13 +163,17 @@ export default function Home() {
         {/* ── 3D Viewer (2/3 width) ─────────────────────────────────────── */}
         <div className="w-full lg:w-2/3 flex-shrink-0">
           {modelUrl ? (
-            <div className="rounded-xl overflow-hidden border border-[#efe752]/[0.08] bg-black h-[400px] sm:h-[520px] lg:h-[calc(100vh-160px)] shadow-2xl shadow-[#efe752]/[0.03]">
-              <Viewer3D modelUrl={modelUrl} onModelMetadata={handleModelMetadata} />
+            <div className="rounded-xl overflow-hidden border border-[#efe752]/[0.10] bg-black h-[400px] sm:h-[520px] lg:h-[calc(100vh-160px)] shadow-2xl shadow-[#efe752]/[0.03]">
+              <Viewer3D
+                modelUrl={modelUrl}
+                prefetchedJobModelMetadata={prefetchedJobModelMetadata}
+                onModelMetadata={handleModelMetadata}
+              />
             </div>
           ) : (
-            <Card className="h-[300px] sm:h-[400px] lg:h-[calc(100vh-160px)] flex items-center justify-center border-dashed border-2 border-white/[0.04] bg-black">
+            <Card className="h-[300px] sm:h-[400px] lg:h-[calc(100vh-160px)] flex items-center justify-center border-dashed border-2 border-white/[0.05] bg-black">
               <CardContent className="text-center text-gray-600">
-                <div className="w-16 h-16 rounded-2xl bg-black/50 flex items-center justify-center mx-auto mb-4 border border-white/[0.06]">
+                <div className="w-16 h-16 rounded-2xl bg-black/50 flex items-center justify-center mx-auto mb-4 border border-white/[0.08]">
                   <Box className="w-8 h-8 text-gray-700" />
                 </div>
                 <h3 className="text-base font-medium text-gray-500 mb-1 font-mono">3D Viewer</h3>
@@ -180,10 +188,7 @@ export default function Home() {
         {/* ── Sidebar (1/3 width): Upload + Status + Metadata ──────────── */}
         <div className="w-full lg:w-1/3 flex flex-col gap-4 lg:max-h-[calc(100vh-160px)] lg:overflow-y-auto scrollbar-thin">
           {/* Upload Panel */}
-          <VideoUpload
-            onUploadSuccess={handleUploadSuccess}
-            disabled={!!jobId && modelUrl === null}
-          />
+          <VideoUpload onUploadSuccess={handleUploadSuccess} jobStarted={!!jobId} />
 
           {/* Combined Status + Metadata Panel */}
           <Card className="w-full">
@@ -202,7 +207,7 @@ export default function Home() {
             )}
 
             {/* Divider */}
-            <div className="border-t border-white/[0.04] mx-4" />
+            <div className="border-t border-white/[0.05] mx-4" />
 
             {/* Metadata Section */}
             <TechnicalDetails

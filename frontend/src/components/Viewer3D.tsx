@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
 import { Viewer, SceneRevealMode, LogLevel, PlyLoader, KSplatLoader } from '@mkkellogg/gaussian-splats-3d';
 import { getApiBaseUrl } from '@/lib/apiBase';
+import type { ModelMetadataResponse } from '@/types/job';
 import {
   buildCenterGridAcceleration,
   buildSplatCenterWorldCache,
@@ -30,6 +31,8 @@ import {
 
 interface Viewer3DProps {
   modelUrl: string | null;
+  /** From job status API when the job completes — skips full PLY vertex parse for bbox/metadata. */
+  prefetchedJobModelMetadata?: ModelMetadataResponse | null;
   onModelMetadata?: (meta: ModelMetadata) => void;
 }
 
@@ -60,6 +63,22 @@ interface CalibrationState {
 
 /** Use progressive PLY loading in GaussianSplats3D when splat count is high (trades peak perf for time-to-first-frame). */
 const PROGRESSIVE_VERTEX_THRESHOLD = 50_000;
+
+function modelMetadataFromJobResponse(s: ModelMetadataResponse, fileSize: number): ModelMetadata {
+  const bbox = s.bounding_box ?? {
+    min: [0, 0, 0] as [number, number, number],
+    max: [1, 1, 1] as [number, number, number],
+  };
+  return {
+    pointCount: s.point_count ?? 0,
+    fileSize,
+    boundingBox: bbox,
+    hasColors: s.has_colors ?? false,
+    hasOpacity: s.has_opacity ?? false,
+    properties: s.properties ?? [],
+    format: s.format ?? 'gaussian_splat',
+  };
+}
 
 function removeMeasurePreviewFromScene(scene: THREE.Scene) {
   const toRemove: THREE.Object3D[] = [];
@@ -435,7 +454,11 @@ function logPLYScaleOpacityDiag(buffer: ArrayBuffer) {
 
 // ── Main Viewer Component (standalone Viewer — no R3F) ──────────────────────
 
-export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
+export default function Viewer3D({
+  modelUrl,
+  prefetchedJobModelMetadata = null,
+  onModelMetadata,
+}: Viewer3DProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
 
@@ -521,13 +544,50 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
           throw new Error('Response does not look like a PLY file (expected ASCII header "ply").');
         }
 
-        // 2. Parse metadata + positions
-        const meta = parsePLYForMeta(buffer);
-        if (meta.vertexCount === 0) throw new Error('No visible points in PLY');
-        console.log(`[GS3D] PLY parsed: ${meta.vertexCount}/${meta.totalVertices} verts, center=[${meta.center.map(v => v.toFixed(2))}]`);
-        logPLYScaleOpacityDiag(buffer);
+        // 2. Metadata: prefer API job payload (skips full PLY vertex scan); else parse PLY
+        const prefetched = prefetchedJobModelMetadata;
+        const canUseServerMeta =
+          !!prefetched &&
+          typeof prefetched.point_count === 'number' &&
+          prefetched.point_count > 0 &&
+          !!prefetched.bounding_box?.min &&
+          !!prefetched.bounding_box?.max;
 
-        const fRestProps = meta.properties.filter((p) => /^f_rest_\d+$/.test(p));
+        let modelMeta: ModelMetadata;
+        let bbMin: [number, number, number];
+        let bbMax: [number, number, number];
+        let vertexCountForProgress: number;
+
+        if (canUseServerMeta) {
+          modelMeta = modelMetadataFromJobResponse(prefetched!, buffer.byteLength);
+          bbMin = modelMeta.boundingBox.min;
+          bbMax = modelMeta.boundingBox.max;
+          vertexCountForProgress = modelMeta.pointCount;
+          console.log(`[GS3D] Using server job metadata: ${vertexCountForProgress} verts (skipped client PLY parse)`);
+        } else {
+          const meta = parsePLYForMeta(buffer);
+          if (meta.vertexCount === 0) throw new Error('No visible points in PLY');
+          console.log(
+            `[GS3D] PLY parsed: ${meta.vertexCount}/${meta.totalVertices} verts, center=[${meta.center.map((v) => v.toFixed(2))}]`,
+          );
+          if (import.meta.env.DEV) {
+            logPLYScaleOpacityDiag(buffer);
+          }
+          modelMeta = {
+            pointCount: meta.vertexCount,
+            fileSize: buffer.byteLength,
+            boundingBox: meta.boundingBox,
+            hasColors: meta.hasColors,
+            hasOpacity: meta.hasOpacity,
+            properties: meta.properties,
+            format: 'gaussian_splat',
+          };
+          bbMin = meta.boundingBox.min;
+          bbMax = meta.boundingBox.max;
+          vertexCountForProgress = meta.vertexCount;
+        }
+
+        const fRestProps = modelMeta.properties.filter((p) => /^f_rest_\d+$/.test(p));
         if (fRestProps.length > 0 && fRestProps.length % 3 !== 0) {
           console.warn(
             '[GS3D] PLY has',
@@ -536,15 +596,6 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
           );
         }
 
-        const modelMeta: ModelMetadata = {
-          pointCount: meta.vertexCount,
-          fileSize: buffer.byteLength,
-          boundingBox: meta.boundingBox,
-          hasColors: meta.hasColors,
-          hasOpacity: meta.hasOpacity,
-          properties: meta.properties,
-          format: 'gaussian_splat',
-        };
         metadataRef.current = modelMeta;
         onMetadataRef.current?.(modelMeta);
 
@@ -562,8 +613,6 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         unhandledRejectionHandler = onUnhandledRejection;
 
         // Auto-position camera based on bounding box diagonal
-        const bbMin = meta.boundingBox.min;
-        const bbMax = meta.boundingBox.max;
         const diagonal = Math.sqrt(
           (bbMax[0] - bbMin[0]) ** 2 +
           (bbMax[1] - bbMin[1]) ** 2 +
@@ -584,10 +633,12 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
           );
         }
 
-        const useProgressive = meta.vertexCount >= PROGRESSIVE_VERTEX_THRESHOLD;
+        const useProgressive = vertexCountForProgress >= PROGRESSIVE_VERTEX_THRESHOLD;
         const sceneRevealMode = useProgressive ? SceneRevealMode.Default : SceneRevealMode.Instant;
         if (useProgressive) {
-          console.log(`[GS3D] progressiveLoad=true (${meta.vertexCount} >= ${PROGRESSIVE_VERTEX_THRESHOLD} verts)`);
+          console.log(
+            `[GS3D] progressiveLoad=true (${vertexCountForProgress} >= ${PROGRESSIVE_VERTEX_THRESHOLD} verts)`,
+          );
         }
 
         // 5. Create standalone Viewer (let library manage its own THREE.Scene)
@@ -603,7 +654,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
           sceneRevealMode,
           antialiased: true,
           freeIntermediateSplatData: false,
-          logLevel: LogLevel.Debug,
+          logLevel: LogLevel.Info,
           sphericalHarmonicsDegree: 2,
           gpuAcceleratedSort,
           sharedMemoryForWorkers,
@@ -623,16 +674,21 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         (axesHelper.material as THREE.Material).depthTest = false;
         libScene.add(axesHelper);
 
-        // 7. Add the splat scene (pass direct URL — the library fetches it internally)
-        // SceneFormat.Ply = 2; orientation is a valid runtime option but missing from TS types
-        console.log('[GS3D] Adding splat scene from:', fullUrl);
-        await viewer.addSplatScene(fullUrl, {
-          splatAlphaRemovalThreshold: loadMinAlpha,
-          showLoadingUI: false,
-          progressiveLoad: useProgressive,
-          format: 2,
-          orientation,
-        } as Record<string, unknown>);
+        // 7. Add splat scene from a blob URL so the library does not re-fetch the same PLY over the network
+        const plyBlob = new Blob([buffer], { type: 'application/octet-stream' });
+        const blobUrl = URL.createObjectURL(plyBlob);
+        try {
+          console.log('[GS3D] Adding splat scene from one-shot blob URL (single fetch)');
+          await viewer.addSplatScene(blobUrl, {
+            splatAlphaRemovalThreshold: loadMinAlpha,
+            showLoadingUI: false,
+            progressiveLoad: useProgressive,
+            format: 2,
+            orientation,
+          } as Record<string, unknown>);
+        } finally {
+          URL.revokeObjectURL(blobUrl);
+        }
         if (disposed) return;
 
         // 8. Start rendering
@@ -643,22 +699,37 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         console.log('[GS3D] splatMesh.visible:', viewer.splatMesh?.visible);
         console.log('[GS3D] renderer context:', (viewer as any).renderer?.getContext()?.constructor?.name);
 
-        // Diagnostic logging after first sort completes (~3s)
-        setTimeout(() => {
-          if (disposed) return;
-          const mesh = viewer.splatMesh as any;
-          const cam = (viewer as any).camera as THREE.PerspectiveCamera | undefined;
-          console.log('[GS3D] Post-sort check: instanceCount=',
-                      mesh?.geometry?.instanceCount,
-                      'splatRenderReady=', (viewer as any).splatRenderReady);
-          if (cam) {
-            console.log('[GS3D] Camera pos=', cam.position.toArray().map((v: number) => v.toFixed(2)),
-                        'fov=', cam.fov, 'near=', cam.near, 'far=', cam.far);
-          }
-          if (mesh?.geometry?.instanceCount === 0) {
-            console.warn('[GS3D] instanceCount is 0 — splats loaded but none rendered. Check console for library errors.');
-          }
-        }, 3000);
+        // Diagnostic logging after first sort completes (~3s) — dev only
+        if (import.meta.env.DEV) {
+          setTimeout(() => {
+            if (disposed) return;
+            const mesh = viewer.splatMesh as any;
+            const cam = (viewer as any).camera as THREE.PerspectiveCamera | undefined;
+            console.log(
+              '[GS3D] Post-sort check: instanceCount=',
+              mesh?.geometry?.instanceCount,
+              'splatRenderReady=',
+              (viewer as any).splatRenderReady,
+            );
+            if (cam) {
+              console.log(
+                '[GS3D] Camera pos=',
+                cam.position.toArray().map((v: number) => v.toFixed(2)),
+                'fov=',
+                cam.fov,
+                'near=',
+                cam.near,
+                'far=',
+                cam.far,
+              );
+            }
+            if (mesh?.geometry?.instanceCount === 0) {
+              console.warn(
+                '[GS3D] instanceCount is 0 — splats loaded but none rendered. Check console for library errors.',
+              );
+            }
+          }, 3000);
+        }
 
         const splatMeshAny = viewer.splatMesh as unknown as {
           getSplatCount?: (includeSinceLastBuild?: boolean) => number;
@@ -762,7 +833,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modelUrl, loadMinAlpha]);
+  }, [modelUrl, loadMinAlpha, prefetchedJobModelMetadata]);
 
   useEffect(() => {
     if (loading) {
@@ -1307,7 +1378,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       {loading && !error && (
         <div className="absolute inset-0 flex items-center justify-center z-20 bg-black/80">
           <div className="flex flex-col items-center gap-3">
-            <div className="w-8 h-8 border-2 border-[#efe752]/30 border-t-[#efe752] rounded-full animate-spin" />
+            <div className="w-8 h-8 border-2 border-[#efe752]/35 border-t-[#efe752] rounded-full animate-spin" />
             <span className="text-[#f5ec99]/70 font-mono text-xs">Loading Gaussian Splats...</span>
           </div>
         </div>
@@ -1315,7 +1386,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
 
       {/* Error overlay */}
       {error && (
-        <div className="absolute top-12 left-3 right-3 z-30 bg-red-900/80 backdrop-blur-md text-white text-xs p-3 rounded-lg border border-red-500/40 font-mono break-all">
+        <div className="absolute top-12 left-3 right-3 z-30 bg-red-900/80 backdrop-blur-md text-white text-xs p-3 rounded-lg border border-red-500/38 font-mono break-all">
           <span className="text-red-300 font-bold">Viewer Error: </span>{error}
         </div>
       )}
@@ -1323,12 +1394,12 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       {!loading && !error && (
         <div className="absolute bottom-4 right-3 z-20 flex flex-col items-end gap-2 max-w-[min(100vw-1.5rem,260px)]">
           {ksplatError && (
-            <div className="text-[10px] text-red-300 font-mono bg-black/85 border border-red-500/30 rounded px-2 py-1">
+            <div className="text-[10px] text-red-300 font-mono bg-black/85 border border-red-500/28 rounded px-2 py-1">
               {ksplatError}
             </div>
           )}
           {displayPanelOpen && (
-            <div className="w-full min-w-[200px] bg-black/95 backdrop-blur-md border border-white/[0.08] rounded-xl p-3 text-[10px] text-white/80 font-mono space-y-3">
+            <div className="w-full min-w-[200px] bg-black/95 backdrop-blur-md border border-white/[0.10] rounded-xl p-3 text-[10px] text-white/80 font-mono space-y-3">
               <div className="text-white/45 text-[9px] leading-snug">
                 {globalThis.crossOriginIsolated === true
                   ? 'crossOriginIsolated: GPU-accelerated sort + shared worker memory enabled.'
@@ -1361,8 +1432,8 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
                         'flex-1 py-1 rounded border text-[10px] transition-colors',
                         !liveViewerApis.sh && 'opacity-40 cursor-not-allowed',
                         shDisplayDegree === d
-                          ? 'border-[#efe752] bg-[#efe752]/15 text-[#efe752]'
-                          : 'border-white/10 text-white/50 hover:border-white/20',
+                          ? 'border-[#efe752]/75 bg-[#efe752]/15 text-[#efe752]'
+                          : 'border-white/[0.13] text-white/50 hover:border-white/[0.19]',
                       )}
                     >
                       {d}
@@ -1396,7 +1467,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
                 type="button"
                 disabled={ksplatBusy}
                 onClick={handleDownloadKsplat}
-                className="w-full flex items-center justify-center gap-1 py-1.5 rounded bg-[#efe752]/10 text-[#efe752] border border-[#efe752]/25 hover:bg-[#efe752]/20 disabled:opacity-40"
+                className="w-full flex items-center justify-center gap-1 py-1.5 rounded bg-[#efe752]/10 text-[#efe752] border border-[#efe752]/31 hover:bg-[#efe752]/20 disabled:opacity-40"
               >
                 <Download className="w-3 h-3" /> {ksplatBusy ? 'Working…' : 'Download .ksplat'}
               </button>
@@ -1419,7 +1490,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
             className={cn(
               'p-2 rounded-lg border font-mono text-xs flex items-center gap-2 shadow-lg',
               displayPanelOpen
-                ? 'bg-[#efe752]/15 border-[#efe752]/30 text-[#efe752]'
+                ? 'bg-[#efe752]/15 border-[#efe752]/35 text-[#efe752]'
                 : 'bg-black/75 border-white/[0.08] text-white/60 hover:text-white',
             )}
           >
@@ -1430,7 +1501,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
 
       {/* ── Top-Left: Mode Indicator ─────────────────────────────────────── */}
       <div className="absolute top-3 left-3 z-10">
-        <div className="bg-black/70 backdrop-blur-md text-white/80 text-xs px-3 py-1.5 rounded-lg border border-white/[0.06] font-mono flex items-center gap-2">
+        <div className="bg-black/70 backdrop-blur-md text-white/80 text-xs px-3 py-1.5 rounded-lg border border-white/[0.08] font-mono flex items-center gap-2">
           {mode === 'orbit' && <><MousePointer className="w-3 h-3" /> Orbit</>}
           {mode === 'walkthrough' && <><Footprints className="w-3 h-3" /> Walk-Through</>}
           {mode === 'measure' && <><Ruler className="w-3 h-3" /> Measure</>}
@@ -1443,7 +1514,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
         <ToolbarButton icon={<Footprints className="w-3.5 h-3.5" />} label="Walk" active={mode === 'walkthrough'} onClick={() => setMode('walkthrough')} />
         <ToolbarButton icon={<Ruler className="w-3.5 h-3.5" />} label="Measure" active={mode === 'measure'} onClick={() => setMode('measure')} />
 
-        <div className="border-t border-white/[0.06] my-1" />
+        <div className="border-t border-white/[0.08] my-1" />
 
         <ToolbarButton icon={<Camera className="w-3.5 h-3.5" />} label="Snapshot" onClick={handleSnapshot} />
         <ToolbarButton icon={<RotateCcw className="w-3.5 h-3.5" />} label="Reset" onClick={handleReset} />
@@ -1453,11 +1524,11 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       {/* ── Measure Sub-Controls ──────────────────────────────────────────── */}
       {mode === 'measure' && (
         <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10">
-          <div className="bg-black/80 backdrop-blur-md border border-white/[0.06] rounded-xl px-4 py-2.5 flex items-center gap-3 font-mono text-xs">
+          <div className="bg-black/80 backdrop-blur-md border border-white/[0.08] rounded-xl px-4 py-2.5 flex items-center gap-3 font-mono text-xs">
             <span className={`text-[10px] px-1.5 py-0.5 rounded ${measurePhase === 'calibrate' ? 'bg-[#f5ec99]/15 text-[#f5ec99]' : 'bg-[#efe752]/15 text-[#efe752]'}`}>
               {measurePhase === 'calibrate' ? 'STEP 1: Calibrate' : 'STEP 2: Measure'}
             </span>
-            <div className="border-l border-white/[0.06] h-5" />
+            <div className="border-l border-white/[0.08] h-5" />
 
             {measurePhase === 'calibrate' ? (
               <>
@@ -1472,7 +1543,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
                 </div>
                 {calibPoints.length === 2 && (
                   <>
-                    <div className="border-l border-white/[0.06] h-5" />
+                    <div className="border-l border-white/[0.08] h-5" />
                     <div className="flex items-center gap-1.5">
                       <span className="text-white/40">=</span>
                       <input
@@ -1481,13 +1552,13 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
                         min="0.01"
                         value={meterInput}
                         onChange={e => setMeterInput(e.target.value)}
-                        className="w-16 bg-black border border-white/[0.08] rounded px-1.5 py-0.5 text-white text-xs font-mono text-center focus:border-[#efe752]/40 focus:outline-none"
+                        className="w-16 bg-black border border-white/[0.10] rounded px-1.5 py-0.5 text-white text-xs font-mono text-center focus:border-[#efe752]/40 focus:outline-none"
                       />
                       <span className="text-white/40">m</span>
                     </div>
                     <button
                       onClick={handleConfirmCalibration}
-                      className="px-2 py-0.5 rounded bg-[#efe752]/15 text-[#efe752] border border-[#efe752]/20 hover:bg-[#efe752]/25 transition-colors"
+                      className="px-2 py-0.5 rounded bg-[#efe752]/15 text-[#efe752] border border-[#efe752]/25 hover:bg-[#efe752]/25 transition-colors"
                     >
                       Confirm
                     </button>
@@ -1507,7 +1578,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
                 </div>
                 {measuredDistance !== null && (
                   <>
-                    <div className="border-l border-white/[0.06] h-5" />
+                    <div className="border-l border-white/[0.08] h-5" />
                     <div className="flex items-center gap-2">
                       <Ruler className="w-3.5 h-3.5 text-[#efe752]" />
                       <span className="text-[#efe752] text-sm font-semibold">{measuredDistance.toFixed(3)}</span>
@@ -1517,13 +1588,13 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
                 )}
                 {measurePoints.length > 0 && (
                   <>
-                    <div className="border-l border-white/[0.06] h-5" />
+                    <div className="border-l border-white/[0.08] h-5" />
                     <button onClick={handleClearMeasure} className="flex items-center gap-1 text-white/40 hover:text-white transition-colors">
                       <Trash2 className="w-3 h-3" /> Clear
                     </button>
                   </>
                 )}
-                <div className="border-l border-white/[0.06] h-5" />
+                <div className="border-l border-white/[0.08] h-5" />
                 <button onClick={handleResetCalibration} className="flex items-center gap-1 text-[#f5ec99]/60 hover:text-[#f5ec99] transition-colors text-[10px]">
                   Recalibrate
                 </button>
@@ -1540,7 +1611,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
 
       {/* ── Bottom-Center: Context Help ───────────────────────────────────── */}
       <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-10">
-        <div className="bg-black/70 backdrop-blur-md text-white/50 text-[10px] px-3 py-1.5 rounded-lg border border-white/[0.06] font-mono">
+        <div className="bg-black/70 backdrop-blur-md text-white/50 text-[10px] px-3 py-1.5 rounded-lg border border-white/[0.08] font-mono">
           {mode === 'orbit' && 'Left: Rotate  |  Right: Pan  |  Scroll: Zoom'}
           {mode === 'walkthrough' && 'Click to lock  |  WASD: Move  |  Space/Shift: Up/Down  |  ESC: Unlock'}
           {mode === 'measure' && (measurePhase === 'calibrate' ? 'Click two reference points, then enter their real distance in meters' : 'Click two points to measure the calibrated distance')}
@@ -1550,7 +1621,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       {/* ── Help Panel ────────────────────────────────────────────────────── */}
       {showHelp && (
         <div className="absolute top-14 right-3 z-20 w-64">
-          <div className="bg-black/95 backdrop-blur-md border border-white/[0.06] rounded-xl p-4 text-xs text-white/70 space-y-3">
+          <div className="bg-black/95 backdrop-blur-md border border-white/[0.08] rounded-xl p-4 text-xs text-white/70 space-y-3">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-white text-sm">Viewer Controls</span>
               <button onClick={() => setShowHelp(false)} className="text-white/40 hover:text-white"><X className="w-3 h-3" /></button>
@@ -1577,8 +1648,8 @@ function ToolbarButton({ icon, label, active, onClick }: {
   icon: React.ReactNode; label: string; active?: boolean; onClick: () => void;
 }) {
   const color = active
-    ? 'bg-[#efe752]/15 text-[#efe752] border-[#efe752]/20'
-    : 'bg-black/70 text-white/50 border-white/[0.06] hover:text-white hover:bg-white/[0.06]';
+    ? 'bg-[#efe752]/15 text-[#efe752] border-[#efe752]/25'
+    : 'bg-black/70 text-white/50 border-white/[0.10] hover:text-white hover:bg-white/[0.06]';
   return (
     <button
       onClick={onClick}

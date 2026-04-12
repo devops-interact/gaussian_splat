@@ -23,7 +23,8 @@ const PRESETS = [
 
 interface VideoUploadProps {
   onUploadSuccess: (jobId: string, scanId?: number) => void;
-  disabled?: boolean;
+  /** After a job exists (processing or model ready), hide presets + upload UI; keep only video summary / messages. */
+  jobStarted?: boolean;
   projectId?: number;
   scanId?: number;
 }
@@ -38,7 +39,7 @@ interface UploadResult {
   };
 }
 
-export default function VideoUpload({ onUploadSuccess, disabled, projectId, scanId }: VideoUploadProps) {
+export default function VideoUpload({ onUploadSuccess, jobStarted = false, projectId, scanId }: VideoUploadProps) {
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -108,6 +109,50 @@ export default function VideoUpload({ onUploadSuccess, disabled, projectId, scan
     fileInputRef.current?.click();
   };
 
+  const videoSummary =
+    videoInfo && (
+      <div className="flex items-center p-3 rounded-lg bg-[#efe752]/[0.06] border border-[#efe752]/31 text-[#f5ec99] text-sm font-mono">
+        <FileVideo className="w-4 h-4 mr-2 shrink-0 text-[#efe752]/80" />
+        <span>
+          Video: {videoInfo.duration.toFixed(1)}s • {videoInfo.resolution} • {videoInfo.fps.toFixed(1)} fps
+        </span>
+      </div>
+    );
+
+  const warningsBlock =
+    warnings.length > 0 && (
+      <div className="p-3 rounded-lg bg-yellow-500/[0.06] border border-yellow-500/[0.15] text-yellow-400 text-sm">
+        <div className="flex items-center font-semibold mb-1">
+          <AlertTriangle className="w-4 h-4 mr-2" />
+          Warnings
+        </div>
+        <ul className="list-disc list-inside space-y-1 ml-5 opacity-90 text-xs">
+          {warnings.map((w, i) => (
+            <li key={i}>{w}</li>
+          ))}
+        </ul>
+      </div>
+    );
+
+  const errorBlock =
+    error && (
+      <div className="p-3 rounded-lg bg-red-500/[0.06] border border-red-500/15 text-red-400 text-sm flex items-center">
+        <AlertTriangle className="w-4 h-4 mr-2 shrink-0" />
+        {error}
+      </div>
+    );
+
+  if (jobStarted) {
+    if (!videoInfo && warnings.length === 0 && !error) return null;
+    return (
+      <div className="w-full space-y-3">
+        {videoSummary}
+        {warningsBlock}
+        {errorBlock}
+      </div>
+    );
+  }
+
   return (
     <Card className="w-full h-full">
       <CardHeader>
@@ -124,13 +169,13 @@ export default function VideoUpload({ onUploadSuccess, disabled, projectId, scan
               <button
                 key={preset.id}
                 onClick={() => setSelectedPreset(preset.id)}
-                disabled={disabled || uploading}
+                disabled={uploading}
                 className={cn(
-                  "flex flex-col items-start p-3 rounded-lg border text-left transition-all duration-200",
+                  'flex flex-col items-start p-3 rounded-lg border text-left transition-all duration-200',
                   selectedPreset === preset.id
-                    ? "border-[#efe752]/25 bg-[#efe752]/[0.06] text-[#efe752]"
-                    : "border-white/[0.06] bg-black/50 text-gray-400 hover:border-[#efe752]/[0.12] hover:bg-white/[0.06]",
-                  (disabled || uploading) && "opacity-50 cursor-not-allowed"
+                    ? 'border-[#efe752]/31 bg-[#efe752]/[0.06] text-[#efe752]'
+                    : 'border-white/[0.10] bg-black/50 text-gray-400 hover:border-[#efe752]/[0.15] hover:bg-white/[0.06]',
+                  uploading && 'opacity-50 cursor-not-allowed'
                 )}
               >
                 <div className="flex items-center justify-between w-full mb-1">
@@ -149,25 +194,18 @@ export default function VideoUpload({ onUploadSuccess, disabled, projectId, scan
         {/* Upload Area */}
         <div
           className={cn(
-            "border-2 border-dashed rounded-xl p-5 flex flex-col items-center justify-center text-center transition-all",
-            "border-white/[0.06] bg-black/40 hover:bg-white/[0.08] hover:border-[#efe752]/[0.15]",
-            (disabled || uploading) && "opacity-50 pointer-events-none"
+            'border-2 border-dashed rounded-xl p-5 flex flex-col items-center justify-center text-center transition-all',
+            'border-white/[0.10] bg-black/40 hover:bg-white/[0.08] hover:border-[#efe752]/[0.19]',
+            uploading && 'opacity-50 pointer-events-none'
           )}
         >
-          <div className="w-10 h-10 rounded-full bg-black flex items-center justify-center mb-3 border border-white/[0.06]">
+          <div className="w-10 h-10 rounded-full bg-black flex items-center justify-center mb-3 border border-white/[0.08]">
             <Upload className="w-5 h-5 text-gray-400" />
           </div>
 
-          <p className="text-xs text-gray-400 mb-4">
-            MP4, MOV, AVI, WEBM — Max 500MB
-          </p>
+          <p className="text-xs text-gray-400 mb-4">MP4, MOV, AVI, WEBM — Max 500MB</p>
 
-          <Button
-            onClick={onUploadClick}
-            disabled={disabled || uploading}
-            loading={uploading}
-            className="w-full"
-          >
+          <Button onClick={onUploadClick} disabled={uploading} loading={uploading} className="w-full">
             {uploading ? 'Uploading...' : 'Select Video File'}
           </Button>
 
@@ -180,34 +218,9 @@ export default function VideoUpload({ onUploadSuccess, disabled, projectId, scan
           />
         </div>
 
-        {/* Status Messages */}
-        {videoInfo && (
-          <div className="flex items-center p-3 rounded-lg bg-[#f5ec99]/[0.06] border border-[#f5ec99]/[0.12] text-[#f5ec99] text-sm">
-            <FileVideo className="w-4 h-4 mr-2" />
-            <span>
-              Video: {videoInfo.duration.toFixed(1)}s • {videoInfo.resolution} • {videoInfo.fps.toFixed(1)} fps
-            </span>
-          </div>
-        )}
-
-        {warnings.length > 0 && (
-          <div className="p-3 rounded-lg bg-yellow-500/[0.06] border border-yellow-500/[0.12] text-yellow-400 text-sm">
-            <div className="flex items-center font-semibold mb-1">
-              <AlertTriangle className="w-4 h-4 mr-2" />
-              Warnings
-            </div>
-            <ul className="list-disc list-inside space-y-1 ml-5 opacity-90 text-xs">
-              {warnings.map((w, i) => <li key={i}>{w}</li>)}
-            </ul>
-          </div>
-        )}
-
-        {error && (
-          <div className="p-3 rounded-lg bg-red-500/[0.06] border border-red-500/[0.12] text-red-400 text-sm flex items-center">
-            <AlertTriangle className="w-4 h-4 mr-2" />
-            {error}
-          </div>
-        )}
+        {videoSummary}
+        {warningsBlock}
+        {errorBlock}
       </CardContent>
     </Card>
   );

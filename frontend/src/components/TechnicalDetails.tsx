@@ -72,17 +72,17 @@ export default function TechnicalDetails({ metadata, jobInfo, embedded }: Techni
           </CardTitle>
           {/* Status indicator */}
           {metadata ? (
-            <span className="flex items-center gap-1.5 text-[10px] font-mono text-[#efe752] bg-[#efe752]/[0.08] px-2 py-0.5 rounded border border-[#efe752]/[0.15]">
+            <span className="flex items-center gap-1.5 text-[10px] font-mono text-[#efe752] bg-[#efe752]/[0.08] px-2 py-0.5 rounded border border-[#efe752]/[0.19]">
               <CheckCircle className="w-3 h-3" />
               Ready
             </span>
           ) : isProcessing ? (
-            <span className="flex items-center gap-1.5 text-[10px] font-mono text-[#f5ec99] bg-[#f5ec99]/[0.08] px-2 py-0.5 rounded border border-[#f5ec99]/[0.15]">
+            <span className="flex items-center gap-1.5 text-[10px] font-mono text-[#f5ec99] bg-[#f5ec99]/[0.08] px-2 py-0.5 rounded border border-[#f5ec99]/[0.19]">
               <Loader2 className="w-3 h-3 animate-spin" />
               Processing
             </span>
           ) : (
-            <span className="flex items-center gap-1.5 text-[10px] font-mono text-gray-500 bg-white/[0.03] px-2 py-0.5 rounded border border-white/[0.06]">
+            <span className="flex items-center gap-1.5 text-[10px] font-mono text-gray-500 bg-white/[0.03] px-2 py-0.5 rounded border border-white/[0.08]">
               Idle
             </span>
           )}
@@ -91,7 +91,7 @@ export default function TechnicalDetails({ metadata, jobInfo, embedded }: Techni
 
       <CardContent className="space-y-0 pb-4">
         {details ? (
-          <div className="divide-y divide-white/[0.04]">
+          <div className="divide-y divide-white/[0.05]">
             <DetailRow icon={<HardDrive className="w-3.5 h-3.5" />} label="File Size" value={details.fileSize} />
             <DetailRow icon={<Clock className="w-3.5 h-3.5" />} label="Processing Time" value={jobInfo?.elapsedTime || '--'} />
             <DetailRow icon={<Layers className="w-3.5 h-3.5" />} label="Point Count" value={details.pointCount} />
