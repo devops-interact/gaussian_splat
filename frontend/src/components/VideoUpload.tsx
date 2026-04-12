@@ -129,7 +129,7 @@ export default function VideoUpload({ onUploadSuccess, disabled, projectId, scan
                   "flex flex-col items-start p-3 rounded-lg border text-left transition-all duration-200",
                   selectedPreset === preset.id
                     ? "border-[#efe752]/25 bg-[#efe752]/[0.06] text-[#efe752]"
-                    : "border-white/[0.06] bg-[#08080f]/50 text-gray-400 hover:border-[#efe752]/[0.12] hover:bg-[#121008]/50",
+                    : "border-white/[0.06] bg-black/50 text-gray-400 hover:border-[#efe752]/[0.12] hover:bg-white/[0.06]",
                   (disabled || uploading) && "opacity-50 cursor-not-allowed"
                 )}
               >
@@ -150,11 +150,11 @@ export default function VideoUpload({ onUploadSuccess, disabled, projectId, scan
         <div
           className={cn(
             "border-2 border-dashed rounded-xl p-5 flex flex-col items-center justify-center text-center transition-all",
-            "border-white/[0.06] bg-[#08080f]/30 hover:bg-[#121008]/40 hover:border-[#efe752]/[0.15]",
+            "border-white/[0.06] bg-black/40 hover:bg-white/[0.08] hover:border-[#efe752]/[0.15]",
             (disabled || uploading) && "opacity-50 pointer-events-none"
           )}
         >
-          <div className="w-10 h-10 rounded-full bg-[#121008] flex items-center justify-center mb-3 border border-white/[0.06]">
+          <div className="w-10 h-10 rounded-full bg-black flex items-center justify-center mb-3 border border-white/[0.06]">
             <Upload className="w-5 h-5 text-gray-400" />
           </div>
 

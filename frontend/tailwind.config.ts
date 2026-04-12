@@ -11,8 +11,7 @@ const config: Config = {
             colors: {
                 // Brand color scheme (dark + chartreuse primary)
                 // #000000  — base black
-                // #08080f  — elevated dark
-                // #121008  — card / warm-tinted dark
+                // Surfaces unified to #000000 (flat black UI)
                 // #efe752  — primary accent
                 // #f5ec99  — secondary soft yellow
                 brand: {
@@ -27,9 +26,9 @@ const config: Config = {
                 },
                 surface: {
                     primary: '#000000',
-                    secondary: '#08080f',
-                    tertiary: '#121008',
-                    elevated: '#1b1a0e',
+                    secondary: '#000000',
+                    tertiary: '#000000',
+                    elevated: '#000000',
                 },
                 border: {
                     primary: 'rgba(255, 255, 255, 0.08)',
@@ -59,10 +58,10 @@ const config: Config = {
             },
             backgroundColor: {
                 'app-primary': '#000000',
-                'app-secondary': '#08080f',
-                'app-tertiary': '#121008',
-                'app-elevated': '#1b1a0e',
-                'app-card': 'rgba(18, 16, 8, 0.6)',
+                'app-secondary': '#000000',
+                'app-tertiary': '#000000',
+                'app-elevated': '#000000',
+                'app-card': '#000000',
             },
             borderColor: {
                 'app-primary': 'rgba(255, 255, 255, 0.08)',

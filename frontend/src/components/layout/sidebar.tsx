@@ -17,7 +17,7 @@ export function Sidebar({ activeItem = 'projects', onNavigate, userEmail = '', o
   ];
 
   return (
-    <div className="w-64 bg-[#08080f] flex flex-col h-full border-r border-white/[0.04] flex-shrink-0">
+    <div className="w-64 bg-black flex flex-col h-full border-r border-white/[0.04] flex-shrink-0">
       <div className="p-6 flex flex-col h-full">
         <motion.div
           initial={{ opacity: 0, x: -20 }}
@@ -25,7 +25,7 @@ export function Sidebar({ activeItem = 'projects', onNavigate, userEmail = '', o
           transition={{ duration: 0.3 }}
         >
           <h2 className="text-2xl font-mono font-bold text-[#efe752] mb-8 tracking-tighter">
-            3D Scanner
+            METROA
           </h2>
         </motion.div>
 

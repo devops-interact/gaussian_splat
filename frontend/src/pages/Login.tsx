@@ -40,9 +40,9 @@ export default function Login() {
         animate={{ opacity: 1, y: 0 }}
         className="w-full max-w-md"
       >
-        <div className="rounded-2xl border border-white/[0.08] bg-[#08080f] p-8 shadow-2xl">
+        <div className="rounded-2xl border border-white/[0.08] bg-black p-8 shadow-2xl">
           <h1 className="text-2xl font-mono font-bold text-[#efe752] mb-2 tracking-tighter">
-            3D Scanner
+            METROA
           </h1>
           <p className="text-gray-500 text-sm mb-6">Sign in to access your projects</p>
 
@@ -54,7 +54,7 @@ export default function Login() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
-                className="w-full px-4 py-3 rounded-lg bg-[#0a0a0a] border border-white/[0.08] text-white placeholder-gray-600 focus:border-[#efe752]/50 focus:ring-1 focus:ring-[#efe752]/30 outline-none transition-all font-mono text-sm"
+                className="w-full px-4 py-3 rounded-lg bg-black border border-white/[0.08] text-white placeholder-gray-600 focus:border-[#efe752]/50 focus:ring-1 focus:ring-[#efe752]/30 outline-none transition-all font-mono text-sm"
                 required
               />
             </div>
@@ -65,7 +65,7 @@ export default function Login() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
-                className="w-full px-4 py-3 rounded-lg bg-[#0a0a0a] border border-white/[0.08] text-white placeholder-gray-600 focus:border-[#efe752]/50 focus:ring-1 focus:ring-[#efe752]/30 outline-none transition-all font-mono text-sm"
+                className="w-full px-4 py-3 rounded-lg bg-black border border-white/[0.08] text-white placeholder-gray-600 focus:border-[#efe752]/50 focus:ring-1 focus:ring-[#efe752]/30 outline-none transition-all font-mono text-sm"
                 required
               />
             </div>

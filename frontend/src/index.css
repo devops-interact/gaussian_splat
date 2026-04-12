@@ -59,7 +59,7 @@
   input,
   textarea,
   select {
-    background-color: #121008;
+    background-color: #000000;
     color: #e5e5e5;
     border-color: rgba(255, 255, 255, 0.08);
   }
@@ -78,7 +78,7 @@
   /* Selection */
   ::selection {
     background: rgba(239, 231, 82, 0.28);
-    color: #0a0a0a;
+    color: #000000;
   }
 }
 

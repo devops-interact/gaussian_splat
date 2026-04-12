@@ -33,11 +33,11 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
         onLogout={handleLogout}
       />
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="sticky top-0 z-30 w-full border-b border-white/[0.04] bg-[#08080f]/80 backdrop-blur-md">
+        <header className="sticky top-0 z-30 w-full border-b border-white/[0.04] bg-black/80 backdrop-blur-md">
           <div className="max-w-[1600px] mx-auto px-6 h-14 flex items-center justify-between">
             <div className="flex items-center gap-3">
               <h1 className="text-lg font-mono font-bold text-[#efe752] tracking-tighter">
-                3D Scanner
+                METROA
               </h1>
               <span className="text-[10px] font-mono text-gray-600 border border-[#efe752]/[0.12] rounded px-1.5 py-0.5 text-[#efe752]/50">
                 v0.1

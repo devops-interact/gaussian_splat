@@ -111,12 +111,12 @@ export default function Home() {
             </button>
 
             {downloadOpen && (
-              <div className="absolute right-0 top-full mt-2 w-56 rounded-xl bg-[#0a0a0a] border border-white/[0.08] shadow-2xl shadow-black/50 backdrop-blur-xl z-50 overflow-hidden">
+              <div className="absolute right-0 top-full mt-2 w-56 rounded-xl bg-black border border-white/[0.08] shadow-2xl shadow-black/50 backdrop-blur-xl z-50 overflow-hidden">
                 <div className="p-1.5">
                   <button
                     onClick={() => handleDownload(false)}
                     disabled={downloading}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-mono text-white/70 hover:text-white hover:bg-[#121008] transition-colors group"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-mono text-white/70 hover:text-white hover:bg-white/[0.06] transition-colors group"
                   >
                     <FileBox className="w-4 h-4 text-[#efe752]/50 group-hover:text-[#efe752]" />
                     <div>
@@ -127,7 +127,7 @@ export default function Home() {
                   <button
                     onClick={() => handleDownload(true)}
                     disabled={downloading}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-mono text-white/70 hover:text-white hover:bg-[#121008] transition-colors group"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-mono text-white/70 hover:text-white hover:bg-white/[0.06] transition-colors group"
                   >
                     <FileArchive className="w-4 h-4 text-[#f5ec99]/50 group-hover:text-[#f5ec99]" />
                     <div>
@@ -138,7 +138,7 @@ export default function Home() {
                   {objUrl && (
                     <button
                       onClick={handleObjDownload}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-mono text-white/70 hover:text-white hover:bg-[#121008] transition-colors group"
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-mono text-white/70 hover:text-white hover:bg-white/[0.06] transition-colors group"
                     >
                       <FileCode className="w-4 h-4 text-amber-400/50 group-hover:text-amber-400" />
                       <div>
@@ -159,13 +159,13 @@ export default function Home() {
         {/* ── 3D Viewer (2/3 width) ─────────────────────────────────────── */}
         <div className="w-full lg:w-2/3 flex-shrink-0">
           {modelUrl ? (
-            <div className="rounded-xl overflow-hidden border border-[#efe752]/[0.08] bg-[#08080f] h-[400px] sm:h-[520px] lg:h-[calc(100vh-160px)] shadow-2xl shadow-[#efe752]/[0.03]">
+            <div className="rounded-xl overflow-hidden border border-[#efe752]/[0.08] bg-black h-[400px] sm:h-[520px] lg:h-[calc(100vh-160px)] shadow-2xl shadow-[#efe752]/[0.03]">
               <Viewer3D modelUrl={modelUrl} onModelMetadata={handleModelMetadata} />
             </div>
           ) : (
-            <Card className="h-[300px] sm:h-[400px] lg:h-[calc(100vh-160px)] flex items-center justify-center border-dashed border-2 border-white/[0.04] bg-[#08080f]">
+            <Card className="h-[300px] sm:h-[400px] lg:h-[calc(100vh-160px)] flex items-center justify-center border-dashed border-2 border-white/[0.04] bg-black">
               <CardContent className="text-center text-gray-600">
-                <div className="w-16 h-16 rounded-2xl bg-[#121008]/50 flex items-center justify-center mx-auto mb-4 border border-white/[0.06]">
+                <div className="w-16 h-16 rounded-2xl bg-black/50 flex items-center justify-center mx-auto mb-4 border border-white/[0.06]">
                   <Box className="w-8 h-8 text-gray-700" />
                 </div>
                 <h3 className="text-base font-medium text-gray-500 mb-1 font-mono">3D Viewer</h3>

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { JobStatus as JobStatusEnum, JobStatusResponse } from '../types/job';
 import { getJobStatus } from '../api/jobs';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Loader2, CheckCircle, AlertOctagon, Clock, Settings } from 'lucide-react';
+import { Loader2, CheckCircle, AlertOctagon, Settings } from 'lucide-react';
 
 interface JobStatusProps {
   jobId: string;
@@ -116,27 +116,24 @@ export default function JobStatus({ jobId, onComplete, embedded }: JobStatusProp
       <CardContent className="space-y-6">
         {/* Info Grid */}
         {(qualityPreset || isActive) && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-            <div className="p-3 rounded-lg bg-[#08080f] border border-white/[0.06]">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs">
+            <div className="p-3 rounded-lg bg-black border border-white/[0.06]">
               <span className="text-gray-500 block text-xs mb-1">Status</span>
-              <span className="font-medium text-white flex items-center">
+              <span className="text-xs font-medium text-white flex items-center">
                 {STATUS_LABELS[status]}
               </span>
             </div>
 
-            <div className="p-3 rounded-lg bg-[#08080f] border border-white/[0.06]">
+            <div className="p-3 rounded-lg bg-black border border-white/[0.06]">
               <span className="text-gray-500 block text-xs mb-1">Time Elapsed</span>
-              <span className="font-mono text-white flex items-center">
-                <Clock className="w-3 h-3 mr-2 text-[#efe752]/40" />
-                {elapsedTime}
-              </span>
+              <span className="text-xs font-mono text-white">{elapsedTime}</span>
             </div>
 
             {qualityPreset && (
-              <div className="p-3 rounded-lg bg-[#08080f] border border-white/[0.06]">
+              <div className="p-3 rounded-lg bg-black border border-white/[0.06]">
                 <span className="text-gray-500 block text-xs mb-1">Quality</span>
-                <span className="font-medium text-white flex items-center">
-                  <Settings className="w-2.5 h-2.5 mr-2 text-[#efe752]/40" />
+                <span className="text-xs font-medium text-white flex items-center">
+                  <Settings className="w-3 h-3 mr-2 text-[#efe752]/40 shrink-0" />
                   {PRESET_LABELS[qualityPreset] || qualityPreset}
                 </span>
               </div>
@@ -151,7 +148,7 @@ export default function JobStatus({ jobId, onComplete, embedded }: JobStatusProp
               <span>Progress</span>
               <span className="text-[#efe752]/70">{Math.round(progress * 100)}%</span>
             </div>
-            <div className="h-2 w-full bg-[#08080f] rounded-full overflow-hidden border border-white/[0.04]">
+            <div className="h-2 w-full bg-black rounded-full overflow-hidden border border-white/[0.04]">
               <div
                 className="h-full bg-gradient-to-r from-[#efe752]/60 to-[#efe752] transition-all duration-500 ease-out rounded-full"
                 style={{ width: `${progress * 100}%` }}

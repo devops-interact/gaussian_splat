@@ -101,7 +101,7 @@ export default function ProjectDetail() {
       </div>
 
       {scans.length === 0 ? (
-        <div className="rounded-xl border-2 border-dashed border-white/[0.06] bg-[#08080f]/50 p-12 text-center">
+        <div className="rounded-xl border-2 border-dashed border-white/[0.06] bg-black/50 p-12 text-center">
           <ScanIcon className="w-12 h-12 text-gray-600 mx-auto mb-4" />
           <p className="text-gray-500 font-mono mb-2">No scans yet</p>
           <p className="text-gray-600 text-sm mb-4">Create a scan to upload a video and start 3D reconstruction</p>
@@ -131,7 +131,7 @@ export default function ProjectDetail() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
                 transition={{ delay: i * 0.05 }}
-                className="relative rounded-xl border border-white/[0.08] bg-[#08080f] p-4 hover:border-[#efe752]/[0.15] transition-colors group"
+                className="relative rounded-xl border border-white/[0.08] bg-black p-4 hover:border-[#efe752]/[0.15] transition-colors group"
               >
                 <button
                   onClick={() => navigate(`/projects/${projectId}/scans/${s.id}`)}
@@ -155,7 +155,7 @@ export default function ProjectDetail() {
                   <p className="text-gray-600 text-xs mt-1">{formatDate(s.created_at)}</p>
                 </button>
                 {menuOpen === s.id && (
-                  <div className="absolute right-2 top-12 z-10 rounded-lg bg-[#0a0a0a] border border-white/[0.08] shadow-xl py-1 min-w-[120px]">
+                  <div className="absolute right-2 top-12 z-10 rounded-lg bg-black border border-white/[0.08] shadow-xl py-1 min-w-[120px]">
                     <button
                       onClick={() => handleDeleteScan(s.id)}
                       className="w-full flex items-center gap-2 px-3 py-2 text-red-400 hover:bg-red-500/10 text-sm font-mono"

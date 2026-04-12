@@ -473,6 +473,12 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
   const [displayPanelOpen, setDisplayPanelOpen] = useState(false);
   const [ksplatBusy, setKsplatBusy] = useState(false);
   const [ksplatError, setKsplatError] = useState<string | null>(null);
+  /** Live Display tuning: false when @mkkellogg/gaussian-splats-3d Viewer omits these methods (e.g. 0.4.7). */
+  const [liveViewerApis, setLiveViewerApis] = useState<{ sh: boolean; scale: boolean }>({
+    sh: false,
+    scale: false,
+  });
+  const liveTuningInfoLoggedRef = useRef(false);
 
   useEffect(() => {
     const id = window.setTimeout(() => setLoadMinAlpha(minAlpha), 450);
@@ -759,17 +765,40 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
   }, [modelUrl, loadMinAlpha]);
 
   useEffect(() => {
+    if (loading) {
+      setLiveViewerApis({ sh: false, scale: false });
+      return;
+    }
+    const v = viewerRef.current;
+    if (!v) return;
+    const sh = typeof (v as { setActiveSphericalHarmonicsDegrees?: (d: number) => void }).setActiveSphericalHarmonicsDegrees === 'function';
+    const scale = typeof (v as { setSplatScale?: (s?: number) => void }).setSplatScale === 'function';
+    setLiveViewerApis({ sh, scale });
+    if ((!sh || !scale) && !liveTuningInfoLoggedRef.current) {
+      liveTuningInfoLoggedRef.current = true;
+      const missing: string[] = [];
+      if (!sh) missing.push('setActiveSphericalHarmonicsDegrees');
+      if (!scale) missing.push('setSplatScale');
+      console.info(
+        `[GS3D] Viewer has no ${missing.join(' / ')} — Display live controls for those are disabled (fixed at Viewer init for this library build).`,
+      );
+    }
+  }, [loading, modelUrl]);
+
+  useEffect(() => {
     if (loading) return;
     const v = viewerRef.current;
     if (!v) return;
-    v.setActiveSphericalHarmonicsDegrees(shDisplayDegree);
+    const fn = (v as { setActiveSphericalHarmonicsDegrees?: (d: number) => void }).setActiveSphericalHarmonicsDegrees;
+    if (typeof fn === 'function') fn.call(v, shDisplayDegree);
   }, [shDisplayDegree, loading]);
 
   useEffect(() => {
     if (loading) return;
     const v = viewerRef.current;
     if (!v) return;
-    v.setSplatScale(splatScale);
+    const fn = (v as { setSplatScale?: (s?: number) => void }).setSplatScale;
+    if (typeof fn === 'function') fn.call(v, splatScale);
   }, [splatScale, loading]);
 
   // ── Walkthrough Mode ───────────────────────────────────────────────────
@@ -1200,7 +1229,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       }
 
       // 7. Small branding in top-right corner
-      const brand = '3D Scanner';
+      const brand = 'METROA';
       ctx.font = `bold ${Math.max(10, Math.round(10 * dpr))}px monospace`;
       ctx.fillStyle = 'rgba(239, 231, 82, 0.4)';
       const brandW = ctx.measureText(brand).width;
@@ -1270,13 +1299,13 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
   if (!modelUrl) return null;
 
   return (
-    <div className="w-full h-full relative group bg-[#08080f] rounded-xl overflow-hidden">
+    <div className="w-full h-full relative group bg-black rounded-xl overflow-hidden">
       {/* Viewer container — the Viewer class creates its own <canvas> inside */}
       <div ref={containerRef} className="w-full h-full" />
 
       {/* Loading overlay */}
       {loading && !error && (
-        <div className="absolute inset-0 flex items-center justify-center z-20 bg-[#08080f]/80">
+        <div className="absolute inset-0 flex items-center justify-center z-20 bg-black/80">
           <div className="flex flex-col items-center gap-3">
             <div className="w-8 h-8 border-2 border-[#efe752]/30 border-t-[#efe752] rounded-full animate-spin" />
             <span className="text-[#f5ec99]/70 font-mono text-xs">Loading Gaussian Splats...</span>
@@ -1299,7 +1328,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
             </div>
           )}
           {displayPanelOpen && (
-            <div className="w-full min-w-[200px] bg-[#08080f]/95 backdrop-blur-md border border-white/[0.08] rounded-xl p-3 text-[10px] text-white/80 font-mono space-y-3">
+            <div className="w-full min-w-[200px] bg-black/95 backdrop-blur-md border border-white/[0.08] rounded-xl p-3 text-[10px] text-white/80 font-mono space-y-3">
               <div className="text-white/45 text-[9px] leading-snug">
                 {globalThis.crossOriginIsolated === true
                   ? 'crossOriginIsolated: GPU-accelerated sort + shared worker memory enabled.'
@@ -1318,15 +1347,19 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
                 <span className="text-white/40">{minAlpha}</span>
               </label>
               <div className="space-y-1">
-                <span className="text-[#f5ec99]">SH level (live)</span>
+                <span className={cn('text-[#f5ec99]', !liveViewerApis.sh && 'text-white/40')}>
+                  SH level (live)
+                </span>
                 <div className="flex gap-1">
                   {([0, 1, 2] as const).map((d) => (
                     <button
                       key={d}
                       type="button"
+                      disabled={!liveViewerApis.sh}
                       onClick={() => setShDisplayDegree(d)}
                       className={cn(
                         'flex-1 py-1 rounded border text-[10px] transition-colors',
+                        !liveViewerApis.sh && 'opacity-40 cursor-not-allowed',
                         shDisplayDegree === d
                           ? 'border-[#efe752] bg-[#efe752]/15 text-[#efe752]'
                           : 'border-white/10 text-white/50 hover:border-white/20',
@@ -1336,19 +1369,28 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
                     </button>
                   ))}
                 </div>
+                {!liveViewerApis.sh && (
+                  <p className="text-[9px] text-white/35">SH fixed at Viewer init on this library build.</p>
+                )}
               </div>
-              <label className="block space-y-1">
-                <span className="text-[#f5ec99]">Splat scale (live)</span>
+              <label className={cn('block space-y-1', !liveViewerApis.scale && 'opacity-50')}>
+                <span className={cn('text-[#f5ec99]', !liveViewerApis.scale && 'text-white/40')}>
+                  Splat scale (live)
+                </span>
                 <input
                   type="range"
                   min={0.5}
                   max={3}
                   step={0.05}
                   value={splatScale}
+                  disabled={!liveViewerApis.scale}
                   onChange={(e) => setSplatScale(Number(e.target.value))}
-                  className="w-full accent-[#efe752]"
+                  className="w-full accent-[#efe752] disabled:cursor-not-allowed"
                 />
                 <span className="text-white/40">{splatScale.toFixed(2)}</span>
+                {!liveViewerApis.scale && (
+                  <p className="text-[9px] text-white/35">Splat scale not supported live on this library build.</p>
+                )}
               </label>
               <button
                 type="button"
@@ -1439,7 +1481,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
                         min="0.01"
                         value={meterInput}
                         onChange={e => setMeterInput(e.target.value)}
-                        className="w-16 bg-[#121008] border border-white/[0.08] rounded px-1.5 py-0.5 text-white text-xs font-mono text-center focus:border-[#efe752]/40 focus:outline-none"
+                        className="w-16 bg-black border border-white/[0.08] rounded px-1.5 py-0.5 text-white text-xs font-mono text-center focus:border-[#efe752]/40 focus:outline-none"
                       />
                       <span className="text-white/40">m</span>
                     </div>
@@ -1508,7 +1550,7 @@ export default function Viewer3D({ modelUrl, onModelMetadata }: Viewer3DProps) {
       {/* ── Help Panel ────────────────────────────────────────────────────── */}
       {showHelp && (
         <div className="absolute top-14 right-3 z-20 w-64">
-          <div className="bg-[#08080f]/95 backdrop-blur-md border border-white/[0.06] rounded-xl p-4 text-xs text-white/70 space-y-3">
+          <div className="bg-black/95 backdrop-blur-md border border-white/[0.06] rounded-xl p-4 text-xs text-white/70 space-y-3">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-white text-sm">Viewer Controls</span>
               <button onClick={() => setShowHelp(false)} className="text-white/40 hover:text-white"><X className="w-3 h-3" /></button>
@@ -1536,7 +1578,7 @@ function ToolbarButton({ icon, label, active, onClick }: {
 }) {
   const color = active
     ? 'bg-[#efe752]/15 text-[#efe752] border-[#efe752]/20'
-    : 'bg-black/70 text-white/50 border-white/[0.06] hover:text-white hover:bg-[#121008]';
+    : 'bg-black/70 text-white/50 border-white/[0.06] hover:text-white hover:bg-white/[0.06]';
   return (
     <button
       onClick={onClick}

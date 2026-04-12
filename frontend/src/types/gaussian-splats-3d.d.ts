@@ -49,8 +49,10 @@ declare module '@mkkellogg/gaussian-splats-3d' {
     update(): void;
     render(): void;
     dispose(): void;
-    setSplatScale(scale?: number): void;
-    setActiveSphericalHarmonicsDegrees(degree: number): void;
+    /** Present only on some package builds; guard with `typeof` before calling. */
+    setSplatScale?(scale?: number): void;
+    /** Present only on some package builds; guard with `typeof` before calling. */
+    setActiveSphericalHarmonicsDegrees?(degree: number): void;
 
     // Internal properties (accessible at runtime)
     camera: THREE.PerspectiveCamera;
