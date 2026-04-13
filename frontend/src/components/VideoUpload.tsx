@@ -10,14 +10,14 @@ const PRESETS = [
   {
     id: 'balanced',
     name: 'Balanced',
-    description: 'Faster preview (~10–15 min). Good for drafts and short clips.',
-    time: '~12 min'
+    description: 'Solid quality; typical ~25–45 min (scales with clip length). Main train + convert_3dgs.',
+    time: '~35 min est.'
   },
   {
     id: 'quality',
     name: 'Quality',
-    description: 'Higher fidelity (~25–35 min). Best default for shareable results.',
-    time: '~30 min'
+    description: 'Highest fidelity; often 1h+ on long clips (24k train + up to 10k convert iters).',
+    time: '~70 min est.'
   }
 ];
 

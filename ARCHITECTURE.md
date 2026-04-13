@@ -132,7 +132,7 @@ Video (MP4)
 | Step | Duration | Output |
 |---|---|---|
 | Frame Extraction | 10-30 s | `/app/storage/frames/{job_id}/` |
-| LongSplat Training | ~8-35 min (preset-dependent) | `model.ply` in models dir |
+| LongSplat Training | ~20–90+ min (preset + clip length; includes `convert_3dgs`) | `model.ply` in models dir |
 | Scaffold Conversion & Post-Process | ~3-15 min (scales with `convert_3dgs` iters) | Converted and centered `model.ply` |
 | PLY Export + Compress | 5-10 s | `{job_id}.ply`, `{job_id}.ply.gz` |
 | Mesh Reconstruction | 30-120 s | `{job_id}.obj` (Poisson → decimate → OBJ) |
@@ -153,12 +153,14 @@ Video (MP4)
 
 Defined in [`backend/core/config.py`](backend/core/config.py) (`QUALITY_PRESETS`).
 
-| Preset | FPS | LongSplat iterations | `convert_3dgs` prune ratio | Est. time | Use case |
-|---|---|---|---|---|---|
-| **Balanced** | 1.5 | 4,000 | 0.58 | ~12 min | Faster drafts |
-| **Quality** | 2.0 | 12,000 | 0.65 | ~30 min | Shareable quality |
+| Preset | FPS | LongSplat iterations | `convert_3dgs` prune ratio | `convert_3dgs` iter cap | Est. time | Use case |
+|---|---|---|---|---|---|---|
+| **Balanced** | 1.5 | 12,000 | 0.58 | **6,500** | ~35 min (typ.) | Shorter post-train refinement than Quality |
+| **Quality** | 2.0 | 24,000 | 0.65 | **10,000** | ~70 min (often 1h+) | Full main train + max refinement |
 
-Sub-iteration counts and `convert_3dgs` refinement steps scale with main `iterations` in [`train.py`](backend/services/longsplat/train.py) (`quality_baseline=12000`, `convert_iters` floor 3000 / cap 10000 at full quality).
+**Two GPU-heavy phases:** (1) LongSplat `train.py` for `--iterations`, (2) `convert_3dgs.py` for `--iteration` up to the preset cap (floored at 3000, scaled by `quality_factor` below 12k main iters). Logs: `[LongSplat timing] train.py subprocess…`, `convert_3dgs.py…`, `custom converter + PlyOptimizer…`.
+
+Sub-iteration counts (pose/local/global/post/init) and the **scaled** convert budget are computed in [`train.py`](backend/services/longsplat/train.py) (`quality_baseline=12000`, `convert_iters = max(3000, min(convert_3dgs_refinement_cap, int(10000 * quality_factor)))`).
 
 Higher **prune ratio** keeps more Gaussians after Scaffold-GS → 3DGS conversion (less aggressive pruning). Tuning is per preset without code changes beyond `PresetConfig`.
 
@@ -244,7 +246,7 @@ Use this order to separate **data** issues from **runtime** issues:
 - **Adaptive point size** — auto-calculated from bounding sphere, with manual +/- controls
 - **Gizmo** — axis indicator (bottom-right)
 - **Rendering / orientation** — Viewer ctor uses **`sphericalHarmonicsDegree: 2`**, **`freeIntermediateSplatData: false`**. **`cameraUp`** is **`[0, 1, 0]`** when **`GET /api/jobs/{id}/initial_camera`** provides pose-based framing (LongSplat world Y-up), and **`[0, -1, 0]`** for the bbox-only fallback (MASt3R / OpenCV-style). **`gpuAcceleratedSort`** and **`sharedMemoryForWorkers`** are **`true`** only when **`globalThis.crossOriginIsolated === true`** and **`VITE_GS3D_FORCE_LEGACY_WORKERS`** is not set to **`1`** / **`true`**; otherwise both are **`false`** (avoids `SharedArrayBuffer` worker errors; see console `[GS3D] crossOriginIsolated=false…` or **`VITE_GS3D_FORCE_LEGACY_WORKERS…`**). Splat scene uses **identity** `orientation`. **`splatAlphaRemovalThreshold`** (min alpha 1–255) and **`progressiveLoad`** (when vertex count ≥ 50k) come from the **Display** panel / load heuristics. **`addSplatScene`** is wrapped in a **90s** watchdog; PLY fetch uses **`AbortSignal.timeout(120s)`** when supported. After `addSplatScene`, **`viewer.start()`**, then **`setActiveSphericalHarmonicsDegrees`** / **`setSplatScale`** for live tuning. **World-space splat center cache** for measurement. Console: **`[GS3D] phase:`** (init milestones), **`[GS3D] Splat count after load`**, **`[GS3D] Splat center cache:`**.
-- **Display panel** — Min alpha (debounced → scene reload), SH 0/1/2 (live), splat scale (live), **Download .ksplat** (client-side), and a short cross-origin isolation hint.
+- **Display panel** — Min alpha (debounced → scene reload), SH 0/1/2 (live), splat scale (live, default **~1.25**, range **0.5–5** for legibility on load), **Download .ksplat** (client-side), and a short cross-origin isolation hint.
 - **Blank splat canvas (grid/axes OK)** — Confirm PLY **`f_rest_*` count divisible by three** (see PLY Output Format). If isolation headers are missing, the library may fail worker SharedArrayBuffer paths: see **SharedArrayBuffer / GPU** below.
 
 ### Viewer: SharedArrayBuffer / GPU-accelerated sort

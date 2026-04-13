@@ -7,6 +7,7 @@ import hashlib
 import importlib.util
 import logging
 import os
+import time
 import shutil
 import subprocess
 from pathlib import Path
@@ -66,6 +67,7 @@ async def train_longsplat(
     resolution: int = 1,
     init_ratio: float = 0.2,
     convert_prune_ratio: float = 0.62,
+    convert_refinement_cap: int = 10_000,
 ) -> bool:
     """
     Train LongSplat model directly from video frames (no COLMAP needed!)
@@ -76,6 +78,7 @@ async def train_longsplat(
         iterations: Number of training iterations
         resolution: Resolution scale factor (1, 2, 4, or 8)
         convert_prune_ratio: Passed to convert_3dgs.py --prune_ratio (preset-controlled; higher keeps more Gaussians)
+        convert_refinement_cap: Upper bound on convert_3dgs.py --iteration (GPU refinement after main train).
 
     Returns:
         True if training succeeded, False otherwise
@@ -161,8 +164,9 @@ async def train_longsplat(
         # Ensure at least 15 frames, but respect ratio
         init_frames = max(15, int(total_frames * init_ratio))
         
-        # Scale sub-iteration parameters with main iterations.
-        # Baseline 12000 = full internal budgets (matches Quality preset cap).
+        # Scale sub-iteration parameters with main iterations (capped at quality_baseline).
+        # Baseline 12000 = full internal budgets when main --iterations >= 12000 (e.g. Balanced).
+        # Quality preset can use higher main --iterations (e.g. 24k) without raising these caps.
         quality_baseline = 12000
         quality_factor = min(1.0, iterations / quality_baseline)
         pose_iter   = max(40,  int(100  * quality_factor))
@@ -170,16 +174,17 @@ async def train_longsplat(
         global_iter = max(240, int(600  * quality_factor))
         post_iter   = max(800, int(2000 * quality_factor))
         init_iter   = max(600, int(1500 * quality_factor))
-        # Scaffold-GS → 3DGS convert_3dgs refinement (scaled; avoid old 8k floor at low train iters)
+        # Scaffold-GS → 3DGS convert_3dgs refinement (scaled; cap from preset for Balanced vs Quality)
         convert_floor = 3000
-        convert_cap = 10000
-        convert_iters = max(convert_floor, int(convert_cap * quality_factor))
+        convert_scale_cap = 10_000
+        scaled_convert = int(convert_scale_cap * quality_factor)
+        convert_iters = max(convert_floor, min(convert_refinement_cap, scaled_convert))
 
         logger.info(
             f"Quality factor: {quality_factor:.2f} → pose={pose_iter}, "
             f"local={local_iter}, global={global_iter}, "
             f"post={post_iter}, init={init_iter}, "
-            f"convert={convert_iters}"
+            f"convert_3dgs_iters={convert_iters} (cap={convert_refinement_cap}, frames={frame_count})"
         )
 
         # NOTE: LongSplat's train.py does NOT support --save_iterations or
@@ -232,6 +237,7 @@ async def train_longsplat(
         
         try:
             with open(log_file_path, "w") as log_file:
+                t_train0 = time.perf_counter()
                 process = await asyncio.create_subprocess_exec(
                     *cmd,
                     cwd=str(LONGSPLAT_REPO),
@@ -261,6 +267,12 @@ async def train_longsplat(
                     
                     raise subprocess.CalledProcessError(process.returncode, cmd)
             
+            train_wall_s = time.perf_counter() - t_train0
+            logger.info(
+                "[LongSplat timing] train.py subprocess wall time: %.1f s (%.1f min)",
+                train_wall_s,
+                train_wall_s / 60.0,
+            )
             logger.info("Training command completed successfully")
             
             # Add diagnostic logging
@@ -308,6 +320,7 @@ async def train_longsplat(
                 
                 try:
                     with open(convert_log_path, "w") as convert_log:
+                        t_conv0 = time.perf_counter()
                         convert_proc = await asyncio.create_subprocess_exec(
                             *convert_cmd,
                             cwd=str(LONGSPLAT_REPO),
@@ -316,6 +329,12 @@ async def train_longsplat(
                             stderr=asyncio.subprocess.STDOUT,
                         )
                         await asyncio.wait_for(convert_proc.wait(), timeout=3600)  # 1 hour max
+                        conv_wall_s = time.perf_counter() - t_conv0
+                        logger.info(
+                            "[LongSplat timing] convert_3dgs.py wall time: %.1f s (%.1f min)",
+                            conv_wall_s,
+                            conv_wall_s / 60.0,
+                        )
                     
                     if convert_proc.returncode == 0:
                         converted_ply = output_dir / "converted_3dgs" / "point_cloud.ply"
@@ -349,6 +368,7 @@ async def train_longsplat(
             # converted_3dgs/point_cloud.ply (standard 3DGS with f_dc_*)
             # and just add RGB uchar properties for Blender compatibility.
             # If it failed, falls back to raw Scaffold-GS format handling.
+            t_post0 = time.perf_counter()
             logger.info("Running custom converter (adds Blender-compatible RGB)...")
             conversion_success = convert_longsplat_to_3dgs(
                 checkpoint_dir=output_dir,
@@ -368,6 +388,12 @@ async def train_longsplat(
                         )
             else:
                 logger.error("Conversion failed - PLY may be missing properties")
+            post_wall_s = time.perf_counter() - t_post0
+            logger.info(
+                "[LongSplat timing] custom converter + PlyOptimizer wall time: %.1f s (%.1f min)",
+                post_wall_s,
+                post_wall_s / 60.0,
+            )
             
             # Clean up scene directory (safe now — convert_3dgs.py already ran)
             try:

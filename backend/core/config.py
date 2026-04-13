@@ -26,29 +26,33 @@ class PresetConfig(BaseModel):
     estimated_minutes: int
     # LongSplat convert_3dgs.py: higher = keep more anchor-derived Gaussians (less aggressive prune).
     convert_3dgs_prune_ratio: float = 0.62
+    # Max refinement iterations passed to convert_3dgs.py --iteration (after main train). Lower = faster post-train GPU phase.
+    convert_3dgs_refinement_cap: int = 10_000
 
 
-# Quality preset definitions - Optimized for faster turnaround vs full LongSplat defaults
+# Quality preset definitions — main LongSplat --iterations (auxiliary budgets scale in train.py)
 QUALITY_PRESETS: Dict[QualityPreset, PresetConfig] = {
     QualityPreset.BALANCED: PresetConfig(
         name="Balanced",
-        description="Faster preview (~10–15 min). Good for drafts and short clips.",
+        description="Solid quality (~25–45 min typical; scales with video length). Main train + shorter convert_3dgs cap than Quality.",
         fps=1.5,
-        iterations=4000,
+        iterations=12000,
         resolution=1,
         init_frames_ratio=0.30,
-        estimated_minutes=12,
+        estimated_minutes=35,
         convert_3dgs_prune_ratio=0.58,
+        convert_3dgs_refinement_cap=6500,
     ),
     QualityPreset.QUALITY: PresetConfig(
         name="Quality",
-        description="Higher fidelity (~25–35 min). Best default for shareable results.",
+        description="Highest fidelity (~55–90+ min typical; main train 24k + up to 10k convert_3dgs iters). Long clips dominate wall time.",
         fps=2.0,
-        iterations=12000,
+        iterations=24000,
         resolution=1,
         init_frames_ratio=0.25,
-        estimated_minutes=30,
+        estimated_minutes=70,
         convert_3dgs_prune_ratio=0.65,
+        convert_3dgs_refinement_cap=10_000,
     ),
 }
 
@@ -65,6 +69,7 @@ class Settings(BaseSettings):
     # Default processing settings (used if no preset specified)
     DEFAULT_PRESET: QualityPreset = QualityPreset.BALANCED
     FRAME_EXTRACTION_FPS: float = 2.0
+    # Unused by pipeline (jobs use QUALITY_PRESETS[].iterations). Kept for env / legacy clarity only.
     LONGSPLAT_ITERATIONS: int = 5000
     LONGSPLAT_RESOLUTION: int = 1
     

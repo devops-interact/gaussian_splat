@@ -120,6 +120,7 @@ async def process_job(job: Job) -> Job:
             resolution=preset_config.resolution,
             init_ratio=preset_config.init_frames_ratio,
             convert_prune_ratio=preset_config.convert_3dgs_prune_ratio,
+            convert_refinement_cap=preset_config.convert_3dgs_refinement_cap,
         )
         _phase("train_longsplat")
         

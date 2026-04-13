@@ -69,6 +69,13 @@ interface CalibrationState {
 /** Use progressive PLY loading in GaussianSplats3D when splat count is high (trades peak perf for time-to-first-frame). */
 const PROGRESSIVE_VERTEX_THRESHOLD = 50_000;
 
+/** Bbox fallback camera: eye distance scales as diagonal × mult (lower = closer / fills frame more). */
+const BBOX_CAM_DIST_MULT = 0.92;
+/** Floor so tiny reconstructions are not framed from too far away (world units). */
+const BBOX_CAM_DIST_MIN = 1.75;
+/** Initial splat ellipsoid scale before user adjusts Display panel (1 = library default). */
+const DEFAULT_SPLAT_SCALE = 1.25;
+
 /** Measure-mode hover: ms between picks; larger reduces main-thread / scene churn. */
 const MEASURE_HOVER_MIN_MS = 100;
 /** Skip rebuilding measure preview if pick moved less than this (world units). */
@@ -579,7 +586,7 @@ export default function Viewer3D({
   const [minAlpha, setMinAlpha] = useState(1);
   const [loadMinAlpha, setLoadMinAlpha] = useState(1);
   const [shDisplayDegree, setShDisplayDegree] = useState<0 | 1 | 2>(2);
-  const [splatScale, setSplatScale] = useState(1);
+  const [splatScale, setSplatScale] = useState(DEFAULT_SPLAT_SCALE);
   const [displayPanelOpen, setDisplayPanelOpen] = useState(false);
   const [ksplatBusy, setKsplatBusy] = useState(false);
   const [ksplatError, setKsplatError] = useState<string | null>(null);
@@ -732,7 +739,7 @@ export default function Viewer3D({
           (bbMax[1] - bbMin[1]) ** 2 +
           (bbMax[2] - bbMin[2]) ** 2,
         );
-        const camDist = Math.max(diagonal * 1.2, 3);
+        const camDist = Math.max(diagonal * BBOX_CAM_DIST_MULT, BBOX_CAM_DIST_MIN);
         // Bbox fallback is tuned with Y-flipped up (MASt3R / OpenCV-style). Pose-derived eye/target from
         // LongSplat world use standard Y-up with initial_camera — see ARCHITECTURE.md.
         let cameraUp: [number, number, number] = [0, -1, 0];
@@ -945,47 +952,56 @@ export default function Viewer3D({
           }
         };
 
-        // Register SplatTree ready callback for library raycaster
+        // Register SplatTree ready callback for library raycaster.
+        // GS3D stores a single callback and clears it after each build; re-register at the
+        // end of the handler so progressive / subsequent final builds refresh the center cache.
         splatTreeReadyRef.current = false;
         const splatMeshInternal = viewer.splatMesh as unknown as {
           onSplatTreeReady?: (cb: () => void) => void;
           getSplatTree?: () => unknown;
         };
+
+        const onSplatTreeReadyHandler = () => {
+          if (disposed || viewerRef.current !== viewer) return;
+          splatTreeReadyRef.current = true;
+          rebuildCenterCache();
+          console.log('[GS3D] SplatTree ready — library raycaster is now active');
+
+          // If the cache came back null (count = 0 on first build), retry once after
+          // a short delay — some GS3D versions fire onSplatTreeReady before the
+          // internal buffer swap completes.
+          if (!splatCentersRef.current) {
+            console.warn('[GS3D] center cache empty on first SplatTree ready — retrying in 1.5s');
+            window.setTimeout(() => {
+              if (!disposed && viewerRef.current === viewer) {
+                rebuildCenterCache();
+                if (splatCentersRef.current) {
+                  console.log(
+                    '[GS3D] center cache rebuilt on retry:',
+                    splatCentersRef.current.length / 3,
+                    'splats',
+                  );
+                } else {
+                  console.warn(
+                    '[GS3D] center cache still empty after retry — picks will use GS3D raycaster only',
+                  );
+                }
+              }
+            }, 1500);
+          }
+
+          splatMeshInternal.onSplatTreeReady?.(onSplatTreeReadyHandler);
+        };
+
         if (splatMeshInternal.getSplatTree?.()) {
           splatTreeReadyRef.current = true;
           rebuildCenterCache();
           console.log('[GS3D] SplatTree already available');
+          if (splatMeshInternal.onSplatTreeReady) {
+            splatMeshInternal.onSplatTreeReady(onSplatTreeReadyHandler);
+          }
         } else if (splatMeshInternal.onSplatTreeReady) {
-          splatMeshInternal.onSplatTreeReady(() => {
-            if (!disposed) {
-              splatTreeReadyRef.current = true;
-              rebuildCenterCache();
-              console.log('[GS3D] SplatTree ready — library raycaster is now active');
-
-              // If the cache came back null (count = 0 on first build), retry once after
-              // a short delay — some GS3D versions fire onSplatTreeReady before the
-              // internal buffer swap completes.
-              if (!splatCentersRef.current) {
-                console.warn('[GS3D] center cache empty on first SplatTree ready — retrying in 1.5s');
-                window.setTimeout(() => {
-                  if (!disposed && viewerRef.current === viewer) {
-                    rebuildCenterCache();
-                    if (splatCentersRef.current) {
-                      console.log(
-                        '[GS3D] center cache rebuilt on retry:',
-                        splatCentersRef.current.length / 3,
-                        'splats',
-                      );
-                    } else {
-                      console.warn(
-                        '[GS3D] center cache still empty after retry — picks will use GS3D raycaster only',
-                      );
-                    }
-                  }
-                }, 1500);
-              }
-            }
-          });
+          splatMeshInternal.onSplatTreeReady(onSplatTreeReadyHandler);
           console.log('[GS3D] Waiting for SplatTree to build (async)...');
         } else {
           console.warn('[GS3D] onSplatTreeReady not available — building center cache eagerly');
@@ -1001,6 +1017,7 @@ export default function Viewer3D({
             if (splatMeshInternal.getSplatTree?.()) {
               splatTreeReadyRef.current = true;
               rebuildCenterCache();
+              splatMeshInternal.onSplatTreeReady?.(onSplatTreeReadyHandler);
               console.log('[GS3D] SplatTree detected via safety poll (5s)');
             } else {
               console.warn('[GS3D] SplatTree still not ready after 5s — library raycaster may not work');
@@ -1321,46 +1338,45 @@ export default function Viewer3D({
     const pickWorldFromEvent = (e: MouseEvent): PickResult | null => {
       camera.updateMatrixWorld(true);
 
-      // canvas.width / canvas.height are the physical framebuffer pixels.
-      // They equal CSS size × devicePixelRatio and match what GS3D's raycaster
-      // and Three.js camera projection matrices use internally.
-      // Never use clientWidth/clientHeight here — on Retina / HiDPI screens
-      // (DPR ≥ 2) that introduces a ×2+ offset that makes every pick miss.
       const physW = canvas.width;
       const physH = canvas.height;
-      const renderDims = new THREE.Vector2(physW, physH);
+      const gs3dDims = new THREE.Vector2();
+      if (viewerAny.getRenderDimensions) viewerAny.getRenderDimensions(gs3dDims);
+
+      const DIM_EPS = 2;
+      const useGs3dDims =
+        gs3dDims.x > 0 &&
+        gs3dDims.y > 0 &&
+        (Math.abs(gs3dDims.x - physW) > DIM_EPS || Math.abs(gs3dDims.y - physH) > DIM_EPS);
+      const pickW = useGs3dDims ? gs3dDims.x : physW;
+      const pickH = useGs3dDims ? gs3dDims.y : physH;
+      const renderDims = new THREE.Vector2(pickW, pickH);
 
       if (!pickDimsLogged) {
         pickDimsLogged = true;
-        const gs3dDims = new THREE.Vector2();
-        if (viewerAny.getRenderDimensions) viewerAny.getRenderDimensions(gs3dDims);
         console.log(
           `[Pick:dims] physical=${physW}x${physH}`,
+          `pickUsing=${useGs3dDims ? 'gs3d' : 'canvas'} (${pickW}x${pickH})`,
           `cssClient=${canvas.clientWidth}x${canvas.clientHeight}`,
           `gs3dReported=${gs3dDims.x}x${gs3dDims.y}`,
           `DPR=${window.devicePixelRatio}`,
         );
-        if (gs3dDims.x > 0 && (Math.abs(gs3dDims.x - physW) > 2 || Math.abs(gs3dDims.y - physH) > 2)) {
-          console.warn(
-            '[Pick:dims] GS3D reported dims differ from canvas physical dims — using canvas.width/height.',
-            `gs3d=(${gs3dDims.x},${gs3dDims.y}) physical=(${physW},${physH})`,
-          );
-        }
       }
 
-      // rect is in CSS pixels. Normalise to [0,1] first, then scale to physical.
+      // rect is in CSS pixels. Normalise to [0,1] relative to the visible canvas, then scale
+      // to the same pixel space GS3D's raycaster uses (canvas backing store or getRenderDimensions).
       const rect = canvas.getBoundingClientRect();
       const mousePos = new THREE.Vector2();
       if (rect.width > 0 && rect.height > 0) {
-        mousePos.x = ((e.clientX - rect.left) / rect.width) * physW;
-        mousePos.y = ((e.clientY - rect.top) / rect.height) * physH;
+        mousePos.x = ((e.clientX - rect.left) / rect.width) * pickW;
+        mousePos.y = ((e.clientY - rect.top) / rect.height) * pickH;
       } else {
-        // Fallback: offsetX/Y are CSS pixels — scale by DPR.
-        const dpr = window.devicePixelRatio || 1;
-        mousePos.set(e.offsetX * dpr, e.offsetY * dpr);
+        const cw = Math.max(1, canvas.clientWidth);
+        const ch = Math.max(1, canvas.clientHeight);
+        mousePos.set((e.offsetX / cw) * pickW, (e.offsetY / ch) * pickH);
       }
-      mousePos.x = THREE.MathUtils.clamp(mousePos.x, 0, physW);
-      mousePos.y = THREE.MathUtils.clamp(mousePos.y, 0, physH);
+      mousePos.x = THREE.MathUtils.clamp(mousePos.x, 0, pickW);
+      mousePos.y = THREE.MathUtils.clamp(mousePos.y, 0, pickH);
 
       const maxDist = metadataRef.current
         ? maxSplatPickDistance(metadataRef.current.boundingBox)
@@ -1754,7 +1770,7 @@ export default function Viewer3D({
                 <input
                   type="range"
                   min={0.5}
-                  max={3}
+                  max={5}
                   step={0.05}
                   value={splatScale}
                   disabled={!liveViewerApis.scale}

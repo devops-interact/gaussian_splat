@@ -101,8 +101,10 @@ Defined in `backend/core/config.py` (`QUALITY_PRESETS`). Sub-iterations and `con
 
 | Preset | FPS | LongSplat iterations | Est. time | Use case |
 |---|---|---|---|---|
-| **Balanced** | 1.5 | 4,000 | ~12 min | Faster drafts |
-| **Quality** | 2.0 | 12,000 | ~30 min | Shareable quality |
+| **Balanced** | 1.5 | 12,000 | ~35 min (typ.; long clips longer) | Default quality; **convert_3dgs** cap **6.5k** iters |
+| **Quality** | 2.0 | 24,000 | ~70 min (often **1h+**) | Highest fidelity; **convert_3dgs** up to **10k** iters |
+
+Wall time is **main `train.py` + second GPU phase `convert_3dgs.py`** (Scaffold→3DGS SH), then CPU PLY conversion—see [`ARCHITECTURE.md`](ARCHITECTURE.md) Quality Presets and server logs `[LongSplat timing]`.
 
 ### 3D viewer (GaussianSplats3D)
 
@@ -165,7 +167,7 @@ If **Measure** clicks land off the surface on a HiDPI display, confirm **`[Pick:
   "status": "training",
   "progress": 0.65,
   "quality_preset": "balanced",
-  "estimated_minutes": 12,
+  "estimated_minutes": 35,
   "validation": {
     "duration": 45.2,
     "resolution": "1920x1080",

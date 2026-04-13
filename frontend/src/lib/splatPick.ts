@@ -502,12 +502,8 @@ export function pickSplatMeasure(input: PickSplatMeasureInput): PickResult | nul
         ) as THREE.Vector3 | null;
 
         if (rawPos) {
-          // Sanity check: hit must be within maxDist from the camera.
-          const camPos = (camera as THREE.PerspectiveCamera).position;
-          if (rawPos.distanceTo(camPos) < maxDist * 2) {
-            return { position: rawPos.clone(), isSnapped: true };
-          }
-          console.warn('[splatPick] GS3D hit position outside maxDist range — discarding', rawPos);
+          // Primary plausibility gate is h.distance <= maxDist above; trust library hit position.
+          return { position: rawPos.clone(), isSnapped: true };
         }
         // Fall through to center cache.
       }
