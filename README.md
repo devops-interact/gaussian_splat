@@ -49,15 +49,15 @@ The SPA must reach your RunPod API over HTTPS. Pick **one** of these patterns:
 |---|---|
 | **A. Explicit API URL (simplest)** | In Vercel → Settings → Environment Variables → **Production**, set `VITE_API_BASE_URL` to your RunPod HTTPS origin with **no trailing slash**, e.g. `https://your-pod-id-8000.proxy.runpod.net`. Rebuild the project after changing env vars (Vite bakes this in at build time). |
 | **B. Same-origin `/api` proxy** | Leave `VITE_API_BASE_URL` **unset** for Production. The app then calls relative URLs like `/api/projects`. Merge the **`rewrites`** block from [`frontend/vercel.rewrites.example.json`](frontend/vercel.rewrites.example.json) into [`frontend/vercel.json`](frontend/vercel.json) (same JSON object as the existing `headers` array), replacing `YOUR_RUNPOD_ORIGIN` with your HTTPS origin (no trailing slash). |
-| **C. Viewer hangs on load (optional)** | In the same Vercel **Environment Variables** screen, add `VITE_GS3D_FORCE_LEGACY_WORKERS` = `true` (or `1`), then **redeploy**. This disables GPU-accelerated sort + shared worker memory in GaussianSplats3D when COEP isolation is on. See [`ARCHITECTURE.md`](ARCHITECTURE.md) § 3D viewer troubleshooting. Local copy: [`frontend/.env.example`](frontend/.env.example). |
+| **C. Viewer hangs on load (optional)** | In Vercel → **Environment Variables** → **Production**, add **`VITE_GS3D_FORCE_LEGACY_WORKERS`** with value **`true`** or **`1`**, then **redeploy**. This forces GaussianSplats3D to use CPU splat sort and non–shared-memory workers (see [`ARCHITECTURE.md`](ARCHITECTURE.md) § 3D viewer troubleshooting). Same line in `frontend/.env` or **`frontend/.env.local`** for local dev — see [`frontend/.env.example`](frontend/.env.example). |
 
 If Production is built **without** `VITE_API_BASE_URL` and **without** rewrites, the browser will request `/api/...` on the Vercel domain only — those routes will 404 unless you add rewrites or a serverless proxy.
 
-Example env (approach A); optional viewer flag if splats never finish loading:
+Example env (approach A); add the second line only if the splat viewer hangs on load:
 
 ```
 VITE_API_BASE_URL=https://your-pod-id-8000.proxy.runpod.net
-# VITE_GS3D_FORCE_LEGACY_WORKERS=true
+VITE_GS3D_FORCE_LEGACY_WORKERS=true
 ```
 
 See [`frontend/.env.example`](frontend/.env.example) for all documented `VITE_*` keys.

@@ -1717,13 +1717,13 @@ export default function Viewer3D({
           )}
           {displayPanelOpen && (
             <div className="w-full min-w-[200px] bg-black/95 backdrop-blur-md border border-white/[0.22] rounded-xl p-3 text-[10px] text-white/80 font-mono space-y-3">
-              <div className="text-white/45 text-[9px] leading-snug">
-                {forceLegacyGs3dWorkers()
-                  ? 'VITE_GS3D_FORCE_LEGACY_WORKERS: GPU sort + shared worker memory off (override).'
-                  : globalThis.crossOriginIsolated === true
+              {!forceLegacyGs3dWorkers() && (
+                <div className="text-white/45 text-[9px] leading-snug">
+                  {globalThis.crossOriginIsolated === true
                     ? 'crossOriginIsolated: GPU-accelerated sort + shared worker memory enabled.'
                     : 'crossOriginIsolated=false: sort flags disabled (set COOP/COEP per ARCHITECTURE.md).'}
-              </div>
+                </div>
+              )}
               <label className="block space-y-1">
                 <span className="text-[#f5ec99]">Min alpha (PLY reload ~0.5s)</span>
                 <input
@@ -1790,17 +1790,6 @@ export default function Viewer3D({
               >
                 <Download className="w-3 h-3" /> {ksplatBusy ? 'Working…' : 'Download .ksplat'}
               </button>
-              <p className="text-[9px] text-white/35 leading-snug">
-                Offline: clone{' '}
-                <a className="text-[#efe752]/80 underline" href="https://github.com/mmkellogg/GaussianSplats3D" target="_blank" rel="noreferrer">
-                  GaussianSplats3D
-                </a>{' '}
-                and run <code className="text-white/50">node util/create-ksplat.js …</code>. Web converter:{' '}
-                <a className="text-[#efe752]/80 underline" href="https://projects.markkellogg.org/threejs/demo_gaussian_splats_3d.php" target="_blank" rel="noreferrer">
-                  demo
-                </a>
-                .
-              </p>
             </div>
           )}
           <button
