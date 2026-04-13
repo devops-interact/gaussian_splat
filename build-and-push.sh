@@ -47,7 +47,9 @@ npm test
 cd ..
 echo -e "${GREEN}✓ Frontend deps + build + tests OK (matches Docker stage 1 + CI)${NC}"
 
-# Viewer / splat picking: GaussianSplats3D + lib/splatPick (physical-pixel rays, world center cache)
+# Viewer / splat picking: GaussianSplats3D + lib/splatPick (measure mode: normalized mouse ×
+# pick dims — canvas backing store or Viewer.getRenderDimensions when it diverges; GS3D raycast;
+# world center cache rebuilt on each SplatTree completion via re-registered onSplatTreeReady)
 echo -e "${BLUE}Verifying viewer & picking sources...${NC}"
 for f in \
     "frontend/src/components/Viewer3D.tsx" \
@@ -65,7 +67,7 @@ grep -q "@mkkellogg/gaussian-splats-3d" frontend/package.json || {
     echo -e "${RED}❌ @mkkellogg/gaussian-splats-3d missing from frontend/package.json${NC}"
     exit 1
 }
-echo -e "${GREEN}✓ Viewer3D + splatPick (measure / GS3D raycast) sources OK${NC}"
+echo -e "${GREEN}✓ Viewer3D + splatPick (measure: GS3D dims + raycast + center cache) sources OK${NC}"
 
 # Vite env template (Vercel / local); must document optional legacy GS3D worker path
 echo -e "${BLUE}Verifying frontend/.env.example...${NC}"
@@ -179,7 +181,7 @@ if [ ${PIPESTATUS[0]} -eq 0 ]; then
     echo -e "  │ Expose HTTP Ports  │ 8000                                         │"
     echo -e "  └────────────────────┴──────────────────────────────────────────────┘"
     echo ""
-    echo -e "${PURPLE}Pipeline: video → frames → LongSplat (MASt3R + 3DGS) → PLY (+ gzip, optional OBJ). Viewer: GaussianSplats3D + splatPick (canvas backing-store coords, SplatTree center cache). GPU sort + SharedArrayBuffer workers when crossOriginIsolated; VITE_GS3D_FORCE_LEGACY_WORKERS forces CPU path. GET /api/jobs/{id}/initial_camera for pose framing.${NC}"
+    echo -e "${PURPLE}Pipeline: video → frames → LongSplat (MASt3R + 3DGS) → PLY (+ gzip, optional OBJ). Viewer: GaussianSplats3D + splatPick (measure: same pixel space as GS3D — canvas or getRenderDimensions when they differ; SplatTree center cache refreshed on every tree build). GPU sort + SharedArrayBuffer workers when crossOriginIsolated; VITE_GS3D_FORCE_LEGACY_WORKERS forces CPU path. GET /api/jobs/{id}/initial_camera for pose framing.${NC}"
     echo -e "${BLUE}Vercel: frontend/vercel.json (COOP+COEP). VITE_API_BASE_URL or /api rewrites per README. Optional VITE_GS3D_FORCE_LEGACY_WORKERS if splats hang — see frontend/.env.example + ARCHITECTURE.md §3D viewer troubleshooting (legacy tradeoff, initial_camera cameraUp, MetaMask SES).${NC}"
     echo -e "${BLUE}Tip: BUILD_NO_CACHE=1 ./build-and-push.sh for a full CUDA layer rebuild${NC}"
     echo ""

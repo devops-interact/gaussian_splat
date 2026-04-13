@@ -24,7 +24,7 @@ docker system prune -af && docker builder prune -af
 ./build-and-push.sh
 ```
 
-The script runs **`npm run build`** and **`npm test`** in `frontend/`, checks COOP/COEP/CORP headers, **`frontend/.env.example`**, the **`initial_camera`** API wiring, viewer + **`src/lib/splatPick.ts`** sources, and required LongSplat/backend files before Docker buildx push. Vercel-facing **`VITE_*`** variables are listed in **§ 3** and in [`frontend/.env.example`](frontend/.env.example).
+The script runs **`npm run build`** and **`npm test`** in `frontend/`, checks COOP/COEP/CORP headers, **`frontend/.env.example`**, the **`initial_camera`** API wiring, viewer + **`src/lib/splatPick.ts`** sources (existence + `@mkkellogg/gaussian-splats-3d` in `package.json`), and required LongSplat/backend files before Docker buildx push. Vercel-facing **`VITE_*`** variables are listed in **§ 3** and in [`frontend/.env.example`](frontend/.env.example).
 
 ### 2. Deploy Backend to RunPod
 
@@ -114,7 +114,7 @@ If the viewer stays on **“Loading Gaussian Splats…”**, set **`VITE_GS3D_FO
 
 If the room looks **upside-down** with pose-based framing, or orbit feels **choppy** while legacy workers are on, or you see **`lockdown-install.js` / SES** `DOMException` spam, see **§ 3D viewer troubleshooting** items **7–9** in [`ARCHITECTURE.md`](ARCHITECTURE.md) (camera up for `initial_camera`, legacy-worker tradeoff, MetaMask / extensions).
 
-If **Measure** clicks land off the surface on a HiDPI display, confirm **`[Pick:dims]`** in the console (`physical` should track `canvas.width`/`height`); picking uses [`frontend/src/lib/splatPick.ts`](frontend/src/lib/splatPick.ts) (world-space center cache + GS3D raycast). See **ARCHITECTURE.md** §3D Viewer — splat picking.
+If **Measure** clicks still feel misaligned, open the console once per measure session and read **`[Pick:dims]`**: it logs **`physical`** (canvas backing store), **`gs3dReported`**, and **`pickUsing=canvas|gs3d (WxH)`** — when the library’s internal render size differs from the canvas, picks intentionally use **`getRenderDimensions`** for both **`renderDims`** and mouse scaling. Picking uses [`frontend/src/lib/splatPick.ts`](frontend/src/lib/splatPick.ts) (GS3D raycast + world-space center cache after each **SplatTree** build). See **ARCHITECTURE.md** §3D Viewer — splat picking.
 
 ---
 
@@ -236,7 +236,7 @@ gaussian-room-reconstruction/
 ├── frontend/
 │   ├── src/
 │   │   ├── lib/
-│   │   │   └── splatPick.ts                 # Measure picks: GS3D ray + world center cache
+│   │   │   └── splatPick.ts                 # Measure picks: GS3D ray + dims/center cache
 │   │   ├── components/
 │   │   │   ├── VideoUpload.tsx              # Preset selector, file upload
 │   │   │   ├── JobStatus.tsx                # Progress bar, status
@@ -267,7 +267,7 @@ gaussian-room-reconstruction/
 | Stale frontend after deploy | Hard-refresh (`Ctrl+Shift+R`) or redeploy on Vercel |
 | Training fails immediately | Check GPU availability, PYTHONPATH, frame count (30+) |
 | No PLY generated | Check `/app/storage/models/{job_id}/` and training logs |
-| Measure picks miss (HiDPI) | See [`ARCHITECTURE.md`](ARCHITECTURE.md) splat picking + `[Pick:dims]` logs; ensure SPA/backend commit matches after viewer changes |
+| Measure picks miss / offset | See [`ARCHITECTURE.md`](ARCHITECTURE.md) splat picking; check **`[Pick:dims]`** (`pickUsing`, `gs3dReported` vs `physical`); ensure SPA/backend commit matches after viewer changes |
 | Open3D build error | Expected under QEMU — works at runtime on real A40 hardware |
 
 ---
