@@ -870,7 +870,19 @@ export default function Viewer3D({
         console.log('[GS3D] phase: viewer.start');
         viewer.start();
         // True ellipsoid hits align better with the rendered splat surface (measurement).
-        viewer.raycaster.raycastAgainstTrueSplatEllipsoid = true;
+        try {
+          const rc = viewer.raycaster as unknown as Record<string, unknown>;
+          if ('raycastAgainstTrueSplatEllipsoid' in rc) {
+            rc['raycastAgainstTrueSplatEllipsoid'] = true;
+            console.log('[GS3D] raycastAgainstTrueSplatEllipsoid = true (ellipsoid hit accuracy on)');
+          } else {
+            console.info(
+              '[GS3D] raycastAgainstTrueSplatEllipsoid not available in this GS3D build — sphere mode',
+            );
+          }
+        } catch {
+          /* MetaMask SES / lockdown may throw on property assignment — ignore */
+        }
 
         console.log('[GS3D] splatMesh.visible:', viewer.splatMesh?.visible);
         console.log('[GS3D] renderer context:', (viewer as any).renderer?.getContext()?.constructor?.name);
@@ -949,6 +961,29 @@ export default function Viewer3D({
               splatTreeReadyRef.current = true;
               rebuildCenterCache();
               console.log('[GS3D] SplatTree ready — library raycaster is now active');
+
+              // If the cache came back null (count = 0 on first build), retry once after
+              // a short delay — some GS3D versions fire onSplatTreeReady before the
+              // internal buffer swap completes.
+              if (!splatCentersRef.current) {
+                console.warn('[GS3D] center cache empty on first SplatTree ready — retrying in 1.5s');
+                window.setTimeout(() => {
+                  if (!disposed && viewerRef.current === viewer) {
+                    rebuildCenterCache();
+                    if (splatCentersRef.current) {
+                      console.log(
+                        '[GS3D] center cache rebuilt on retry:',
+                        splatCentersRef.current.length / 3,
+                        'splats',
+                      );
+                    } else {
+                      console.warn(
+                        '[GS3D] center cache still empty after retry — picks will use GS3D raycaster only',
+                      );
+                    }
+                  }
+                }, 1500);
+              }
             }
           });
           console.log('[GS3D] Waiting for SplatTree to build (async)...');
@@ -959,14 +994,29 @@ export default function Viewer3D({
 
         // Safety re-check: if SplatTree callback was missed, poll after 5s
         splatSafetyPollTimer = window.setTimeout(() => {
-          if (disposed || splatTreeReadyRef.current) return;
+          if (disposed) return;
           if (viewerRef.current !== viewer) return;
-          if (splatMeshInternal.getSplatTree?.()) {
-            splatTreeReadyRef.current = true;
+
+          if (!splatTreeReadyRef.current) {
+            if (splatMeshInternal.getSplatTree?.()) {
+              splatTreeReadyRef.current = true;
+              rebuildCenterCache();
+              console.log('[GS3D] SplatTree detected via safety poll (5s)');
+            } else {
+              console.warn('[GS3D] SplatTree still not ready after 5s — library raycaster may not work');
+            }
+          } else if (!splatCentersRef.current) {
+            // Tree was ready but cache is still null — try once more.
             rebuildCenterCache();
-            console.log('[GS3D] SplatTree detected via safety poll (5s)');
-          } else {
-            console.warn('[GS3D] SplatTree still not ready after 5s — library raycaster may not work');
+            // Ref assignment inside rebuildCenterCache is not reflected in CFA; read with cast.
+            const recoveredBuf = splatCentersRef.current as Float32Array | null;
+            if (recoveredBuf) {
+              console.log(
+                '[GS3D] center cache recovered via safety poll:',
+                recoveredBuf.length / 3,
+                'splats',
+              );
+            }
           }
         }, 5000);
 
@@ -1271,33 +1321,46 @@ export default function Viewer3D({
     const pickWorldFromEvent = (e: MouseEvent): PickResult | null => {
       camera.updateMatrixWorld(true);
 
-      const renderDims = new THREE.Vector2();
-      if (viewerAny.getRenderDimensions) {
-        viewerAny.getRenderDimensions(renderDims);
-      } else {
-        renderDims.set(canvas.clientWidth, canvas.clientHeight);
-      }
+      // canvas.width / canvas.height are the physical framebuffer pixels.
+      // They equal CSS size × devicePixelRatio and match what GS3D's raycaster
+      // and Three.js camera projection matrices use internally.
+      // Never use clientWidth/clientHeight here — on Retina / HiDPI screens
+      // (DPR ≥ 2) that introduces a ×2+ offset that makes every pick miss.
+      const physW = canvas.width;
+      const physH = canvas.height;
+      const renderDims = new THREE.Vector2(physW, physH);
 
       if (!pickDimsLogged) {
         pickDimsLogged = true;
+        const gs3dDims = new THREE.Vector2();
+        if (viewerAny.getRenderDimensions) viewerAny.getRenderDimensions(gs3dDims);
         console.log(
-          `[Pick:dims] renderDims=${renderDims.x}x${renderDims.y}`,
-          `canvas.client=${canvas.clientWidth}x${canvas.clientHeight}`,
-          `canvas.hw=${canvas.width}x${canvas.height}`,
+          `[Pick:dims] physical=${physW}x${physH}`,
+          `cssClient=${canvas.clientWidth}x${canvas.clientHeight}`,
+          `gs3dReported=${gs3dDims.x}x${gs3dDims.y}`,
           `DPR=${window.devicePixelRatio}`,
         );
+        if (gs3dDims.x > 0 && (Math.abs(gs3dDims.x - physW) > 2 || Math.abs(gs3dDims.y - physH) > 2)) {
+          console.warn(
+            '[Pick:dims] GS3D reported dims differ from canvas physical dims — using canvas.width/height.',
+            `gs3d=(${gs3dDims.x},${gs3dDims.y}) physical=(${physW},${physH})`,
+          );
+        }
       }
 
+      // rect is in CSS pixels. Normalise to [0,1] first, then scale to physical.
       const rect = canvas.getBoundingClientRect();
       const mousePos = new THREE.Vector2();
       if (rect.width > 0 && rect.height > 0) {
-        mousePos.x = ((e.clientX - rect.left) / rect.width) * renderDims.x;
-        mousePos.y = ((e.clientY - rect.top) / rect.height) * renderDims.y;
+        mousePos.x = ((e.clientX - rect.left) / rect.width) * physW;
+        mousePos.y = ((e.clientY - rect.top) / rect.height) * physH;
       } else {
-        mousePos.set(e.offsetX, e.offsetY);
+        // Fallback: offsetX/Y are CSS pixels — scale by DPR.
+        const dpr = window.devicePixelRatio || 1;
+        mousePos.set(e.offsetX * dpr, e.offsetY * dpr);
       }
-      mousePos.x = THREE.MathUtils.clamp(mousePos.x, 0, renderDims.x);
-      mousePos.y = THREE.MathUtils.clamp(mousePos.y, 0, renderDims.y);
+      mousePos.x = THREE.MathUtils.clamp(mousePos.x, 0, physW);
+      mousePos.y = THREE.MathUtils.clamp(mousePos.y, 0, physH);
 
       const maxDist = metadataRef.current
         ? maxSplatPickDistance(metadataRef.current.boundingBox)

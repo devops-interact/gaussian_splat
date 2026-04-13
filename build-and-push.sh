@@ -42,13 +42,17 @@ echo -e "${BLUE}Installing frontend dependencies...${NC}"
 cd frontend && npm install
 echo -e "${BLUE}Running frontend production build (tsc + vite) — fails fast before Docker...${NC}"
 npm run build
+echo -e "${BLUE}Running frontend unit tests (vitest)...${NC}"
+npm test
 cd ..
-echo -e "${GREEN}✓ Frontend deps + build OK (matches Docker stage 1)${NC}"
+echo -e "${GREEN}✓ Frontend deps + build + tests OK (matches Docker stage 1 + CI)${NC}"
 
-# Viewer / splat picking stack (GaussianSplats3D, not THREE.Raycaster)
+# Viewer / splat picking: GaussianSplats3D + lib/splatPick (physical-pixel rays, world center cache)
 echo -e "${BLUE}Verifying viewer & picking sources...${NC}"
 for f in \
     "frontend/src/components/Viewer3D.tsx" \
+    "frontend/src/lib/splatPick.ts" \
+    "frontend/src/lib/splatPick.test.ts" \
     "frontend/src/types/gaussian-splats-3d.d.ts" \
     "frontend/package.json"
 do
@@ -61,7 +65,7 @@ grep -q "@mkkellogg/gaussian-splats-3d" frontend/package.json || {
     echo -e "${RED}❌ @mkkellogg/gaussian-splats-3d missing from frontend/package.json${NC}"
     exit 1
 }
-echo -e "${GREEN}✓ Viewer / GS3D splat picking sources OK${NC}"
+echo -e "${GREEN}✓ Viewer3D + splatPick (measure / GS3D raycast) sources OK${NC}"
 
 # Vite env template (Vercel / local); must document optional legacy GS3D worker path
 echo -e "${BLUE}Verifying frontend/.env.example...${NC}"
@@ -175,8 +179,8 @@ if [ ${PIPESTATUS[0]} -eq 0 ]; then
     echo -e "  │ Expose HTTP Ports  │ 8000                                         │"
     echo -e "  └────────────────────┴──────────────────────────────────────────────┘"
     echo ""
-    echo -e "${PURPLE}Viewer: GaussianSplats3D — GPU-accelerated sort + SharedArrayBuffer workers when crossOriginIsolated; optional VITE_GS3D_FORCE_LEGACY_WORKERS forces them off. COOP/COEP/CORP on API; PLY gzip fallback on /model; chartreuse UI.${NC}"
-    echo -e "${BLUE}Vercel: deploy frontend/vercel.json (COOP+COEP) with the SPA. Set VITE_API_BASE_URL or same-origin /api rewrites per README. Optional VITE_GS3D_FORCE_LEGACY_WORKERS=true if splats hang on load — see frontend/.env.example + ARCHITECTURE.md (3D viewer troubleshooting).${NC}"
+    echo -e "${PURPLE}Pipeline: video → frames → LongSplat (MASt3R + 3DGS) → PLY (+ gzip, optional OBJ). Viewer: GaussianSplats3D + splatPick (canvas backing-store coords, SplatTree center cache). GPU sort + SharedArrayBuffer workers when crossOriginIsolated; VITE_GS3D_FORCE_LEGACY_WORKERS forces CPU path. GET /api/jobs/{id}/initial_camera for pose framing.${NC}"
+    echo -e "${BLUE}Vercel: frontend/vercel.json (COOP+COEP). VITE_API_BASE_URL or /api rewrites per README. Optional VITE_GS3D_FORCE_LEGACY_WORKERS if splats hang — see frontend/.env.example + ARCHITECTURE.md §3D viewer troubleshooting (legacy tradeoff, initial_camera cameraUp, MetaMask SES).${NC}"
     echo -e "${BLUE}Tip: BUILD_NO_CACHE=1 ./build-and-push.sh for a full CUDA layer rebuild${NC}"
     echo ""
 else

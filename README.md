@@ -9,9 +9,9 @@ A production web application that converts video footage of rooms into interacti
 - **Video upload** with quality preset selection (**Balanced** / **Quality**)
 - **LongSplat training** with MASt3R for automatic pose estimation (no COLMAP)
 - **3D Viewer** — orbit, walk-through, measurement tool, snapshot capture
-- **Points / Mesh toggle** — raw point cloud or Poisson-reconstructed GLB surface
+- **Gaussian splats + optional mesh** — primary view is the splat PLY; optional **OBJ** mesh download when the API exposes `model_url_obj` (`EXPORT_OBJ=true` on the pod)
 - **Metadata panel** — point count, bounding box, color data, processing status
-- **Downloads** — `.ply`, `.ply.gz`, `.glb` (mesh)
+- **Downloads** — `.ply`, `.ply.gz`, optional `.obj` (mesh, when enabled)
 
 ---
 
@@ -24,7 +24,7 @@ docker system prune -af && docker builder prune -af
 ./build-and-push.sh
 ```
 
-The script runs a production **`npm run build`** in `frontend/`, checks COOP/COEP/CORP headers, **`frontend/.env.example`**, the **`initial_camera`** API wiring, and required viewer/backend files before Docker buildx push. Vercel-facing **`VITE_*`** variables are listed in **§ 3** and in [`frontend/.env.example`](frontend/.env.example).
+The script runs **`npm run build`** and **`npm test`** in `frontend/`, checks COOP/COEP/CORP headers, **`frontend/.env.example`**, the **`initial_camera`** API wiring, viewer + **`src/lib/splatPick.ts`** sources, and required LongSplat/backend files before Docker buildx push. Vercel-facing **`VITE_*`** variables are listed in **§ 3** and in [`frontend/.env.example`](frontend/.env.example).
 
 ### 2. Deploy Backend to RunPod
 
@@ -82,14 +82,17 @@ curl https://your-pod-8000.proxy.runpod.net/health
 
 ## Processing Pipeline
 
+Orchestrated in [`backend/core/pipeline.py`](backend/core/pipeline.py) (see [`ARCHITECTURE.md`](ARCHITECTURE.md) for step timings and PLY details):
+
 ```
 Video (MP4)
-  → Validate (duration, resolution, format)
-  → Extract Frames (FFmpeg @ preset FPS)
-  → LongSplat Training (MASt3R poses + 3DGS optimization)
-  → Export PLY + Gzip compress
-  → Mesh Reconstruction (Poisson surface → GLB)
-  → Complete
+  → Validate (upload / preset limits)
+  → Extract frames (FFmpeg @ preset FPS → JPGs)
+  → LongSplat training (MASt3R poses + joint 3DGS optimization; internal Scaffold→3DGS conversion + postprocess in train stack)
+  → Export PLY (web-ready `model.ply` path)
+  → Optional gzip of PLY for static `.ply.gz`
+  → Optional OBJ mesh (Poisson / trimesh path when EXPORT_OBJ=true)
+  → Complete — viewer loads PLY via GET /api/jobs/{id}/model; optional GET /api/jobs/{id}/initial_camera for first-frame pose
 ```
 
 ### Quality Presets
@@ -109,6 +112,8 @@ If the viewer stays on **“Loading Gaussian Splats…”**, set **`VITE_GS3D_FO
 
 If the room looks **upside-down** with pose-based framing, or orbit feels **choppy** while legacy workers are on, or you see **`lockdown-install.js` / SES** `DOMException` spam, see **§ 3D viewer troubleshooting** items **7–9** in [`ARCHITECTURE.md`](ARCHITECTURE.md) (camera up for `initial_camera`, legacy-worker tradeoff, MetaMask / extensions).
 
+If **Measure** clicks land off the surface on a HiDPI display, confirm **`[Pick:dims]`** in the console (`physical` should track `canvas.width`/`height`); picking uses [`frontend/src/lib/splatPick.ts`](frontend/src/lib/splatPick.ts) (world-space center cache + GS3D raycast). See **ARCHITECTURE.md** §3D Viewer — splat picking.
+
 ---
 
 ## Tech Stack
@@ -116,7 +121,7 @@ If the room looks **upside-down** with pose-based framing, or orbit feels **chop
 ### Frontend (Vercel)
 
 - **React 18** + TypeScript + Vite
-- **Three.js** (`@react-three/fiber`, `@react-three/drei`) — 3D viewer
+- **Three.js** + **GaussianSplats3D** — splat viewer (orbit / walk / measure); optional OBJ mesh download from API
 - **Tailwind CSS** — styling
 - Custom binary PLY parser with SH→RGB and direct RGB priority
 
@@ -126,7 +131,7 @@ If the room looks **upside-down** with pose-based framing, or orbit feels **chop
 - **PyTorch 2.2.0** (CUDA 12.1)
 - **LongSplat** — MASt3R pose estimation + 3DGS training
 - **Open3D** — Poisson surface reconstruction
-- **trimesh** — GLB mesh export
+- **trimesh** — optional mesh export (OBJ when `EXPORT_OBJ=true`)
 - **FFmpeg** — video frame extraction
 
 ### Infrastructure
@@ -146,9 +151,11 @@ If the room looks **upside-down** with pose-based framing, or orbit feels **chop
 | `GET` | `/api/presets` | List quality presets |
 | `POST` | `/api/jobs/upload` | Upload video (multipart + quality_preset) |
 | `GET` | `/api/jobs/{id}/status` | Job status, progress, model URLs |
-| `GET` | `/api/jobs/{id}/model` | Download PLY |
+| `GET` | `/api/jobs/{id}/model` | Download PLY (CORP-safe for COEP pages) |
 | `GET` | `/api/jobs/{id}/model?compressed=true` | Download compressed PLY.gz |
-| `GET` | `/static/models/{id}.glb` | GLB mesh (static) |
+| `GET` | `/api/jobs/{id}/initial_camera` | Optional pose hint (`position` / `target`) for viewer first frame |
+| `GET` | `/api/jobs/{id}/cameras` | Optional `cameras_all.json` from training |
+| `GET` | `/static/models/{id}/*.obj` | OBJ mesh when `EXPORT_OBJ=true` and export succeeded |
 
 ### Job Status Response
 
@@ -167,12 +174,11 @@ If the room looks **upside-down** with pose-based framing, or orbit feels **chop
   },
   "model_url": "/api/jobs/uuid/model",
   "model_url_compressed": "/static/models/uuid.ply.gz",
-  "model_url_mesh": "/static/models/uuid.glb"
+  "model_url_obj": "/static/models/uuid/uuid.obj"
 }
 ```
 
-**Status flow:**
-`uploaded` → `validating` → `extracting_frames` → `training` → `exporting` → `compressing` → `completed`
+**Status flow:** `uploaded` → `validating` → `extracting_frames` → `training` → `exporting` → `compressing` → `completed` (or `error`). Optional OBJ export runs in the final stages when `EXPORT_OBJ=true`.
 
 ---
 
@@ -208,33 +214,37 @@ gaussian-room-reconstruction/
 │   ├── core/
 │   │   ├── config.py                        # Quality presets, settings
 │   │   ├── models.py                        # Pydantic models
-│   │   └── pipeline.py                      # Processing orchestration (6 steps)
+│   │   └── pipeline.py                      # Job orchestration (frames → train → PLY → gzip → optional OBJ)
 │   ├── services/
+│   │   ├── viewer_initial_camera.py         # initial_camera JSON for Viewer3D
 │   │   ├── longsplat/
 │   │   │   ├── train.py                     # LongSplat training wrapper
+│   │   │   ├── postprocess.py
 │   │   │   └── longsplat_to_3dgs_converter.py
 │   │   ├── video/
 │   │   │   ├── extract_frames.py
 │   │   │   └── validate.py
 │   │   └── export/
 │   │       ├── to_ply.py                    # PLY export + diagnostics
-│   │       ├── to_mesh.py                   # Poisson surface → GLB
+│   │       ├── to_mesh.py                   # Poisson → GLB (utility; not wired in default pipeline)
 │   │       ├── to_obj.py                    # OBJ export (optional)
 │   │       └── compress.py                  # Gzip compression
 │   ├── main.py                              # FastAPI entry
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
+│   │   ├── lib/
+│   │   │   └── splatPick.ts                 # Measure picks: GS3D ray + world center cache
 │   │   ├── components/
 │   │   │   ├── VideoUpload.tsx              # Preset selector, file upload
 │   │   │   ├── JobStatus.tsx                # Progress bar, status
-│   │   │   ├── Viewer3D.tsx                 # PLY/GLB 3D viewer + tools
+│   │   │   ├── Viewer3D.tsx                 # GaussianSplats3D PLY viewer + measure / walk
 │   │   │   ├── TechnicalDetails.tsx         # Metadata panel
 │   │   │   ├── layout/dashboard-layout.tsx
 │   │   │   └── ui/{button,card}.tsx
 │   │   ├── pages/Home.tsx                   # Main page layout
 │   │   ├── types/job.ts
-│   │   ├── api/jobs.ts
+│   │   ├── api/jobs.ts                      # initial_camera + model URLs
 │   │   └── index.css
 │   ├── tailwind.config.ts
 │   └── package.json
@@ -255,6 +265,7 @@ gaussian-room-reconstruction/
 | Stale frontend after deploy | Hard-refresh (`Ctrl+Shift+R`) or redeploy on Vercel |
 | Training fails immediately | Check GPU availability, PYTHONPATH, frame count (30+) |
 | No PLY generated | Check `/app/storage/models/{job_id}/` and training logs |
+| Measure picks miss (HiDPI) | See [`ARCHITECTURE.md`](ARCHITECTURE.md) splat picking + `[Pick:dims]` logs; ensure SPA/backend commit matches after viewer changes |
 | Open3D build error | Expected under QEMU — works at runtime on real A40 hardware |
 
 ---

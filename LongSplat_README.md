@@ -64,6 +64,12 @@ The training wrapper (`backend/services/longsplat/train.py`) handles:
 - stdout/stderr capture for production logging
 - Output PLY validation
 
+### Viewer API (no extra training step)
+
+Training output under the job model directory feeds the **web viewer** only:
+
+- **`GET /api/jobs/{id}/initial_camera`** — [`backend/services/viewer_initial_camera.py`](backend/services/viewer_initial_camera.py) reads LongSplat-style poses (e.g. `cameras_all.json` when present) and returns a suggested **`position` / `target`** in LongSplat world space. The SPA’s [`Viewer3D.tsx`](frontend/src/components/Viewer3D.tsx) fetches this in parallel with the PLY and applies **`cameraUp: [0, 1, 0]`** for that path (see **ARCHITECTURE.md**). This does **not** change the GPU training command or PLY export.
+
 ---
 
 ## References

@@ -12,15 +12,21 @@ export function maxSplatPickDistance(bbox: {
   return Math.max(diagonal * 4, 3);
 }
 
-/** Screen-space pick tolerance (px on shorter render axis). */
-export const PICK_RADIUS_PX = 12;
+// Screen-space pick cone in physical pixels. 12 physical px ≈ 4 CSS px on Retina,
+// which is too tight. 28 physical px ≈ 9 CSS px at DPR=3 — comfortable for finger / mouse.
+export const PICK_RADIUS_PX = 28;
 
 /** Build uniform grid over centers when count exceeds this (plan: large-PLY acceleration). */
 export const CENTER_GRID_MIN_SPLATS = 50_000;
 
 export type SplatMeshWithCenters = THREE.Object3D & {
   getSplatCount?: (includeSinceLastBuild?: boolean) => number;
-  getSplatCenter?: (globalIndex: number, outCenter: THREE.Vector3, applySceneTransform?: boolean) => void;
+  /** GS3D < 0.3.x: boolean; newer: Matrix4 | null */
+  getSplatCenter?: (
+    globalIndex: number,
+    outCenter: THREE.Vector3,
+    sceneTransform?: boolean | THREE.Matrix4 | null,
+  ) => void;
 };
 
 export interface PickResult {
@@ -72,16 +78,44 @@ export function buildSplatCenterWorldCache(splatMesh: SplatMeshWithCenters): Flo
   const countFn = splatMesh.getSplatCount;
   const centerFn = splatMesh.getSplatCenter;
   if (!countFn || !centerFn) return null;
+
+  // Pass false to count only splats committed to the last SplatTree build.
+  // If the tree hasn't been built yet this returns 0 and we bail out cleanly.
   const n = countFn.call(splatMesh, false);
   if (!n || n <= 0) return null;
+
+  // Always obtain the current world transform so we are independent of whether
+  // the third parameter of getSplatCenter is a boolean or a Matrix4.
+  splatMesh.updateMatrixWorld(true);
+  const matWorld = (splatMesh as unknown as THREE.Object3D).matrixWorld;
+  const isIdentity =
+    matWorld.elements[0] === 1 &&
+    matWorld.elements[5] === 1 &&
+    matWorld.elements[10] === 1 &&
+    matWorld.elements[15] === 1 &&
+    matWorld.elements[12] === 0 &&
+    matWorld.elements[13] === 0 &&
+    matWorld.elements[14] === 0;
+
   const buf = new Float32Array(n * 3);
   const p = new THREE.Vector3();
+
   for (let i = 0; i < n; i++) {
-    centerFn.call(splatMesh, i, p, true);
+    // Pass 'false' for the third param (local space) and apply matrixWorld ourselves.
+    // This is safe for both old (boolean) and new (Matrix4) versions of the API.
+    centerFn.call(splatMesh, i, p, false);
+    if (!isIdentity) p.applyMatrix4(matWorld);
     buf[i * 3] = p.x;
     buf[i * 3 + 1] = p.y;
     buf[i * 3 + 2] = p.z;
   }
+
+  console.log(
+    `[splatPick] center cache built: ${n} splats,`,
+    `matWorld identity: ${isIdentity}`,
+    `sample[0]: (${buf[0].toFixed(3)}, ${buf[1].toFixed(3)}, ${buf[2].toFixed(3)})`,
+  );
+
   return buf;
 }
 
@@ -456,7 +490,26 @@ export function pickSplatMeasure(input: PickSplatMeasureInput): PickResult | nul
         if (!bestLib || h.distance < bestLib.distance) bestLib = h;
       }
       if (bestLib) {
-        return { position: bestLib.origin.clone(), isSnapped: true };
+        // GS3D < 0.3.x names the hit position 'origin'; newer versions use 'point'.
+        // Guard both and fall through to center-cache if neither looks plausible.
+        const hitAny = bestLib as unknown as Record<string, unknown>;
+        const rawPos = (
+          hitAny['point'] instanceof THREE.Vector3
+            ? hitAny['point']
+            : hitAny['origin'] instanceof THREE.Vector3
+              ? hitAny['origin']
+              : null
+        ) as THREE.Vector3 | null;
+
+        if (rawPos) {
+          // Sanity check: hit must be within maxDist from the camera.
+          const camPos = (camera as THREE.PerspectiveCamera).position;
+          if (rawPos.distanceTo(camPos) < maxDist * 2) {
+            return { position: rawPos.clone(), isSnapped: true };
+          }
+          console.warn('[splatPick] GS3D hit position outside maxDist range — discarding', rawPos);
+        }
+        // Fall through to center cache.
       }
     } catch {
       // fall through to center cache
@@ -488,4 +541,43 @@ export function pickSplatMeasure(input: PickSplatMeasureInput): PickResult | nul
   }
 
   return null;
+}
+
+/**
+ * Dev-only: project the first N cached splat centers through the camera and log
+ * where they would appear on screen. Useful to confirm center cache + render dims alignment.
+ *
+ * Usage in browser console (after model loads):
+ *   import { diagPickAlignment } from '@/lib/splatPick';
+ *   diagPickAlignment(camera, centersRef, renderW, renderH);
+ */
+export function diagPickAlignment(
+  camera: THREE.PerspectiveCamera,
+  centers: Float32Array | null,
+  renderW: number,
+  renderH: number,
+  sampleCount = 5,
+): void {
+  if (!centers || centers.length < 3) {
+    console.warn('[diagPick] no center cache');
+    return;
+  }
+  const step = Math.max(1, Math.floor(centers.length / 3 / sampleCount));
+  const v = new THREE.Vector3();
+  console.groupCollapsed(
+    `[diagPick] ${sampleCount} sample splat centers → screen pos (renderDims ${renderW}x${renderH})`,
+  );
+  for (let i = 0; i < sampleCount; i++) {
+    const idx = i * step;
+    v.set(centers[idx * 3], centers[idx * 3 + 1], centers[idx * 3 + 2]);
+    const ndc = v.clone().project(camera);
+    const sx = ((ndc.x + 1) / 2) * renderW;
+    const sy = ((-ndc.y + 1) / 2) * renderH;
+    console.log(
+      `  splat[${idx}]: world=(${v.x.toFixed(2)},${v.y.toFixed(2)},${v.z.toFixed(2)})`,
+      `ndc=(${ndc.x.toFixed(3)},${ndc.y.toFixed(3)})`,
+      `screen=(${sx.toFixed(0)}px, ${sy.toFixed(0)}px)`,
+    );
+  }
+  console.groupEnd();
 }

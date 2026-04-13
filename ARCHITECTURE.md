@@ -71,8 +71,9 @@ A web application that converts video footage of rooms into interactive 3D point
 |---|---|
 | React 18 + TypeScript | UI framework |
 | Vite | Build tool |
-| Three.js (`@react-three/fiber`, `@react-three/drei`) | 3D visualization (points + GLB mesh) |
-| `@mkkellogg/gaussian-splats-3d` | 3DGS React component and core renderer |
+| Three.js (`@react-three/fiber`, `@react-three/drei`) | Scene helpers / legacy paths |
+| `@mkkellogg/gaussian-splats-3d` | 3DGS viewer, PLY load, splat raycaster |
+| [`frontend/src/lib/splatPick.ts`](frontend/src/lib/splatPick.ts) | Measure picking: physical-pixel NDC, world center cache, GS3D hit merge |
 | Custom PLY parser | Binary GS format conversion within renderer |
 | Tailwind CSS | Styling |
 | Lucide React | Iconography |
@@ -195,7 +196,7 @@ The backend converter also detects whether `f_dc` values are already in `[0,1]` 
 
 The API still serves **`.ply`** (and `.ply.gz`). [GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D) also supports **`.ksplat`** and **`.splat`** for faster loads. In-app: use the viewer **Display** panel **Download .ksplat** (browser `PlyLoader` → `KSplatLoader`). Offline / batch: clone the upstream repo and run `node util/create-ksplat.js …`, or use the hosted [converter / demo](https://projects.markkellogg.org/threejs/demo_gaussian_splats_3d.php). The npm package does **not** ship `util/create-ksplat.js`.
 
-**Deployment checklist (Vercel + RunPod):** The SPA (Vercel) and the API/training image (Docker Hub → RunPod) should track the **same `main` commit** when you change PLY or viewer behavior. After merging backend fixes, run `./build-and-push.sh`, **recreate or pull** `interactdevops/gaussian-room-reconstruction:latest` on the pod, then run a **new job**. In container logs, successful normalization logs *Normalized f_rest for web viewer* and export diagnostics should show **9** (or 0) `f_rest_*` fields, not **11**. Old `model.ply` files on disk are not rewritten automatically.
+**Deployment checklist (Vercel + RunPod):** The SPA (Vercel) and the API/training image (Docker Hub → RunPod) should track the **same `main` commit** when you change PLY or viewer behavior. After merging backend fixes, run [`./build-and-push.sh`](build-and-push.sh) (runs **`npm run build`** + **`npm test`** in `frontend/`, header/CORP checks, and required LongSplat files before `docker buildx push`), **recreate or pull** `interactdevops/gaussian-room-reconstruction:latest` on the pod, then run a **new job**. In container logs, successful normalization logs *Normalized f_rest for web viewer* and export diagnostics should show **9** (or 0) `f_rest_*` fields, not **11**. Old `model.ply` files on disk are not rewritten automatically.
 
 ### 3D viewer troubleshooting (GaussianSplats3D)
 
@@ -210,6 +211,7 @@ Use this order to separate **data** issues from **runtime** issues:
 7. **Upside-down or rolled horizon with `initial_camera`:** Pose-derived **`position` / `target`** come from LongSplat world space. `Viewer3D` uses **`cameraUp: [0, 1, 0]`** when that API hint is applied, and keeps **`cameraUp: [0, -1, 0]`** for the bbox-only fallback (MASt3R / OpenCV-style framing). If a scene still looks wrong, compare with hint off (bbox path) and file an issue with a sample job id.
 8. **`VITE_GS3D_FORCE_LEGACY_WORKERS` tradeoff:** `true` can unblock **stuck loads** on some GPUs but disables **GPU-accelerated sort** and **shared worker memory** → **choppier** orbit and more CPU work during interaction. After confirming loads succeed (e.g. JobStatus no longer thrashes the viewer), try **unset** or **`false`** on Vercel for smoother motion on capable devices.
 9. **MetaMask SES / `lockdown-install.js`:** Repeated **`DOMException: An attempt was made to use an object that is not, or is no longer, usable`** often comes from the extension’s SES hardening when libraries (e.g. OrbitControls) touch **`domElement.style`**. Test in **incognito without extensions** or disable that feature for debugging; it is not evidence of a bad PLY.
+10. **Measure picks land off the splat (HiDPI / wrong “floor”):** Confirm **`[Pick:dims]`** once per session: **`physical`** should match **`canvas.width` × `canvas.height`** (backing store). Measure mode uses [`frontend/src/lib/splatPick.ts`](frontend/src/lib/splatPick.ts): library raycast first (`point` or `origin` hit field, distance-gated), then world-space **center cache** built with **`getSplatCenter(..., false)`** + **`matrixWorld`** (GS3D ≥ 0.3.x Matrix4 vs boolean API-safe). **`PICK_RADIUS_PX`** is in **physical** pixels (**28**). If **`[splatPick] center cache built: 0 splats`** appears, wait for **`[GS3D] SplatTree ready`** / retry logs; dev helper **`diagPickAlignment()`** can project cached centers to the screen.
 
 ---
 
@@ -223,8 +225,9 @@ Use this order to separate **data** issues from **runtime** issues:
 | `GET` | `/api/jobs/{id}/status` | Job status, progress, `model_url` (PLY via `/api/jobs/{id}/model`), `model_url_compressed`, `model_url_obj` |
 | `GET` | `/api/jobs/{id}/model` | Download PLY (raw bytes; if only `.ply.gz` exists on disk, decompresses on the fly) |
 | `GET` | `/api/jobs/{id}/model?compressed=true` | Download compressed PLY.gz |
+| `GET` | `/api/jobs/{id}/initial_camera` | JSON `position` / `target` / `up` for viewer first frame ([`viewer_initial_camera.py`](backend/services/viewer_initial_camera.py)); 8s client timeout in viewer |
 | `GET` | `/api/jobs/{id}/cameras` | Optional `cameras_all.json` from training output |
-| `GET` | `/static/models/{id}.glb` | GLB mesh (static file) |
+| `GET` | `/static/models/{id}/{id}.obj` | Optional Poisson/trimesh **OBJ** mesh when [`pipeline.py`](backend/core/pipeline.py) runs OBJ export (`EXPORT_OBJ=true`) |
 
 ---
 
@@ -232,7 +235,7 @@ Use this order to separate **data** issues from **runtime** issues:
 
 ### 3D Viewer (`Viewer3D.tsx`)
 
-- **Splat picking** — **Strategy 1:** library `intersectSplatMesh` with **`raycastAgainstTrueSplatEllipsoid: true`**, choosing the **minimum-distance** hit under the scene-scale `maxDist` (not the first hit in the buffer). **Strategy 2:** nearest splat **center** along the view ray (cached `getSplatCenter(..., true)`), same `mousePos`/`renderDims` / NDC as `setFromCameraAndScreenPosition`, **~12px** screen gate (`PICK_RADIUS_PX`), and the same **`maxDist`** cap on ray parameter `t`. Reconstructions have no inherent metric scale—use **calibration** for real-world distances.
+- **Splat picking** ([`splatPick.ts`](frontend/src/lib/splatPick.ts)) — **Strategy 1:** `intersectSplatMesh` after optional **`raycastAgainstTrueSplatEllipsoid`** (set when the GS3D build exposes it); pick **closest** hit by **`distance`**, read position from **`point`** or **`origin`**, require **`distanceTo(camera) < maxDist × 2`** or fall through. **Strategy 2:** `Float32Array` world **center cache**: `getSplatCount(false)` then `getSplatCenter(i, p, false)` and **`p.applyMatrix4(splatMesh.matrixWorld)`** when the mesh matrix is not identity (works across GS3D boolean vs `Matrix4` third-arg APIs). Cache rebuild on **`onSplatTreeReady`** plus **1.5s retry** if empty and **5s safety poll** if tree ready but cache null. **Screen coords:** `mousePos` and **`renderDims`** use **`canvas` backing-store** size (`width`/`height`), not CSS `clientWidth`/`clientHeight`, so NDC matches Three.js / GS3D on HiDPI. Cone gate: **`PICK_RADIUS_PX`** (**28** physical px on the shorter render axis). Reconstructions are not metric—use **calibration** for real-world distances. Dev: **`diagPickAlignment(camera, centers, w, h)`** projects sample centers for alignment checks.
 - **Orbit mode** — rotate, pan, zoom with OrbitControls
 - **Walk-through mode** — first-person WASD + mouse-look via pointer lock. Walk/Measure listeners attach after `loading` becomes false so they bind to the real canvas once the GaussianSplats3D viewer exists (avoids stuck modes and DOMExceptions from pointer lock on a disposed canvas).
 - **Measurement tool** — click two points on the splat cloud (A = lavender, B = green); **mousemove** shows a semi-transparent preview sphere on the splat under the cursor (throttled raycast, **~100ms** min interval, skips preview rebuild when the pick moves less than **~0.03** world units). Displays calibrated distance after step 2.
