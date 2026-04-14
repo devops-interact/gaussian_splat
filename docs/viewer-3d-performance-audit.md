@@ -2,7 +2,7 @@
 
 This document implements the **learn, don’t merge** audit: we compare our **Three.js + `@mkkellogg/gaussian-splats-3d`** viewer to patterns in **[playcanvas/supersplat](https://github.com/playcanvas/supersplat)** (PlayCanvas + custom splat stack). SuperSplat is **not** integrated or vendored; paths below refer to a **read-only clone** for research (e.g. `/tmp/supersplat-audit-readonly` or your own shallow clone).
 
-**Primary code in this repo:** [`frontend/src/components/Viewer3D.tsx`](../frontend/src/components/Viewer3D.tsx), [`frontend/src/lib/splatPick.ts`](../frontend/src/lib/splatPick.ts), [`frontend/src/lib/measureOverlayMesh.ts`](../frontend/src/lib/measureOverlayMesh.ts), [`frontend/src/types/gaussian-splats-3d.d.ts`](../frontend/src/types/gaussian-splats-3d.d.ts).
+**Primary code in this repo:** [`frontend/src/components/Viewer3D.tsx`](../frontend/src/components/Viewer3D.tsx), [`frontend/src/lib/splatPick.ts`](../frontend/src/lib/splatPick.ts), [`frontend/src/types/gaussian-splats-3d.d.ts`](../frontend/src/types/gaussian-splats-3d.d.ts).
 
 ---
 
@@ -58,10 +58,10 @@ Used for **client-side ksplat export**, not the main viewer load (viewer uses `a
 | `PICK_RADIUS_PX` | `28` | Physical pixels on shorter render axis |
 | `CENTER_GRID_MIN_SPLATS` | `50_000` | Spatial grid for center-cache picking |
 | `maxSplatPickDistance` | `bbox diagonal × 4` (min 3) | Scaled by scene scale in viewer |
-| GS3D raycast | `intersectSplatMesh`; optional `raycastAgainstTrueSplatEllipsoid` | Set after `viewer.start()` when supported |
+| GS3D raycast | `intersectSplatMesh`; optional `raycastAgainstTrueSplatEllipsoid` | Set after `viewer.start()` when supported (not used for measure placement when `splatCentersOnly`) |
 | `getRenderDimensions` | Used when non-zero vs canvas backing store | Pick alignment |
 | Measure hover | `MEASURE_HOVER_MIN_MS = 100`, `MEASURE_PREVIEW_MOVE_EPS = 0.03` | Reduces pick churn |
-| Measure mesh | [`measureOverlayMesh.ts`](../frontend/src/lib/measureOverlayMesh.ts): `MEASURE_OVERLAY_VOXEL_TARGET = 3000`, PCA + Delaunay | Raycast cost grows with triangle count |
+| Measure snap | `pickSplatMeasure` + `splatCentersOnly`: cone over **world center cache** only | No proxy mesh; cost is center-cache traversal / grid buckets vs splat count |
 
 ### 1.5 Deployment levers ([`ARCHITECTURE.md`](../ARCHITECTURE.md), [`frontend/vercel.json`](../frontend/vercel.json))
 
@@ -108,7 +108,7 @@ Observations from **shallow clone** of `playcanvas/supersplat` (`src/`). Engine:
 2. **Tiers:** Same PLY bucketed by splat count: **&lt;50k**, **50k–200k**, **&gt;200k** (50k aligns with `PROGRESSIVE_VERTEX_THRESHOLD`).
 3. **A/B flags:** Document for each run: `crossOriginIsolated` (Application → Frames), **`VITE_GS3D_FORCE_LEGACY_WORKERS`** build flag, **`VITE_VIEWER_SCENE_SCALE`**.
 4. **Metrics to note:** Long tasks (&gt;50 ms), **GPU** row, frame duration, JS heap (Memory tab) after load settles.
-5. **Regression:** After any viewer flag change, verify **pick alignment** (console `[Pick:dims]` per README) and **measure** two-point + mesh snap.
+5. **Regression:** After any viewer flag change, verify **pick alignment** (console `[Pick:dims]` per README) and **measure** two-point calibration + distance on splat-center snaps.
 
 ---
 
@@ -122,7 +122,7 @@ Observations from **shallow clone** of `playcanvas/supersplat` (`src/`). Engine:
 | H3 | P1 | `PROGRESSIVE_VERTEX_THRESHOLD` wrong for product mix | A/B 35k / 50k / 75k | TTF vs jank tradeoff documented |
 | H4 | P2 | PlyLoader `sectionSize` / `blockSize` / `bucketSize` help ksplat export or memory | Read GS3D README + small experiment | Export still valid; tests pass |
 | H5 | P2 | `integerBasedSort: true` helps on huge scenes | Benchmark | Sort stability + visual check |
-| H6 | P2 | Stronger measure mesh throttle reduces main-thread spikes | Tune `MEASURE_HOVER_MIN_MS` | Measure UX still responsive |
+| H6 | P2 | Stronger measure hover throttle reduces main-thread spikes | Tune `MEASURE_HOVER_MIN_MS` | Measure UX still responsive |
 | H7 | P3 | Default SH degree / splat scale presets per tier | UX + FPS | Document presets only |
 
 ---

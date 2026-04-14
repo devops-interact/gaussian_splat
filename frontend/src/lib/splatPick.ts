@@ -32,6 +32,8 @@ export type SplatMeshWithCenters = THREE.Object3D & {
 export interface PickResult {
   position: THREE.Vector3;
   isSnapped: boolean;
+  /** Set when the pick resolved to a splat world center (cone / center-cache path). */
+  splatCenterIndex?: number;
 }
 
 export interface SplatHit {
@@ -381,6 +383,8 @@ function collectGridCandidatesAlongRay(
   }
 }
 
+export type NearestSplatCenterHit = { position: THREE.Vector3; splatIndex: number };
+
 /**
  * Nearest splat center along the view ray within screen cone; smallest ray parameter t wins.
  */
@@ -394,7 +398,7 @@ export function pickNearestCenterConeAlongRay(
   renderDims: THREE.Vector2,
   maxDistAlongRay: number,
   grid: SplatCenterGridAccel | null,
-): THREE.Vector3 | null {
+): NearestSplatCenterHit | null {
   const shortAxis = Math.max(1, Math.min(renderDims.x, renderDims.y));
   const ndcTolPerPx = 2 / shortAxis;
   const ndcTol = PICK_RADIUS_PX * ndcTolPerPx;
@@ -444,7 +448,10 @@ export function pickNearestCenterConeAlongRay(
 
   if (bestI < 0) return null;
   const j = bestI * 3;
-  return new THREE.Vector3(centers[j], centers[j + 1], centers[j + 2]);
+  return {
+    position: new THREE.Vector3(centers[j], centers[j + 1], centers[j + 2]),
+    splatIndex: bestI,
+  };
 }
 
 export interface PickSplatMeasureInput {
@@ -459,6 +466,11 @@ export interface PickSplatMeasureInput {
   gs3d: GaussianSplatPickAdapter | null;
   /** Default: horizontal plane through y = 0 */
   groundPlane?: THREE.Plane;
+  /**
+   * When true: only nearest splat center under the cursor cone (no GS3D surface hit, no ground plane).
+   * Used for measure mode snapping to discrete splat centers.
+   */
+  splatCentersOnly?: boolean;
 }
 
 export function pickSplatMeasure(input: PickSplatMeasureInput): PickResult | null {
@@ -472,12 +484,38 @@ export function pickSplatMeasure(input: PickSplatMeasureInput): PickResult | nul
     centers,
     centerGrid,
     gs3d,
+    splatCentersOnly = false,
   } = input;
 
   if (!splatMeshVisible) return null;
   if (gs3d?.isLoading()) return null;
 
   const groundPlane = input.groundPlane ?? new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+  if (splatCentersOnly) {
+    if (!centers || centers.length < 3) return null;
+    const { ndcX, ndcY } = ndcFromMousePos(mousePos, renderDims);
+    const ray = worldRayFromCameraScreen(camera, mousePos, renderDims);
+    const centerHit = pickNearestCenterConeAlongRay(
+      camera,
+      ray.origin,
+      ray.direction,
+      ndcX,
+      ndcY,
+      centers,
+      renderDims,
+      maxDist,
+      centerGrid,
+    );
+    if (centerHit) {
+      return {
+        position: centerHit.position.clone(),
+        isSnapped: true,
+        splatCenterIndex: centerHit.splatIndex,
+      };
+    }
+    return null;
+  }
 
   if (splatTreeReady && gs3d) {
     try {
@@ -502,8 +540,11 @@ export function pickSplatMeasure(input: PickSplatMeasureInput): PickResult | nul
         ) as THREE.Vector3 | null;
 
         if (rawPos) {
-          // Primary plausibility gate is h.distance <= maxDist above; trust library hit position.
-          return { position: rawPos.clone(), isSnapped: true };
+          const idx =
+            typeof bestLib.splatIndex === 'number' && Number.isFinite(bestLib.splatIndex)
+              ? bestLib.splatIndex
+              : undefined;
+          return { position: rawPos.clone(), isSnapped: true, splatCenterIndex: idx };
         }
         // Fall through to center cache.
       }
@@ -516,7 +557,7 @@ export function pickSplatMeasure(input: PickSplatMeasureInput): PickResult | nul
   const ray = worldRayFromCameraScreen(camera, mousePos, renderDims);
 
   if (centers && centers.length >= 3) {
-    const hit = pickNearestCenterConeAlongRay(
+    const centerHit = pickNearestCenterConeAlongRay(
       camera,
       ray.origin,
       ray.direction,
@@ -527,7 +568,13 @@ export function pickSplatMeasure(input: PickSplatMeasureInput): PickResult | nul
       maxDist,
       centerGrid,
     );
-    if (hit) return { position: hit, isSnapped: true };
+    if (centerHit) {
+      return {
+        position: centerHit.position.clone(),
+        isSnapped: true,
+        splatCenterIndex: centerHit.splatIndex,
+      };
+    }
   }
 
   const groundHit = new THREE.Vector3();

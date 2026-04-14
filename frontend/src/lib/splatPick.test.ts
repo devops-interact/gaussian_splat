@@ -81,9 +81,10 @@ describe('pickNearestCenterConeAlongRay', () => {
       null,
     );
     expect(hit).not.toBeNull();
-    expect(hit!.x).toBeCloseTo(0);
-    expect(hit!.y).toBeCloseTo(0);
-    expect(hit!.z).toBeCloseTo(3);
+    expect(hit!.position.x).toBeCloseTo(0);
+    expect(hit!.position.y).toBeCloseTo(0);
+    expect(hit!.position.z).toBeCloseTo(3);
+    expect(hit!.splatIndex).toBe(1);
   });
 });
 
@@ -185,5 +186,65 @@ describe('pickSplatMeasure', () => {
     expect(pick).not.toBeNull();
     expect(pick!.isSnapped).toBe(false);
     expect(Math.abs(pick!.position.y)).toBeLessThan(1e-3);
+  });
+
+  it('splatCentersOnly skips GS3D and returns nearest center with index', () => {
+    const cam = new THREE.PerspectiveCamera(60, 800 / 600, 0.1, 100);
+    cam.position.set(0, 0, 5);
+    cam.lookAt(0, 0, 0);
+    cam.updateProjectionMatrix();
+    cam.updateMatrixWorld(true);
+
+    const centers = new Float32Array([
+      0, 0, 0.5,
+      0, 0, 3,
+    ]);
+    const gs3d = {
+      setFromCameraAndScreenPosition: vi.fn(),
+      intersectSplatMesh: vi.fn(() => []),
+      splatMesh: new THREE.Group(),
+      isLoading: () => false,
+    };
+
+    const pick = pickSplatMeasure({
+      camera: cam,
+      mousePos: new THREE.Vector2(400, 300),
+      renderDims: new THREE.Vector2(800, 600),
+      maxDist: 100,
+      splatMeshVisible: true,
+      splatTreeReady: true,
+      centers,
+      centerGrid: null,
+      gs3d,
+      splatCentersOnly: true,
+    });
+
+    expect(gs3d.setFromCameraAndScreenPosition).not.toHaveBeenCalled();
+    expect(pick?.isSnapped).toBe(true);
+    expect(pick?.splatCenterIndex).toBe(1);
+    expect(pick?.position.z).toBeCloseTo(3);
+  });
+
+  it('splatCentersOnly returns null when no center in cone', () => {
+    const cam = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+    cam.position.set(0, 0, 5);
+    cam.lookAt(0, 0, 0);
+    cam.updateProjectionMatrix();
+    cam.updateMatrixWorld(true);
+
+    const centers = new Float32Array([10, 10, 10]);
+    const pick = pickSplatMeasure({
+      camera: cam,
+      mousePos: new THREE.Vector2(400, 300),
+      renderDims: new THREE.Vector2(800, 600),
+      maxDist: 100,
+      splatMeshVisible: true,
+      splatTreeReady: false,
+      centers,
+      centerGrid: null,
+      gs3d: null,
+      splatCentersOnly: true,
+    });
+    expect(pick).toBeNull();
   });
 });
