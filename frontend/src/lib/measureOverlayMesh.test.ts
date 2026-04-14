@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import {
   buildMeasureOverlayFromCenters,
+  createMeasureOverlayWireframeMaterial,
   pickMeshSurface,
   voxelDownsampleCenters,
   MEASURE_OVERLAY_VOXEL_TARGET,
@@ -39,6 +40,62 @@ describe('measureOverlayMesh', () => {
       expect(r.geometry.index).toBeTruthy();
       expect((r.geometry.index!.count ?? 0) > 0).toBe(true);
     }
+  });
+
+  it('buildMeasureOverlayFromCenters handles oblique plane via PCA', () => {
+    const nx = 1 / Math.sqrt(3);
+    const ny = 1 / Math.sqrt(3);
+    const nz = 1 / Math.sqrt(3);
+    const ax = 0;
+    const ay = 1;
+    const az = 0;
+    let tx = ay * nz - az * ny;
+    let ty = az * nx - ax * nz;
+    let tz = ax * ny - ay * nx;
+    const tlen = Math.hypot(tx, ty, tz) || 1;
+    tx /= tlen;
+    ty /= tlen;
+    tz /= tlen;
+    const bx = ny * tz - nz * ty;
+    const by = nz * tx - nx * tz;
+    const bz = nx * ty - ny * tx;
+    const pts: number[] = [];
+    for (let i = 0; i < 400; i++) {
+      const u = (Math.random() - 0.5) * 6;
+      const v = (Math.random() - 0.5) * 6;
+      const noise = (Math.random() - 0.5) * 0.02;
+      pts.push(
+        u * tx + v * bx + noise * nx,
+        u * ty + v * by + noise * ny,
+        u * tz + v * bz + noise * nz,
+      );
+    }
+    const r = buildMeasureOverlayFromCenters(new Float32Array(pts));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect((r.geometry.index?.count ?? 0) / 3).toBeGreaterThan(20);
+    }
+  });
+
+  it('buildMeasureOverlayFromCenters falls back for isotropic ball', () => {
+    const pts: number[] = [];
+    for (let i = 0; i < 250; i++) {
+      pts.push(Math.random() * 2 - 1, Math.random() * 2 - 1, Math.random() * 2 - 1);
+    }
+    const r = buildMeasureOverlayFromCenters(new Float32Array(pts));
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect((r.geometry.index?.count ?? 0) > 0).toBe(true);
+    }
+  });
+
+  it('createMeasureOverlayWireframeMaterial scales polygon offset with scene scale', () => {
+    const m1 = createMeasureOverlayWireframeMaterial(1);
+    const m4 = createMeasureOverlayWireframeMaterial(4);
+    expect(m4.polygonOffsetFactor).toBeCloseTo(m1.polygonOffsetFactor! * 4, 5);
+    expect(m4.polygonOffsetUnits).toBeCloseTo(m1.polygonOffsetUnits! * 4, 5);
+    m1.dispose();
+    m4.dispose();
   });
 
   it('pickMeshSurface hits front-facing triangle', () => {

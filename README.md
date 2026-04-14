@@ -8,7 +8,7 @@ A production web application that converts video footage of rooms into interacti
 
 - **Video upload** with quality preset selection (**Balanced** / **Quality**)
 - **LongSplat training** with MASt3R for automatic pose estimation (no COLMAP)
-- **3D Viewer** — orbit, walk-through, measurement (optional low-poly wireframe mesh snap), snapshot capture
+- **3D Viewer** — orbit, walk-through, measurement (optional mid-poly wireframe mesh snap), snapshot capture
 - **Gaussian splats + optional mesh** — primary view is the splat PLY; optional **OBJ** mesh download when the API exposes `model_url_obj` (`EXPORT_OBJ=true` on the pod)
 - **Metadata panel** — point count, bounding box, color data, processing status
 - **Downloads** — `.ply`, `.ply.gz`, optional `.obj` (mesh, when enabled)

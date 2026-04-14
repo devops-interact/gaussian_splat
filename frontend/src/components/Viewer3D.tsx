@@ -1087,7 +1087,7 @@ export default function Viewer3D({
             return;
           }
 
-          const mat = createMeasureOverlayWireframeMaterial();
+          const mat = createMeasureOverlayWireframeMaterial(sceneScaleRef.current);
           const mesh = new THREE.Mesh(built.geometry, mat);
           mesh.name = 'MeasureOverlayMesh';
           mesh.userData.__measureOverlayMesh = true;
