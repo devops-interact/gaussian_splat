@@ -166,7 +166,7 @@ async def train_longsplat(
         
         # Scale sub-iteration parameters with main iterations (capped at quality_baseline).
         # Baseline 12000 = full internal budgets when main --iterations >= 12000 (e.g. Balanced).
-        # Quality preset can use higher main --iterations (e.g. 28k) without raising these caps.
+        # Quality preset can use higher main --iterations (e.g. 24k) without raising these caps.
         quality_baseline = 12000
         quality_factor = min(1.0, iterations / quality_baseline)
         pose_iter   = max(40,  int(100  * quality_factor))
@@ -178,7 +178,7 @@ async def train_longsplat(
         # convert_scale_cap must be >= max QUALITY_PRESETS[*].convert_3dgs_refinement_cap or scaled_convert
         # plateaus below the preset cap (quality_factor==1 would cap at convert_scale_cap only).
         convert_floor = 3000
-        convert_scale_cap = 14_000
+        convert_scale_cap = 10_000
         scaled_convert = int(convert_scale_cap * quality_factor)
         convert_iters = max(convert_floor, min(convert_refinement_cap, scaled_convert))
 

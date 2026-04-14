@@ -8,7 +8,7 @@ A production web application that converts video footage of rooms into interacti
 
 - **Video upload** with quality preset selection (**Balanced** / **Quality**)
 - **LongSplat training** with MASt3R for automatic pose estimation (no COLMAP)
-- **3D Viewer** — orbit, walk-through, measurement tool, snapshot capture
+- **3D Viewer** — orbit, walk-through, measurement (optional low-poly wireframe mesh snap), snapshot capture
 - **Gaussian splats + optional mesh** — primary view is the splat PLY; optional **OBJ** mesh download when the API exposes `model_url_obj` (`EXPORT_OBJ=true` on the pod)
 - **Metadata panel** — point count, bounding box, color data, processing status
 - **Downloads** — `.ply`, `.ply.gz`, optional `.obj` (mesh, when enabled)
@@ -101,8 +101,8 @@ Defined in `backend/core/config.py` (`QUALITY_PRESETS`). Sub-iterations and `con
 
 | Preset | FPS | LongSplat iterations | Est. time | Use case |
 |---|---|---|---|---|
-| **Balanced** | 1.5 | 15,000 | ~40 min (typ.; long clips longer) | Default quality; **convert_3dgs** cap **8k** iters |
-| **Quality** | 2.25 | 28,000 | ~85 min (often **1h+**) | Highest fidelity; **convert_3dgs** up to **12k** iters |
+| **Balanced** | 1.5 | 12,000 | ~35 min (typ.; long clips longer) | Default quality; **convert_3dgs** cap **6.5k** iters |
+| **Quality** | 1.0 | 24,000 | ~70 min (often **1h+**) | Highest fidelity; **convert_3dgs** up to **10k** iters; **1.0 FPS** |
 
 Wall time is **main `train.py` + second GPU phase `convert_3dgs.py`** (Scaffold→3DGS SH), then CPU PLY conversion—see [`ARCHITECTURE.md`](ARCHITECTURE.md) Quality Presets and server logs `[LongSplat timing]`.
 

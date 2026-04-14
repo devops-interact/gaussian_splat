@@ -15,6 +15,11 @@ import {
   type SplatCenterGridAccel,
   type SplatMeshWithCenters,
 } from '@/lib/splatPick';
+import {
+  buildMeasureOverlayFromCenters,
+  createMeasureOverlayWireframeMaterial,
+  pickMeshSurface,
+} from '@/lib/measureOverlayMesh';
 import { cn } from '@/lib/utils';
 import {
   Camera,
@@ -193,6 +198,7 @@ function removeMeasurePreviewFromScene(scene: THREE.Scene) {
 }
 
 const MEASURE_PICK_HINT_IDLE = 'Move over the model…';
+const MEASURE_MESH_HINT_IDLE = 'Move over the cyan wireframe mesh…';
 
 interface MeasurePreviewOptions {
   previousWorld?: THREE.Vector3 | null;
@@ -314,9 +320,14 @@ function buildMeasurePickHint(
   calibLen: number,
   measureLen: number,
   pick: PickResult | null,
+  meshWireSnap: boolean,
 ): string {
-  if (!pick) return MEASURE_PICK_HINT_IDLE;
-  if (!pick.isSnapped) return 'No splat under cursor — move over the reconstruction to preview a point.';
+  if (!pick) return meshWireSnap ? MEASURE_MESH_HINT_IDLE : MEASURE_PICK_HINT_IDLE;
+  if (!pick.isSnapped) {
+    return meshWireSnap
+      ? 'No mesh under cursor — move over the cyan wireframe.'
+      : 'No splat under cursor — move over the reconstruction to preview a point.';
+  }
   if (measurePhase === 'calibrate') {
     if (calibLen === 0) return 'Preview: calibration A · click to place';
     if (calibLen === 1) return 'Preview: calibration B · click to place';
@@ -626,6 +637,9 @@ export default function Viewer3D({
   const splatCentersRef = useRef<Float32Array | null>(null);
   const splatCenterGridRef = useRef<SplatCenterGridAccel | null>(null);
   const splatTreeReadyRef = useRef<boolean>(false);
+  /** Low-poly wireframe mesh for measure-only raycast; see docs/measure-mesh-overlay-prompt.md */
+  const measureOverlayMeshRef = useRef<THREE.Mesh | null>(null);
+  const measureMeshWireSnapEnabledRef = useRef(true);
   const onMetadataRef = useRef(onModelMetadata);
   onMetadataRef.current = onModelMetadata;
 
@@ -642,11 +656,28 @@ export default function Viewer3D({
   const [measurePoints, setMeasurePoints] = useState<MeasurePoint[]>([]);
   const [measuredDistance, setMeasuredDistance] = useState<number | null>(null);
   const [measurePickHint, setMeasurePickHint] = useState(MEASURE_PICK_HINT_IDLE);
+  const [measureMeshWireSnapEnabled, setMeasureMeshWireSnapEnabled] = useState(true);
+  const [measureOverlayBuilt, setMeasureOverlayBuilt] = useState(false);
+  const [measureOverlayError, setMeasureOverlayError] = useState<string | null>(null);
 
   const visibleMeasurePoints = measurePhase === 'calibrate' ? calibPoints : measurePoints;
 
-  const measurePickCtxRef = useRef({ measurePhase, calibPoints, measurePoints });
-  measurePickCtxRef.current = { measurePhase, calibPoints, measurePoints };
+  measureMeshWireSnapEnabledRef.current = measureMeshWireSnapEnabled;
+  const meshWireSnapActive =
+    measureMeshWireSnapEnabled && measureOverlayBuilt && !measureOverlayError;
+
+  const measurePickCtxRef = useRef({
+    measurePhase,
+    calibPoints,
+    measurePoints,
+    meshWireSnap: false,
+  });
+  measurePickCtxRef.current = {
+    measurePhase,
+    calibPoints,
+    measurePoints,
+    meshWireSnap: meshWireSnapActive,
+  };
 
   // Display / render tuning (GaussianSplats3D; see https://projects.markkellogg.org/threejs/demo_gaussian_splats_3d.php)
   const [minAlpha, setMinAlpha] = useState(1);
@@ -1019,6 +1050,59 @@ export default function Viewer3D({
           console.log('[GS3D] Splat count after load (lastBuild / bufferTotal):', lastBuild, '/', bufferTotal);
         }
 
+        const syncMeasureOverlayMesh = () => {
+          if (disposed || viewerRef.current !== viewer) return;
+          const scene = (viewer as unknown as { threeScene?: THREE.Scene }).threeScene;
+          if (!scene) return;
+
+          const existing = measureOverlayMeshRef.current;
+          if (existing) {
+            scene.remove(existing);
+            existing.geometry.dispose();
+            (existing.material as THREE.Material).dispose();
+            measureOverlayMeshRef.current = null;
+          }
+          if (!disposed) {
+            setMeasureOverlayBuilt(false);
+            setMeasureOverlayError(null);
+          }
+
+          const buf = splatCentersRef.current;
+          if (!buf || buf.length < 9) {
+            if (!disposed && !buf) {
+              setMeasureOverlayError('Waiting for splat centers…');
+            } else if (!disposed && buf && buf.length < 9) {
+              setMeasureOverlayError('Too few splat centers for wireframe mesh');
+            }
+            return;
+          }
+
+          const built = buildMeasureOverlayFromCenters(buf);
+          if (!built.ok) {
+            console.warn('[MeasureOverlay]', built.error);
+            if (!disposed) {
+              setMeasureOverlayError(built.error);
+              setMeasureOverlayBuilt(false);
+            }
+            return;
+          }
+
+          const mat = createMeasureOverlayWireframeMaterial();
+          const mesh = new THREE.Mesh(built.geometry, mat);
+          mesh.name = 'MeasureOverlayMesh';
+          mesh.userData.__measureOverlayMesh = true;
+          mesh.visible = measureMeshWireSnapEnabledRef.current;
+          mesh.renderOrder = 5;
+          scene.add(mesh);
+          measureOverlayMeshRef.current = mesh;
+          if (!disposed) {
+            setMeasureOverlayError(null);
+            setMeasureOverlayBuilt(true);
+          }
+          const triCount = built.geometry.index ? built.geometry.index.count / 3 : 0;
+          console.log('[MeasureOverlay] wireframe mesh', triCount, 'triangles');
+        };
+
         // Build splat center cache only after SplatTree is ready (transforms are finalized)
         const rebuildCenterCache = () => {
           const buf = buildSplatCenterWorldCache(viewer.splatMesh as SplatMeshWithCenters);
@@ -1034,6 +1118,7 @@ export default function Viewer3D({
           } else {
             console.warn('[GS3D] Failed to build splat center cache');
           }
+          syncMeasureOverlayMesh();
         };
 
         // Register SplatTree ready callback for library raycaster.
@@ -1158,6 +1243,14 @@ export default function Viewer3D({
       viewerRef.current = null;
       if (viewer) {
         try {
+          const scene = (viewer as unknown as { threeScene?: THREE.Scene }).threeScene;
+          const om = measureOverlayMeshRef.current;
+          if (scene && om) {
+            scene.remove(om);
+            om.geometry.dispose();
+            (om.material as THREE.Material).dispose();
+            measureOverlayMeshRef.current = null;
+          }
           viewer.dispose();
         } catch {
           /* GaussianSplats3D may removeChild after React already detached nodes */
@@ -1410,6 +1503,9 @@ export default function Viewer3D({
     const threeScene = viewerAny.threeScene;
     if (!camera || !gsRaycaster || !splatMesh || !threeScene) return;
 
+    const meshSnapActive =
+      measureMeshWireSnapEnabled && measureOverlayBuilt && !measureOverlayError;
+
     const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     let pickDimsLogged = false;
 
@@ -1468,6 +1564,15 @@ export default function Viewer3D({
         : 100;
       const maxDist = baseMax * sceneScaleRef.current;
 
+      if (meshSnapActive) {
+        const om = measureOverlayMeshRef.current;
+        if (om && om.geometry) {
+          const pt = pickMeshSurface({ camera, mousePos, renderDims, mesh: om });
+          if (pt) return { position: pt, isSnapped: true };
+          return null;
+        }
+      }
+
       return pickSplatMeasure({
         camera,
         mousePos,
@@ -1492,6 +1597,8 @@ export default function Viewer3D({
           handleAddMeasurePoint(pick.position);
         } else if (pick && !pick.isSnapped) {
           console.log('[GS3D] Click rejected — no splat surface under cursor');
+        } else if (!pick && meshSnapActive) {
+          console.log('[MeasureOverlay] Click rejected — no wireframe mesh under cursor');
         }
       } catch (err) {
         console.warn('[GS3D] Raycaster intersection failed (likely during mid-sort):', err);
@@ -1519,6 +1626,7 @@ export default function Viewer3D({
             ctx.calibPoints.length,
             ctx.measurePoints.length,
             pick,
+            ctx.meshWireSnap,
           );
           setMeasurePickHint((prev) => (prev === hint ? prev : hint));
           return;
@@ -1536,11 +1644,12 @@ export default function Viewer3D({
           ctx.calibPoints.length,
           ctx.measurePoints.length,
           pick,
+          ctx.meshWireSnap,
         );
         setMeasurePickHint((prev) => (prev === hint ? prev : hint));
       } catch {
         removeMeasurePreviewFromScene(threeScene);
-        setMeasurePickHint(MEASURE_PICK_HINT_IDLE);
+        setMeasurePickHint(meshSnapActive ? MEASURE_MESH_HINT_IDLE : MEASURE_PICK_HINT_IDLE);
         hasLastPreviewWorld = false;
       }
     };
@@ -1548,7 +1657,7 @@ export default function Viewer3D({
     const onLeave = () => {
       hasLastPreviewWorld = false;
       removeMeasurePreviewFromScene(threeScene);
-      setMeasurePickHint(MEASURE_PICK_HINT_IDLE);
+      setMeasurePickHint(meshSnapActive ? MEASURE_MESH_HINT_IDLE : MEASURE_PICK_HINT_IDLE);
     };
 
     canvas.addEventListener('click', onClick);
@@ -1560,7 +1669,22 @@ export default function Viewer3D({
       canvas.removeEventListener('pointerleave', onLeave);
       removeMeasurePreviewFromScene(threeScene);
     };
-  }, [mode, measurePhase, calibration, loading, handleAddMeasurePoint]);
+  }, [
+    mode,
+    measurePhase,
+    calibration,
+    loading,
+    handleAddMeasurePoint,
+    measureMeshWireSnapEnabled,
+    measureOverlayBuilt,
+    measureOverlayError,
+  ]);
+
+  useEffect(() => {
+    const m = measureOverlayMeshRef.current;
+    if (!m) return;
+    m.visible = measureMeshWireSnapEnabled;
+  }, [measureMeshWireSnapEnabled, measureOverlayBuilt]);
 
   const handleConfirmCalibration = useCallback(() => {
     if (calibPoints.length !== 2) return;
@@ -2000,6 +2124,20 @@ export default function Viewer3D({
                 )}
               </>
             )}
+            </div>
+            <div className="flex flex-col gap-1 pl-0.5">
+              <label className="flex items-center gap-2 text-[10px] text-white/55 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={measureMeshWireSnapEnabled}
+                  onChange={(e) => setMeasureMeshWireSnapEnabled(e.target.checked)}
+                  className="rounded border-white/20 bg-black/50"
+                />
+                Wireframe mesh picks (low-poly proxy surface)
+              </label>
+              {measureOverlayError && (
+                <span className="text-amber-200/90 text-[10px] leading-snug">{measureOverlayError}</span>
+              )}
             </div>
             <p className="text-[10px] text-white/45 leading-snug pl-0.5">{measurePickHint}</p>
           </div>
