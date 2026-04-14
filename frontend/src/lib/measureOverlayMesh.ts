@@ -392,6 +392,7 @@ const OVERLAY_SCALE_MAX = 10;
  */
 export function createMeasureOverlayWireframeMaterial(sceneScale = 1): THREE.MeshBasicMaterial {
   const s = Math.min(OVERLAY_SCALE_MAX, Math.max(OVERLAY_SCALE_MIN, sceneScale));
+  // Base magnitude -2.5 tuned at scene scale 1 (desktop); scale with splat so offset stays comparable.
   const factor = -2.5 * s;
   const units = -2.5 * s;
   return new THREE.MeshBasicMaterial({
