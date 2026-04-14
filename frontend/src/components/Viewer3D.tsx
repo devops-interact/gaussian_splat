@@ -73,7 +73,7 @@ const PROGRESSIVE_VERTEX_THRESHOLD = 50_000;
 const BBOX_CAM_DIST_MULT = 0.92;
 /** Floor so tiny reconstructions are not framed from too far away (world units). */
 const BBOX_CAM_DIST_MIN = 1.75;
-/** Initial splat ellipsoid scale before user adjusts Display panel (1 = library default). */
+/** Initial splat ellipsoid scale at Viewer init (1 = library default). */
 const DEFAULT_SPLAT_SCALE = 1.25;
 
 /** Measure-mode hover: ms between picks; larger reduces main-thread / scene churn. */
@@ -192,7 +192,18 @@ function removeMeasurePreviewFromScene(scene: THREE.Scene) {
   }
 }
 
-const MEASURE_PICK_HINT_IDLE = 'Move over the splat cloud — preview snaps to nearest splat center…';
+const MEASURE_PICK_HINT_IDLE =
+  'Move over the splat cloud — yellow preview marks the splat center you will select…';
+
+/** Hover pre-select (snapped pick): saturated yellow, distinct from placed-point blue in-scene. */
+const MEASURE_PREVIEW_YELLOW = 0xffdd00;
+const MEASURE_PREVIEW_YELLOW_LINES = 0xf0c419;
+const MEASURE_PREVIEW_CONNECTOR = 0xffee99;
+
+/** Committed measure points in the Three.js scene (see measurement visuals effect). */
+const MEASURE_PLACED_A = '#6eb7ff';
+const MEASURE_PLACED_B = '#2f8fff';
+const MEASURE_PLACED_LINE = '#7ec8ff';
 
 interface MeasurePreviewOptions {
   previousWorld?: THREE.Vector3 | null;
@@ -209,9 +220,11 @@ function setMeasurePreviewInScene(
 
   const { position, isSnapped } = pick;
   const hasCenterId = typeof pick.splatCenterIndex === 'number';
-  const color = isSnapped ? (hasCenterId ? 0xc4e86a : 0xefe752) : 0xff6b6b;
+  const color = isSnapped ? MEASURE_PREVIEW_YELLOW : 0xff6b6b;
+  const lineColor = isSnapped ? MEASURE_PREVIEW_YELLOW_LINES : 0xff6b6b;
   const camDist = camera.position.distanceTo(position);
-  const scale = Math.max(0.01, camDist * 0.012);
+  const scaleBase = Math.max(0.01, camDist * 0.012);
+  const scale = hasCenterId && isSnapped ? scaleBase * 1.2 : scaleBase;
 
   // Ring indicator
   const ringGeo = new THREE.RingGeometry(scale * 0.5, scale, 24);
@@ -231,7 +244,6 @@ function setMeasurePreviewInScene(
 
   // Crosshair lines through the ring center
   const halfLen = scale * 1.2;
-  const lineColor = isSnapped ? 0xefe752 : 0xff6b6b;
   const lineMat = new THREE.LineBasicMaterial({
     color: lineColor,
     transparent: true,
@@ -280,9 +292,9 @@ function setMeasurePreviewInScene(
   if (isSnapped) {
     const ghostGeo = new THREE.SphereGeometry(0.012, 12, 12);
     const ghostMat = new THREE.MeshBasicMaterial({
-      color: 0xefe752,
+      color: MEASURE_PREVIEW_YELLOW,
       transparent: true,
-      opacity: 0.34,
+      opacity: 0.4,
       depthTest: false,
       depthWrite: false,
     });
@@ -296,7 +308,7 @@ function setMeasurePreviewInScene(
   if (isSnapped && prev) {
     const dashGeo = new THREE.BufferGeometry().setFromPoints([prev.clone(), position.clone()]);
     const dashMat = new THREE.LineDashedMaterial({
-      color: 0xf5ec99,
+      color: MEASURE_PREVIEW_CONNECTOR,
       dashSize: 0.045,
       gapSize: 0.03,
       transparent: true,
@@ -665,14 +677,13 @@ export default function Viewer3D({
   const [minAlpha, setMinAlpha] = useState(1);
   const [loadMinAlpha, setLoadMinAlpha] = useState(1);
   const [shDisplayDegree, setShDisplayDegree] = useState<0 | 1 | 2>(2);
-  const [splatScale, setSplatScale] = useState(DEFAULT_SPLAT_SCALE);
+  const [splatScale] = useState(DEFAULT_SPLAT_SCALE);
   const [displayPanelOpen, setDisplayPanelOpen] = useState(false);
   const [ksplatBusy, setKsplatBusy] = useState(false);
   const [ksplatError, setKsplatError] = useState<string | null>(null);
   /** Live Display tuning: false when @mkkellogg/gaussian-splats-3d Viewer omits these methods (e.g. 0.4.7). */
-  const [liveViewerApis, setLiveViewerApis] = useState<{ sh: boolean; scale: boolean }>({
+  const [liveViewerApis, setLiveViewerApis] = useState<{ sh: boolean }>({
     sh: false,
-    scale: false,
   });
   const liveTuningInfoLoggedRef = useRef(false);
 
@@ -854,7 +865,7 @@ export default function Viewer3D({
           ];
           cameraUp = [0, 1, 0];
           console.log(
-            '[GS3D] phase: initial_camera applied (first 24 poses + offset); cameraUp=[0,1,0]',
+            '[GS3D] phase: initial_camera applied (first cameras_all pose + offset); cameraUp=[0,1,0]',
             hint,
           );
         } else if (!disposed && jobId) {
@@ -1185,19 +1196,19 @@ export default function Viewer3D({
 
   useEffect(() => {
     if (loading) {
-      setLiveViewerApis({ sh: false, scale: false });
+      setLiveViewerApis({ sh: false });
       return;
     }
     const v = viewerRef.current;
     if (!v) return;
     const sh = typeof (v as { setActiveSphericalHarmonicsDegrees?: (d: number) => void }).setActiveSphericalHarmonicsDegrees === 'function';
-    const scale = typeof (v as { setSplatScale?: (s?: number) => void }).setSplatScale === 'function';
-    setLiveViewerApis({ sh, scale });
-    if ((!sh || !scale) && !liveTuningInfoLoggedRef.current) {
+    const scaleApi = typeof (v as { setSplatScale?: (s?: number) => void }).setSplatScale === 'function';
+    setLiveViewerApis({ sh });
+    if ((!sh || !scaleApi) && !liveTuningInfoLoggedRef.current) {
       liveTuningInfoLoggedRef.current = true;
       const missing: string[] = [];
       if (!sh) missing.push('setActiveSphericalHarmonicsDegrees');
-      if (!scale) missing.push('setSplatScale');
+      if (!scaleApi) missing.push('setSplatScale');
       console.info(
         `[GS3D] Viewer has no ${missing.join(' / ')} — Display live controls for those are disabled (fixed at Viewer init for this library build).`,
       );
@@ -1347,8 +1358,8 @@ export default function Viewer3D({
     toRemove.forEach(o => { scene.remove(o); });
 
     const sphereGeo = new THREE.SphereGeometry(0.012, 12, 12);
-    const primaryMat = new THREE.MeshBasicMaterial({ color: '#efe752' });
-    const secondaryMat = new THREE.MeshBasicMaterial({ color: '#f5ec99' });
+    const primaryMat = new THREE.MeshBasicMaterial({ color: MEASURE_PLACED_B });
+    const secondaryMat = new THREE.MeshBasicMaterial({ color: MEASURE_PLACED_A });
 
     visibleMeasurePoints.forEach((pt, i) => {
       const mesh = new THREE.Mesh(sphereGeo, i === 0 ? secondaryMat : primaryMat);
@@ -1359,7 +1370,7 @@ export default function Viewer3D({
 
     if (visibleMeasurePoints.length === 2) {
       const lineGeo = new THREE.BufferGeometry().setFromPoints(visibleMeasurePoints.map(p => p.position));
-      const lineMat = new THREE.LineBasicMaterial({ color: '#efe752', linewidth: 2 });
+      const lineMat = new THREE.LineBasicMaterial({ color: MEASURE_PLACED_LINE, linewidth: 2 });
       const line = new THREE.Line(lineGeo, lineMat);
       line.userData.__measure = true;
       scene.add(line);
@@ -1867,25 +1878,6 @@ export default function Viewer3D({
                   <p className="text-[9px] text-white/35">SH fixed at Viewer init on this library build.</p>
                 )}
               </div>
-              <label className={cn('block space-y-1', !liveViewerApis.scale && 'opacity-50')}>
-                <span className={cn('text-[#f5ec99]', !liveViewerApis.scale && 'text-white/40')}>
-                  Splat scale (live)
-                </span>
-                <input
-                  type="range"
-                  min={0.5}
-                  max={5}
-                  step={0.05}
-                  value={splatScale}
-                  disabled={!liveViewerApis.scale}
-                  onChange={(e) => setSplatScale(Number(e.target.value))}
-                  className="w-full accent-[#efe752] disabled:cursor-not-allowed"
-                />
-                <span className="text-white/40">{splatScale.toFixed(2)}</span>
-                {!liveViewerApis.scale && (
-                  <p className="text-[9px] text-white/35">Splat scale not supported live on this library build.</p>
-                )}
-              </label>
               <button
                 type="button"
                 disabled={ksplatBusy}
@@ -1946,11 +1938,11 @@ export default function Viewer3D({
             {measurePhase === 'calibrate' ? (
               <>
                 <div className="flex items-center gap-2">
-                  <span className={`flex items-center gap-1 ${calibPoints.length >= 1 ? 'text-[#f5ec99]' : 'text-white/30'}`}>
+                  <span className={`flex items-center gap-1 ${calibPoints.length >= 1 ? 'text-[#6eb7ff]' : 'text-white/30'}`}>
                     <CircleDot className="w-3 h-3" /> A {calibPoints.length >= 1 ? '✓' : ''}
                   </span>
                   <span className="text-white/15">&rarr;</span>
-                  <span className={`flex items-center gap-1 ${calibPoints.length >= 2 ? 'text-[#efe752]' : 'text-white/30'}`}>
+                  <span className={`flex items-center gap-1 ${calibPoints.length >= 2 ? 'text-[#2f8fff]' : 'text-white/30'}`}>
                     <CircleDot className="w-3 h-3" /> B {calibPoints.length >= 2 ? '✓' : ''}
                   </span>
                 </div>
@@ -1981,11 +1973,11 @@ export default function Viewer3D({
             ) : (
               <>
                 <div className="flex items-center gap-2">
-                  <span className={`flex items-center gap-1 ${measurePoints.length >= 1 ? 'text-[#f5ec99]' : 'text-white/30'}`}>
+                  <span className={`flex items-center gap-1 ${measurePoints.length >= 1 ? 'text-[#6eb7ff]' : 'text-white/30'}`}>
                     <CircleDot className="w-3 h-3" /> A {measurePoints.length >= 1 ? '✓' : ''}
                   </span>
                   <span className="text-white/15">&rarr;</span>
-                  <span className={`flex items-center gap-1 ${measurePoints.length >= 2 ? 'text-[#efe752]' : 'text-white/30'}`}>
+                  <span className={`flex items-center gap-1 ${measurePoints.length >= 2 ? 'text-[#2f8fff]' : 'text-white/30'}`}>
                     <CircleDot className="w-3 h-3" /> B {measurePoints.length >= 2 ? '✓' : ''}
                   </span>
                 </div>
@@ -2030,8 +2022,8 @@ export default function Viewer3D({
           {mode === 'orbit' && 'Left: Rotate  |  Right: Pan  |  Scroll: Zoom'}
           {mode === 'walkthrough' && 'Click to lock  |  WASD: Move  |  Space/Shift: Up/Down  |  ESC: Unlock'}
           {mode === 'measure' && (measurePhase === 'calibrate'
-            ? 'Hover previews the pick; click two reference points, then enter their real distance in meters'
-            : 'Hover previews the pick; click two points to measure the calibrated distance')}
+            ? 'Yellow hover marks the splat center you will place; placed points appear blue — click two references, then enter their real distance in meters'
+            : 'Yellow hover marks the next splat center; placed points are blue — click two points for the calibrated distance')}
         </div>
       </div>
 
@@ -2046,10 +2038,10 @@ export default function Viewer3D({
             <div className="space-y-2">
               <HelpItem icon={<MousePointer className="w-3 h-3" />} title="Orbit Mode">Left-click drag to rotate. Right-click drag to pan. Scroll to zoom.</HelpItem>
               <HelpItem icon={<Footprints className="w-3 h-3" />} title="Walk-Through">Click to lock cursor. WASD to move. Mouse to look. Space/Shift for up/down.</HelpItem>
-              <HelpItem icon={<Ruler className="w-3 h-3" />} title="Measure">Step 1: Click two reference points and enter their known distance. Step 2: Measure any distance in meters.</HelpItem>
+              <HelpItem icon={<Ruler className="w-3 h-3" />} title="Measure">Yellow hover shows the splat center you are about to place; placed points appear blue in the scene. Step 1: two reference clicks + known distance. Step 2: measure any distance in meters.</HelpItem>
               <HelpItem icon={<Camera className="w-3 h-3" />} title="Snapshot">Captures the current view as a PNG image.</HelpItem>
               <HelpItem icon={<SlidersHorizontal className="w-3 h-3" />} title="Display panel">
-                Min alpha culls faint splats (reloads scene). SH 0/1/2 and splat scale update the live render. Download .ksplat uses the same pipeline as the official GaussianSplats3D demo. If the page is not cross-origin isolated, GPU sort is disabled automatically.
+                Min alpha culls faint splats (reloads scene). SH 0/1/2 updates the live render when supported. Download .ksplat uses the same pipeline as the official GaussianSplats3D demo. If the page is not cross-origin isolated, GPU sort is disabled automatically.
               </HelpItem>
             </div>
           </div>

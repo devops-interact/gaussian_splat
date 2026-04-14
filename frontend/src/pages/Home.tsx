@@ -18,7 +18,7 @@ export default function Home() {
   const [objUrl, setObjUrl] = useState<string | null>(null);
   const [modelMetadata, setModelMetadata] = useState<ModelMetadata | null>(null);
   const [prefetchedJobModelMetadata, setPrefetchedJobModelMetadata] = useState<ModelMetadataResponse | null>(null);
-  const [qualityPreset] = useState<string>('balanced');
+  const [jobQualityPreset, setJobQualityPreset] = useState<string | null>(null);
   const [elapsedTime] = useState<string>('--');
   const [downloading, setDownloading] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
@@ -42,6 +42,7 @@ export default function Home() {
     setObjUrl(null);
     setModelMetadata(null);
     setPrefetchedJobModelMetadata(null);
+    setJobQualityPreset(null);
   };
 
   const handleProcessingComplete = useCallback((url: string, objUrlResp?: string, jobMeta?: ModelMetadataResponse) => {
@@ -198,6 +199,7 @@ export default function Home() {
               <JobStatus
                 jobId={jobId}
                 onComplete={handleProcessingComplete}
+                onQualityPresetChange={setJobQualityPreset}
                 embedded
               />
             ) : (
@@ -214,7 +216,7 @@ export default function Home() {
             <TechnicalDetails
               metadata={modelMetadata}
               jobInfo={{
-                qualityPreset,
+                qualityPreset: jobQualityPreset ?? undefined,
                 elapsedTime,
                 isProcessing: !!jobId && modelUrl === null,
               }}

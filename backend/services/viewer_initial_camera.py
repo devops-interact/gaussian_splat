@@ -1,5 +1,8 @@
 """
-Compute default viewer camera from LongSplat cameras_all.json (first N frames).
+Compute default viewer camera from LongSplat cameras_all.json (first entry only).
+
+The first list element is treated as the first training camera (same order as sorted
+extracted frames copied into LongSplat's images/ — see longsplat train.py).
 
 Matches LongSplat utils.graphics_utils.getWorld2View + scene.Camera.world_view_transform
 convention (world_view = getWorld2View(R, T).T in PyTorch terms).
@@ -16,8 +19,7 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_FRAME_COUNT = 24
-# Eye distance = diagonal × this (full diagonal was often too far for comfortable first view).
+# Distance along view ray for look-at = bbox diagonal × this (scales with scene size).
 INITIAL_CAMERA_DIAGONAL_FRAC = 0.6
 
 
@@ -89,11 +91,12 @@ def compute_initial_camera_from_paths(
     cameras_path: Path,
     offset_path: Path,
     ply_path: Path | None,
-    n_frames: int = DEFAULT_FRAME_COUNT,
 ) -> dict[str, list[float]] | None:
     """
-    Returns {"position": [x,y,z], "target": [0,0,0]} in the same centered frame as the served PLY,
-    or None if required inputs are missing.
+    First pose in cameras_all.json only: eye at that camera center (PLY-centered frame),
+    look-at one scene-scaled step along its forward axis.
+
+    Returns {"position": [x,y,z], "target": [x,y,z]} or None if required inputs are missing.
     """
     if not cameras_path.exists():
         logger.info("cameras_all.json missing: %s", cameras_path)
@@ -116,30 +119,16 @@ def compute_initial_camera_from_paths(
         logger.warning("cameras_all.json is not a non-empty list")
         return None
 
-    n = min(n_frames, len(raw))
-    centers: list[np.ndarray] = []
-    forwards: list[np.ndarray] = []
+    cam: dict[str, Any] = raw[0]
+    try:
+        R = np.asarray(cam["R"], dtype=np.float64).reshape(3, 3)
+        T = np.asarray(cam["T"], dtype=np.float64).reshape(3)
+    except (KeyError, ValueError) as e:
+        logger.warning("Camera entry 0 missing R/T: %s", e)
+        return None
 
-    for i in range(n):
-        cam: dict[str, Any] = raw[i]
-        try:
-            R = np.asarray(cam["R"], dtype=np.float64).reshape(3, 3)
-            T = np.asarray(cam["T"], dtype=np.float64).reshape(3)
-        except (KeyError, ValueError) as e:
-            logger.warning("Camera entry %d missing R/T: %s", i, e)
-            return None
-        c, f = _camera_center_and_forward(R, T)
-        centers.append(c - off_vec)
-        forwards.append(f)
-
-    fwd_sum = np.sum(np.stack(forwards, axis=0), axis=0)
-    fn = float(np.linalg.norm(fwd_sum))
-    if fn < 1e-8:
-        fwd_mean = np.array([0.0, 0.0, 1.0], dtype=np.float64)
-    else:
-        fwd_mean = fwd_sum / fn
-
-    C_mean = np.mean(np.stack(centers, axis=0), axis=0)
+    c0, f0 = _camera_center_and_forward(R, T)
+    c0_centered = c0 - off_vec
 
     if ply_path and ply_path.exists():
         dist = _ply_bbox_diagonal(ply_path)
@@ -148,14 +137,19 @@ def compute_initial_camera_from_paths(
 
     frac = _initial_camera_distance_frac()
     eye_dist = dist * frac
-    eye = C_mean - fwd_mean * eye_dist
-    target = np.array([0.0, 0.0, 0.0], dtype=np.float64)
 
-    # Avoid degenerate eye == target
-    if float(np.linalg.norm(eye - target)) < 1e-4:
-        eye = target - fwd_mean * eye_dist
+    position = c0_centered.astype(np.float64)
+    target = c0_centered + f0 * eye_dist
+
+    # Avoid degenerate position == target (e.g. tiny eye_dist)
+    if float(np.linalg.norm(target - position)) < 1e-4:
+        target = c0_centered + f0 * max(eye_dist, 1e-3)
+
+    if float(np.linalg.norm(target - position)) < 1e-4:
+        logger.warning("Initial camera degenerate after first-pose fix — bailing out")
+        return None
 
     return {
-        "position": [float(eye[0]), float(eye[1]), float(eye[2])],
+        "position": [float(position[0]), float(position[1]), float(position[2])],
         "target": [float(target[0]), float(target[1]), float(target[2])],
     }

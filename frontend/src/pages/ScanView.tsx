@@ -26,7 +26,7 @@ export default function ScanView() {
   const [objUrl, setObjUrl] = useState<string | null>(null);
   const [modelMetadata, setModelMetadata] = useState<ModelMetadata | null>(null);
   const [prefetchedJobModelMetadata, setPrefetchedJobModelMetadata] = useState<ModelMetadataResponse | null>(null);
-  const [qualityPreset] = useState<string>('balanced');
+  const [jobQualityPreset, setJobQualityPreset] = useState<string | null>(null);
   const [elapsedTime] = useState<string>('--');
   const [downloading, setDownloading] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
@@ -38,6 +38,7 @@ export default function ScanView() {
     if (isNewScan) {
       setScan(null);
       setJobId(null);
+      setJobQualityPreset(null);
       return;
     }
     const sid = parseInt(scanId!, 10);
@@ -110,6 +111,7 @@ export default function ScanView() {
     setObjUrl(null);
     setModelMetadata(null);
     setPrefetchedJobModelMetadata(null);
+    setJobQualityPreset(null);
     if (scanIdFromResponse && isNewScan && projectId) {
       setScan({ id: scanIdFromResponse, job_id: newJobId });
       navigate(`/projects/${projectId}/scans/${scanIdFromResponse}`, { replace: true });
@@ -231,6 +233,7 @@ export default function ScanView() {
               <JobStatus
                 jobId={jobId}
                 onComplete={handleProcessingComplete}
+                onQualityPresetChange={setJobQualityPreset}
                 embedded
               />
             ) : (
@@ -245,7 +248,7 @@ export default function ScanView() {
             <TechnicalDetails
               metadata={modelMetadata}
               jobInfo={{
-                qualityPreset,
+                qualityPreset: jobQualityPreset ?? undefined,
                 elapsedTime,
                 isProcessing: !!jobId && modelUrl === null,
               }}

@@ -8,6 +8,8 @@ import { Loader2, CheckCircle, AlertOctagon } from 'lucide-react';
 interface JobStatusProps {
   jobId: string;
   onComplete: (modelUrl: string, objUrl?: string, modelMetadata?: ModelMetadataResponse) => void;
+  /** Mirrors `quality_preset` from each successful status poll (null when job id changes, before first poll). */
+  onQualityPresetChange?: (preset: string | null) => void;
   embedded?: boolean;
 }
 
@@ -42,9 +44,11 @@ function backoffMsAfterFailure(consecutiveFailures: number): number {
   return Math.min(POLL_BACKOFF_CAP_MS, POLL_OK_MS * 2 ** (consecutiveFailures - 1));
 }
 
-export default function JobStatus({ jobId, onComplete, embedded }: JobStatusProps) {
+export default function JobStatus({ jobId, onComplete, onQualityPresetChange, embedded }: JobStatusProps) {
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
+  const onQualityPresetChangeRef = useRef(onQualityPresetChange);
+  onQualityPresetChangeRef.current = onQualityPresetChange;
   /** Avoid calling onComplete again when the poll effect restarts (e.g. parent re-render); resets when jobId changes. */
   const completionNotifiedForJobIdRef = useRef<string | null>(null);
 
@@ -77,6 +81,12 @@ export default function JobStatus({ jobId, onComplete, embedded }: JobStatusProp
     return () => clearInterval(timer);
   }, [startTime, status, connectError]);
 
+  // New job id: clear local preset and parent Metadata row until the next poll.
+  useEffect(() => {
+    setQualityPreset(null);
+    onQualityPresetChangeRef.current?.(null);
+  }, [jobId]);
+
   // Poll job status: fixed interval after success, exponential backoff after failures; stop on 404 or cap.
   useEffect(() => {
     const ac = new AbortController();
@@ -107,7 +117,10 @@ export default function JobStatus({ jobId, onComplete, embedded }: JobStatusProp
           setStatus(response.status);
           setProgress(response.progress);
           setError(response.error_message || null);
-          if (response.quality_preset) setQualityPreset(response.quality_preset);
+          if (response.quality_preset) {
+            setQualityPreset(response.quality_preset);
+            onQualityPresetChangeRef.current?.(response.quality_preset);
+          }
           if (response.estimated_minutes) setEstimatedMinutes(response.estimated_minutes);
           if (response.status === JobStatusEnum.COMPLETED && response.model_url) {
             if (completionNotifiedForJobIdRef.current !== jobId) {

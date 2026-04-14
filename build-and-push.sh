@@ -50,6 +50,7 @@ echo -e "${GREEN}✓ Frontend deps + build + tests OK (Docker frontend-build sta
 # Viewer / splat picking: GaussianSplats3D + lib/splatPick (measure: normalized mouse × pick dims —
 # canvas backing store or Viewer.getRenderDimensions when it diverges; measure snaps to splat
 # world centers via cone pick on center cache rebuilt on each SplatTree via onSplatTreeReady).
+# initial_camera: backend/services/viewer_initial_camera.py — first cameras_all.json pose + PLY offset.
 echo -e "${BLUE}Verifying viewer & picking sources...${NC}"
 for f in \
     "frontend/src/components/Viewer3D.tsx" \
@@ -108,6 +109,10 @@ for f in "${REQUIRED_FILES[@]}"; do
 done
 grep -q "initial_camera" backend/api/jobs.py || {
     echo -e "${RED}❌ backend/api/jobs.py missing initial_camera route (viewer expects GET /api/jobs/{id}/initial_camera)${NC}"
+    exit 1
+}
+grep -q "raw\[0\]" backend/services/viewer_initial_camera.py || {
+    echo -e "${RED}❌ backend/services/viewer_initial_camera.py expected to use first cameras_all entry (raw[0])${NC}"
     exit 1
 }
 echo -e "${GREEN}✓ Backend structure OK${NC}"
@@ -190,7 +195,7 @@ if [ ${PIPESTATUS[0]} -eq 0 ]; then
     echo -e "  └────────────────────┴──────────────────────────────────────────────┘"
     echo ""
     echo -e "${PURPLE}Pipeline: video → frames → LongSplat MASt3R + 3DGS → PLY + gzip, optional OBJ. Viewer: GaussianSplats3D + splatPick — measure snaps to splat world centers (cone pick on center cache; canvas/getRenderDimensions alignment).${NC}"
-    echo -e "${PURPLE}GPU splat sort + SharedArrayBuffer workers when crossOriginIsolated unless VITE_GS3D_FORCE_LEGACY_WORKERS=true|1 — CPU sort path. GET /api/jobs/{id}/initial_camera.${NC}"
+    echo -e "${PURPLE}GPU splat sort + SharedArrayBuffer workers when crossOriginIsolated unless VITE_GS3D_FORCE_LEGACY_WORKERS=true|1 — CPU sort path. GET /api/jobs/{id}/initial_camera: first cameras_all pose, look-at along forward (bbox-scaled).${NC}"
     echo -e "${BLUE}Vercel: COOP+COEP in frontend/vercel.json. Env: VITE_API_BASE_URL and/or rewrites — README §3. If splats hang: add VITE_GS3D_FORCE_LEGACY_WORKERS=true or 1 in Production → redeploy — frontend/.env.example + ARCHITECTURE.md — tradeoff: smoother loads, choppier orbit.${NC}"
     echo -e "${BLUE}Tip: BUILD_NO_CACHE=1 ./build-and-push.sh for a full CUDA layer rebuild${NC}"
     echo ""

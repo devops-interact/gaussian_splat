@@ -8,7 +8,7 @@ A production web application that converts video footage of rooms into interacti
 
 - **Video upload** with quality preset selection (**Balanced** / **Quality**)
 - **LongSplat training** with MASt3R for automatic pose estimation (no COLMAP)
-- **3D Viewer** — orbit, walk-through, measurement (snaps to splat centers from the reconstruction), snapshot capture. Performance audit: [`docs/viewer-3d-performance-audit.md`](docs/viewer-3d-performance-audit.md).
+- **3D Viewer** — orbit, walk-through, measurement (snaps to splat centers; **yellow** hover preview, **blue** placed markers in the scene), snapshot capture. Performance audit: [`docs/viewer-3d-performance-audit.md`](docs/viewer-3d-performance-audit.md).
 - **Gaussian splats + optional mesh** — primary view is the splat PLY; optional **OBJ** mesh download when the API exposes `model_url_obj` (`EXPORT_OBJ=true` on the pod)
 - **Metadata panel** — point count, bounding box, color data, processing status
 - **Downloads** — `.ply`, `.ply.gz`, optional `.obj` (mesh, when enabled)
@@ -108,7 +108,7 @@ Wall time is **main `train.py` + second GPU phase `convert_3dgs.py`** (Scaffold�
 
 ### 3D viewer (GaussianSplats3D)
 
-The scan viewer uses [`@mkkellogg/gaussian-splats-3d`](https://github.com/mkkellogg/GaussianSplats3D). The **Display** panel (bottom-right) exposes **min alpha** (reloads the splat scene), **SH level** 0/1/2, **splat scale**, and optional **Download .ksplat** in the browser (same idea as the [official demo / converter](https://projects.markkellogg.org/threejs/demo_gaussian_splats_3d.php)). For batch conversion without the app, clone GaussianSplats3D and run `node util/create-ksplat.js` (not included in the npm package). Jobs still export **PLY**; `.ksplat` is optional for faster reloads elsewhere.
+The scan viewer uses [`@mkkellogg/gaussian-splats-3d`](https://github.com/mkkellogg/GaussianSplats3D). The **Display** panel (bottom-right) exposes **min alpha** (reloads the splat scene), **SH level** 0/1/2, and optional **Download .ksplat** in the browser (same idea as the [official demo / converter](https://projects.markkellogg.org/threejs/demo_gaussian_splats_3d.php)). For batch conversion without the app, clone GaussianSplats3D and run `node util/create-ksplat.js` (not included in the npm package). Jobs still export **PLY**; `.ksplat` is optional for faster reloads elsewhere.
 
 If the viewer stays on **“Loading Gaussian Splats…”**, set **`VITE_GS3D_FORCE_LEGACY_WORKERS=true`** in Vercel env (or `frontend/.env.local` locally), redeploy / restart dev, and check **`[GS3D] phase:`** logs in the browser console — details in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 

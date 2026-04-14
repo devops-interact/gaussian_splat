@@ -299,7 +299,8 @@ async def get_job_cameras(job_id: str):
 @router.get("/{job_id}/initial_camera")
 async def get_initial_camera(job_id: str):
     """
-    Suggested viewer camera from the first 24 LongSplat poses + ply center offset.
+    Suggested viewer camera from the first LongSplat pose in cameras_all.json + ply center offset.
+    Eye at that camera center; look-at along its forward axis (distance scaled by PLY bbox diagonal).
     Requires cameras_all.json and ply_center_offset.json under the job model directory.
     """
     job_manager = get_job_manager()
