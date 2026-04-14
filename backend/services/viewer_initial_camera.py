@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,18 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 DEFAULT_FRAME_COUNT = 24
+# Eye distance = diagonal × this (full diagonal was often too far for comfortable first view).
+INITIAL_CAMERA_DIAGONAL_FRAC = 0.6
+
+
+def _initial_camera_distance_frac() -> float:
+    raw = os.environ.get("INITIAL_CAMERA_DISTANCE_FRAC", "").strip()
+    if raw:
+        try:
+            return max(0.35, min(0.95, float(raw)))
+        except ValueError:
+            logger.warning("Invalid INITIAL_CAMERA_DISTANCE_FRAC=%r — using default", raw)
+    return INITIAL_CAMERA_DIAGONAL_FRAC
 
 
 def _world_view_transform_from_rt(R: np.ndarray, T: np.ndarray) -> np.ndarray:
@@ -133,12 +146,14 @@ def compute_initial_camera_from_paths(
     else:
         dist = 3.0
 
-    eye = C_mean - fwd_mean * dist
+    frac = _initial_camera_distance_frac()
+    eye_dist = dist * frac
+    eye = C_mean - fwd_mean * eye_dist
     target = np.array([0.0, 0.0, 0.0], dtype=np.float64)
 
     # Avoid degenerate eye == target
     if float(np.linalg.norm(eye - target)) < 1e-4:
-        eye = target - fwd_mean * dist
+        eye = target - fwd_mean * eye_dist
 
     return {
         "position": [float(eye[0]), float(eye[1]), float(eye[2])],

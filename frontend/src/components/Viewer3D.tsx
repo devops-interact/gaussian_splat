@@ -96,6 +96,70 @@ function forceLegacyGs3dWorkers(): boolean {
   return v === '1' || String(v).toLowerCase() === 'true';
 }
 
+const VIEWER_SCENE_SCALE_MIN = 0.25;
+const VIEWER_SCENE_SCALE_MAX = 10;
+
+/** Uniform world scale for splat mesh + camera (Vite build-time). 1 = default. */
+function parseViewerSceneScale(): number {
+  const raw = import.meta.env.VITE_VIEWER_SCENE_SCALE;
+  if (raw === undefined || raw === '') return 1;
+  const n = Number(String(raw).trim());
+  if (!Number.isFinite(n) || n <= 0) return 1;
+  return THREE.MathUtils.clamp(n, VIEWER_SCENE_SCALE_MIN, VIEWER_SCENE_SCALE_MAX);
+}
+
+/** Orbit dolly limits vs effective scene diagonal (after mesh scale). */
+const ORBIT_MIN_DIST_FRAC = 0.035;
+const ORBIT_MAX_DIST_MULT = 150;
+
+function applyOrbitZoomLimitsFromDiagonal(viewer: Viewer, effectiveDiagonal: number): void {
+  if (!(effectiveDiagonal > 0)) return;
+  const ctrl = (viewer as unknown as { controls?: unknown }).controls;
+  if (!ctrl || typeof ctrl !== 'object') {
+    console.info('[GS3D] Orbit controls missing — skip zoom limit patch');
+    return;
+  }
+  const minD = Math.max(1e-4, effectiveDiagonal * ORBIT_MIN_DIST_FRAC);
+  const maxD = Math.max(minD * 2, effectiveDiagonal * ORBIT_MAX_DIST_MULT);
+  const c = ctrl as Record<string, unknown>;
+  try {
+    if ('minDistance' in c) {
+      (c as { minDistance: number }).minDistance = minD;
+    }
+    if ('maxDistance' in c) {
+      (c as { maxDistance: number }).maxDistance = maxD;
+    }
+    const upd = (c as { update?: () => void }).update;
+    if (typeof upd === 'function') upd.call(ctrl);
+    console.log('[GS3D] Orbit limits', {
+      minDistance: minD.toFixed(4),
+      maxDistance: maxD.toFixed(2),
+      effectiveDiagonal: effectiveDiagonal.toFixed(2),
+    });
+  } catch (e) {
+    console.warn('[GS3D] Could not patch orbit limits:', e);
+  }
+}
+
+/** Scale camera offset from lookAt (keeps target fixed when scaling position alone). */
+function scaleCameraPairFromOrigin(
+  position: [number, number, number],
+  lookAt: [number, number, number],
+  scale: number,
+): { position: [number, number, number]; lookAt: [number, number, number] } {
+  if (scale === 1) {
+    return { position: [...position] as [number, number, number], lookAt: [...lookAt] as [number, number, number] };
+  }
+  return {
+    position: [
+      lookAt[0] + (position[0] - lookAt[0]) * scale,
+      lookAt[1] + (position[1] - lookAt[1]) * scale,
+      lookAt[2] + (position[2] - lookAt[2]) * scale,
+    ],
+    lookAt: [...lookAt] as [number, number, number],
+  };
+}
+
 function modelMetadataFromJobResponse(s: ModelMetadataResponse, fileSize: number): ModelMetadata {
   const bbox = s.bounding_box ?? {
     min: [0, 0, 0] as [number, number, number],
@@ -557,6 +621,8 @@ export default function Viewer3D({
   });
 
   const metadataRef = useRef<ModelMetadata | null>(null);
+  /** Matches VITE_VIEWER_SCENE_SCALE for pick maxDist while viewer is mounted. */
+  const sceneScaleRef = useRef(1);
   const splatCentersRef = useRef<Float32Array | null>(null);
   const splatCenterGridRef = useRef<SplatCenterGridAccel | null>(null);
   const splatTreeReadyRef = useRef<boolean>(false);
@@ -739,6 +805,11 @@ export default function Viewer3D({
           (bbMax[1] - bbMin[1]) ** 2 +
           (bbMax[2] - bbMin[2]) ** 2,
         );
+        const sceneScale = parseViewerSceneScale();
+        sceneScaleRef.current = sceneScale;
+        if (sceneScale !== 1) {
+          console.log(`[GS3D] VITE_VIEWER_SCENE_SCALE=${sceneScale} (clamped ${VIEWER_SCENE_SCALE_MIN}–${VIEWER_SCENE_SCALE_MAX})`);
+        }
         const camDist = Math.max(diagonal * BBOX_CAM_DIST_MULT, BBOX_CAM_DIST_MIN);
         // Bbox fallback is tuned with Y-flipped up (MASt3R / OpenCV-style). Pose-derived eye/target from
         // LongSplat world use standard Y-up with initial_camera — see ARCHITECTURE.md.
@@ -775,6 +846,12 @@ export default function Viewer3D({
           );
         } else if (!disposed && jobId) {
           console.log('[GS3D] phase: initial_camera skipped (missing, error, or canceled)');
+        }
+
+        if (sceneScale !== 1) {
+          const scaled = scaleCameraPairFromOrigin(initialCameraPosition, initialCameraLookAt, sceneScale);
+          initialCameraPosition = scaled.position;
+          initialCameraLookAt = scaled.lookAt;
         }
 
         const isolated = globalThis.crossOriginIsolated === true;
@@ -873,9 +950,16 @@ export default function Viewer3D({
         console.log('[GS3D] phase: addSplatScene done');
         if (disposed) return;
 
+        if (sceneScale !== 1 && viewer.splatMesh) {
+          viewer.splatMesh.scale.setScalar(sceneScale);
+          viewer.splatMesh.updateMatrixWorld(true);
+          console.log('[GS3D] splatMesh.scale applied:', sceneScale);
+        }
+
         // 8. Start rendering
         console.log('[GS3D] phase: viewer.start');
         viewer.start();
+        applyOrbitZoomLimitsFromDiagonal(viewer, diagonal * sceneScale);
         // True ellipsoid hits align better with the rendered splat surface (measurement).
         try {
           const rc = viewer.raycaster as unknown as Record<string, unknown>;
@@ -1061,6 +1145,7 @@ export default function Viewer3D({
       splatCentersRef.current = null;
       splatCenterGridRef.current = null;
       splatTreeReadyRef.current = false;
+      sceneScaleRef.current = 1;
       if (unhandledRejectionHandler) {
         window.removeEventListener('unhandledrejection', unhandledRejectionHandler);
         unhandledRejectionHandler = null;
@@ -1378,9 +1463,10 @@ export default function Viewer3D({
       mousePos.x = THREE.MathUtils.clamp(mousePos.x, 0, pickW);
       mousePos.y = THREE.MathUtils.clamp(mousePos.y, 0, pickH);
 
-      const maxDist = metadataRef.current
+      const baseMax = metadataRef.current
         ? maxSplatPickDistance(metadataRef.current.boundingBox)
         : 100;
+      const maxDist = baseMax * sceneScaleRef.current;
 
       return pickSplatMeasure({
         camera,

@@ -155,14 +155,16 @@ Defined in [`backend/core/config.py`](backend/core/config.py) (`QUALITY_PRESETS`
 
 | Preset | FPS | LongSplat iterations | `convert_3dgs` prune ratio | `convert_3dgs` iter cap | Est. time | Use case |
 |---|---|---|---|---|---|---|
-| **Balanced** | 1.5 | 12,000 | 0.58 | **6,500** | ~35 min (typ.) | Shorter post-train refinement than Quality |
-| **Quality** | 2.0 | 24,000 | 0.65 | **10,000** | ~70 min (often 1h+) | Full main train + max refinement |
+| **Balanced** | 1.5 | 15,000 | 0.59 | **8,000** | ~40 min (typ.) | Shorter post-train refinement than Quality |
+| **Quality** | 2.25 | 28,000 | 0.68 | **12,000** | ~85 min (often 1h+) | Full main train + max refinement |
 
 **Two GPU-heavy phases:** (1) LongSplat `train.py` for `--iterations`, (2) `convert_3dgs.py` for `--iteration` up to the preset cap (floored at 3000, scaled by `quality_factor` below 12k main iters). Logs: `[LongSplat timing] train.py subprocess…`, `convert_3dgs.py…`, `custom converter + PlyOptimizer…`.
 
-Sub-iteration counts (pose/local/global/post/init) and the **scaled** convert budget are computed in [`train.py`](backend/services/longsplat/train.py) (`quality_baseline=12000`, `convert_iters = max(3000, min(convert_3dgs_refinement_cap, int(10000 * quality_factor)))`).
+Sub-iteration counts (pose/local/global/post/init) and the **scaled** convert budget are computed in [`train.py`](backend/services/longsplat/train.py) (`quality_baseline=12000`, `convert_iters = max(3000, min(convert_3dgs_refinement_cap, int(convert_scale_cap * quality_factor)))` with **`convert_scale_cap=14000`** so preset caps up to 12k are not plateaued by the scale term).
 
 Higher **prune ratio** keeps more Gaussians after Scaffold-GS → 3DGS conversion (less aggressive pruning). Tuning is per preset without code changes beyond `PresetConfig`.
+
+**PLY extent:** [`postprocess.py`](backend/services/longsplat/postprocess.py) drops position outliers beyond `mean + sigma * std` (distance from centroid). Default **sigma = 3.5**; override with **`PLY_POSITION_OUTLIER_SIGMA`** (float, clamped **2.5–6**) if you need to retain more distant splats.
 
 ---
 
@@ -238,7 +240,7 @@ Use this order to separate **data** issues from **runtime** issues:
 ### 3D Viewer (`Viewer3D.tsx`)
 
 - **Splat picking** ([`splatPick.ts`](frontend/src/lib/splatPick.ts)) — **Strategy 1:** `intersectSplatMesh` after optional **`raycastAgainstTrueSplatEllipsoid`** (set when the GS3D build exposes it); pick **closest** hit by **`distance`** (≤ scene **`maxSplatPickDistance`**); read position from **`point`** or **`origin`** when present (no extra camera-distance gate on the hit position). **Strategy 2:** `Float32Array` world **center cache**: `getSplatCount(false)` then `getSplatCenter(i, p, false)` and **`p.applyMatrix4(splatMesh.matrixWorld)`** when the mesh matrix is not identity (works across GS3D boolean vs `Matrix4` third-arg APIs). Cache rebuild on **each** **`onSplatTreeReady`** (handler re-registers for the next GS3D tree build; also armed when the tree already exists at load and from the **5s** safety poll), plus **1.5s retry** if cache empty after a ready event. **Screen coords:** mouse is normalized to the canvas **`getBoundingClientRect`**, then scaled to **`renderDims`**: default **`canvas.width`/`height`**, or **`Viewer.getRenderDimensions`** when non-zero and meaningfully different from the backing store (same space as GS3D raycaster). Cone gate: **`PICK_RADIUS_PX`** (**28** px on the shorter **`renderDims`** axis). Reconstructions are not metric—use **calibration** for real-world distances. Dev: **`diagPickAlignment(camera, centers, w, h)`** projects sample centers for alignment checks.
-- **Orbit mode** — rotate, pan, zoom with OrbitControls
+- **Orbit mode** — rotate, pan, zoom with OrbitControls. After **`viewer.start()`**, `Viewer3D` patches **`minDistance`** / **`maxDistance`** from the PLY bbox diagonal × **`VITE_VIEWER_SCENE_SCALE`** (defaults **1**) so scroll-zoom can move closer than GS3D defaults. Optional **`VITE_VIEWER_SCENE_SCALE`** (clamped **0.25–10**) applies **`splatMesh.scale`**, scales initial camera eye positions from the look-at target, and scales measure **`maxDist`**. **`GET /api/jobs/{id}/initial_camera`** eye distance uses bbox diagonal × **`INITIAL_CAMERA_DIAGONAL_FRAC`** (**0.6**), overridable on the API host with env **`INITIAL_CAMERA_DISTANCE_FRAC`** (**0.35–0.95**); see [`viewer_initial_camera.py`](backend/services/viewer_initial_camera.py).
 - **Walk-through mode** — first-person WASD + mouse-look via pointer lock. Walk/Measure listeners attach after `loading` becomes false so they bind to the real canvas once the GaussianSplats3D viewer exists (avoids stuck modes and DOMExceptions from pointer lock on a disposed canvas).
 - **Measurement tool** — click two points on the splat cloud (A = lavender, B = green); **mousemove** shows a semi-transparent preview sphere on the splat under the cursor (throttled raycast, **~100ms** min interval, skips preview rebuild when the pick moves less than **~0.03** world units). Displays calibrated distance after step 2.
 - **Points / Mesh toggle** — switch between raw point cloud and reconstructed GLB surface

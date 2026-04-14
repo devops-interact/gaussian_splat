@@ -1,11 +1,30 @@
 import json
 import logging
+import os
 from pathlib import Path
 
 import numpy as np
 from plyfile import PlyData, PlyElement
 
 logger = logging.getLogger(__name__)
+
+# Position outlier gate: keep points with dist_to_centroid <= mean + sigma * std (higher = retain more distant splats).
+_DEFAULT_POSITION_OUTLIER_SIGMA = 3.5
+_SIGMA_MIN = 2.5
+_SIGMA_MAX = 6.0
+
+
+def _position_outlier_sigma() -> float:
+    raw = os.environ.get("PLY_POSITION_OUTLIER_SIGMA", "").strip()
+    if not raw:
+        return _DEFAULT_POSITION_OUTLIER_SIGMA
+    try:
+        v = float(raw)
+    except ValueError:
+        logger.warning("Invalid PLY_POSITION_OUTLIER_SIGMA=%r — using default %.2f", raw, _DEFAULT_POSITION_OUTLIER_SIGMA)
+        return _DEFAULT_POSITION_OUTLIER_SIGMA
+    return max(_SIGMA_MIN, min(_SIGMA_MAX, v))
+
 
 class PlyOptimizer:
     """
@@ -149,7 +168,8 @@ class PlyOptimizer:
                 dist_std = np.std(dists)
 
                 if np.isfinite(dist_mean) and np.isfinite(dist_std) and dist_std > 0:
-                    threshold = dist_mean + 3.0 * dist_std
+                    pos_sigma = _position_outlier_sigma()
+                    threshold = dist_mean + pos_sigma * dist_std
                     position_mask = dists <= threshold
                     n_position_removed = int(np.sum(~position_mask))
                     if n_position_removed > 0:

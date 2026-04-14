@@ -101,8 +101,8 @@ Defined in `backend/core/config.py` (`QUALITY_PRESETS`). Sub-iterations and `con
 
 | Preset | FPS | LongSplat iterations | Est. time | Use case |
 |---|---|---|---|---|
-| **Balanced** | 1.5 | 12,000 | ~35 min (typ.; long clips longer) | Default quality; **convert_3dgs** cap **6.5k** iters |
-| **Quality** | 2.0 | 24,000 | ~70 min (often **1h+**) | Highest fidelity; **convert_3dgs** up to **10k** iters |
+| **Balanced** | 1.5 | 15,000 | ~40 min (typ.; long clips longer) | Default quality; **convert_3dgs** cap **8k** iters |
+| **Quality** | 2.25 | 28,000 | ~85 min (often **1h+**) | Highest fidelity; **convert_3dgs** up to **12k** iters |
 
 Wall time is **main `train.py` + second GPU phase `convert_3dgs.py`** (Scaffold→3DGS SH), then CPU PLY conversion—see [`ARCHITECTURE.md`](ARCHITECTURE.md) Quality Presets and server logs `[LongSplat timing]`.
 
@@ -115,6 +115,8 @@ If the viewer stays on **“Loading Gaussian Splats…”**, set **`VITE_GS3D_FO
 If the room looks **upside-down** with pose-based framing, or orbit feels **choppy** while legacy workers are on, or you see **`lockdown-install.js` / SES** `DOMException` spam, see **§ 3D viewer troubleshooting** items **7–9** in [`ARCHITECTURE.md`](ARCHITECTURE.md) (camera up for `initial_camera`, legacy-worker tradeoff, MetaMask / extensions).
 
 If **Measure** clicks still feel misaligned, open the console once per measure session and read **`[Pick:dims]`**: it logs **`physical`** (canvas backing store), **`gs3dReported`**, and **`pickUsing=canvas|gs3d (WxH)`** — when the library’s internal render size differs from the canvas, picks intentionally use **`getRenderDimensions`** for both **`renderDims`** and mouse scaling. Picking uses [`frontend/src/lib/splatPick.ts`](frontend/src/lib/splatPick.ts) (GS3D raycast + world-space center cache after each **SplatTree** build). See **ARCHITECTURE.md** §3D Viewer — splat picking.
+
+**Orbit zoom feels capped:** the viewer patches **OrbitControls** `minDistance` / `maxDistance` from the PLY bbox diagonal (after optional scene scale). If you want the room **visually larger** in the same units, set **`VITE_VIEWER_SCENE_SCALE`** (e.g. `2`) in **`frontend/.env.local`** or Vercel Production, then rebuild — see [`frontend/.env.example`](frontend/.env.example). Calibration still maps to meters because measure picks live in the same scaled space.
 
 ---
 

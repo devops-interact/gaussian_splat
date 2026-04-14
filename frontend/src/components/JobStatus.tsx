@@ -23,8 +23,8 @@ const STATUS_LABELS: Record<JobStatusEnum, string> = {
 };
 
 const PRESET_LABELS: Record<string, string> = {
-  balanced: 'Balanced (~35 min est.; longer on long videos)',
-  quality: 'Quality (~70 min est.; often 1h+ on long clips)',
+  balanced: 'Balanced (~40 min est.; longer on long videos)',
+  quality: 'Quality (~85 min est.; often 1h+ on long clips)',
 };
 
 const POLL_OK_MS = 2000;
