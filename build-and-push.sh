@@ -50,7 +50,7 @@ echo -e "${GREEN}✓ Frontend deps + build + tests OK (Docker frontend-build sta
 # Viewer / splat picking: GaussianSplats3D + lib/splatPick (measure: normalized mouse × pick dims —
 # canvas backing store or Viewer.getRenderDimensions when it diverges; GS3D raycast; world center
 # cache on each SplatTree via onSplatTreeReady). Optional measure wireframe: lib/measureOverlayMesh
-# (Delaunay proxy mesh + Raycaster when checkbox on; see docs/measure-mesh-overlay-prompt.md).
+# (mid-poly voxel Delaunay + PCA plane / bbox fallback; Raycaster when checkbox on; see docs/measure-mesh-overlay-prompt.md).
 echo -e "${BLUE}Verifying viewer & picking sources...${NC}"
 for f in \
     "frontend/src/components/Viewer3D.tsx" \
@@ -74,7 +74,7 @@ grep -qE '"delaunator"' frontend/package.json || {
     echo -e "${RED}❌ delaunator missing from frontend/package.json (measure wireframe mesh)${NC}"
     exit 1
 }
-echo -e "${GREEN}✓ Viewer3D + splatPick + measureOverlayMesh (measure: splat raycast + optional wireframe mesh snap) sources OK${NC}"
+echo -e "${GREEN}✓ Viewer3D + splatPick + measureOverlayMesh (measure: splat raycast + optional mid-poly wireframe mesh snap) sources OK${NC}"
 
 # Vite env template (Vercel / local): API base URL + optional GS3D legacy worker flag (see README §3)
 echo -e "${BLUE}Verifying frontend/.env.example...${NC}"
@@ -196,7 +196,7 @@ if [ ${PIPESTATUS[0]} -eq 0 ]; then
     echo -e "  │ Expose HTTP Ports  │ 8000                                         │"
     echo -e "  └────────────────────┴──────────────────────────────────────────────┘"
     echo ""
-    echo -e "${PURPLE}Pipeline: video → frames → LongSplat (MASt3R + 3DGS) → PLY (+ gzip, optional OBJ). Viewer: GaussianSplats3D + splatPick + measureOverlayMesh (measure: splat picks + optional low-poly wireframe Raycaster; canvas/getRenderDimensions + SplatTree center cache). GPU splat sort + SharedArrayBuffer workers when crossOriginIsolated unless VITE_GS3D_FORCE_LEGACY_WORKERS=true|1 (CPU sort path). GET /api/jobs/{id}/initial_camera.${NC}"
+    echo -e "${PURPLE}Pipeline: video → frames → LongSplat (MASt3R + 3DGS) → PLY (+ gzip, optional OBJ). Viewer: GaussianSplats3D + splatPick + measureOverlayMesh (measure: splat picks + optional mid-poly wireframe Raycaster, PCA/bbox proxy; polygon offset scales with VITE_VIEWER_SCENE_SCALE; canvas/getRenderDimensions + SplatTree center cache). GPU splat sort + SharedArrayBuffer workers when crossOriginIsolated unless VITE_GS3D_FORCE_LEGACY_WORKERS=true|1 (CPU sort path). GET /api/jobs/{id}/initial_camera.${NC}"
     echo -e "${BLUE}Vercel: COOP+COEP in frontend/vercel.json. Env: VITE_API_BASE_URL and/or rewrites (README §3). If splats hang: add VITE_GS3D_FORCE_LEGACY_WORKERS=true (or 1) in Production → redeploy — frontend/.env.example + ARCHITECTURE.md (tradeoff: smoother loads, choppier orbit).${NC}"
     echo -e "${BLUE}Tip: BUILD_NO_CACHE=1 ./build-and-push.sh for a full CUDA layer rebuild${NC}"
     echo ""
