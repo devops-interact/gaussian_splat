@@ -20,8 +20,8 @@ def _normalize_f_rest_fields(vertex_data: np.ndarray) -> Tuple[np.ndarray, int]:
     """
     Ensure the number of f_rest_* properties is divisible by 3.
 
-    @mkkellogg/gaussian-splats-3d (INRIA V1 PLY) uses sphericalHarmonicsFieldCount / 3 as
-    coefficientsPerChannel; a non-integer breaks internal f_rest index keys and can yield a
+    Web splat viewers (INRIA V1 PLY parsers, incl. Babylon.js) derive SH coefficients per
+    channel as f_rest count / 3; a non-integer count breaks SH indexing and can yield a
     blank splat pass with no JS error. LongSplat exports sometimes emit 11 f_rest_* columns.
     """
     if vertex_data.dtype.names is None:
@@ -112,8 +112,8 @@ def normalize_vertex_f_rest_by_property_names(vertex, prop_names: List[str]) -> 
 
 def assert_ply_gaussian_splats3d_compatible(ply_path: Path) -> None:
     """
-    Fail export if PLY vertex layout is unsafe for @mkkellogg/gaussian-splats-3d
-    (f_rest_* count must be 0 or a multiple of 3). Call after rewrite_ply_sanitize_f_rest_inplace.
+    Fail export if PLY vertex layout is unsafe for web splat viewers (incl. Babylon.js):
+    f_rest_* count must be 0 or a multiple of 3. Call after rewrite_ply_sanitize_f_rest_inplace.
     """
     plydata = PlyData.read(str(ply_path))
     vertex = plydata["vertex"]
@@ -331,7 +331,7 @@ def _add_rgb_colors_to_3dgs_ply(source_ply: Path, output_ply: Path) -> bool:
             and "blue" in prop_names_set
         )
 
-        # Never copy source verbatim if f_rest count was bad for GS3D (11 cols, etc.)
+        # Never copy source verbatim if f_rest count was bad for web viewers (11 cols, etc.)
         if has_rgb and f_rest_dropped == 0 and not pre_bad_frest:
             logger.info(
                 "RGB properties already exist in source PLY — preserving original colors (not overwriting)"

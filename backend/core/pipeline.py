@@ -186,7 +186,7 @@ async def process_job(job: Job) -> Job:
         job.status = JobStatus.COMPLETED
         job.progress = 1.0
         job.model_filename = f"{job.job_id}.ply"
-        # Viewer fetch must hit /api/... so gzip is decompressed and CORP is set for COEP pages
+        # Viewer fetch must hit /api/... so gzip is decompressed server-side
         job.model_url = f"/api/jobs/{job.job_id}/model"
         job.processing_time_seconds = round(time.time() - start_time, 1)
         await job_manager.update_job(job)

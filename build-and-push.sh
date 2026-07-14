@@ -47,16 +47,14 @@ npm test
 cd ..
 echo -e "${GREEN}✓ Frontend deps + build + tests OK (Docker frontend-build stage mirrors install + build)${NC}"
 
-# Viewer / splat picking: GaussianSplats3D + lib/splatPick (measure: normalized mouse × pick dims —
-# canvas backing store or Viewer.getRenderDimensions when it diverges; measure snaps to splat
-# world centers via cone pick on center cache rebuilt on each SplatTree via onSplatTreeReady).
+# Viewer / splat picking: Babylon.js GaussianSplattingMesh + lib/splatPick (measure: normalized mouse ×
+# canvas backing store; measure snaps to splat world centers via cone pick on center cache from splatsData).
 # initial_camera: backend/services/viewer_initial_camera.py — first cameras_all.json pose + PLY offset.
 echo -e "${BLUE}Verifying viewer & picking sources...${NC}"
 for f in \
     "frontend/src/components/Viewer3D.tsx" \
     "frontend/src/lib/splatPick.ts" \
     "frontend/src/lib/splatPick.test.ts" \
-    "frontend/src/types/gaussian-splats-3d.d.ts" \
     "frontend/package.json"
 do
     if [ ! -f "$f" ]; then
@@ -64,13 +62,17 @@ do
         exit 1
     fi
 done
-grep -q "@mkkellogg/gaussian-splats-3d" frontend/package.json || {
-    echo -e "${RED}❌ @mkkellogg/gaussian-splats-3d missing from frontend/package.json${NC}"
+grep -q "@babylonjs/core" frontend/package.json || {
+    echo -e "${RED}❌ @babylonjs/core missing from frontend/package.json${NC}"
     exit 1
 }
-echo -e "${GREEN}✓ Viewer3D + splatPick (measure: splat-center cone pick on SplatTree center cache) sources OK${NC}"
+grep -q "@babylonjs/loaders" frontend/package.json || {
+    echo -e "${RED}❌ @babylonjs/loaders missing from frontend/package.json${NC}"
+    exit 1
+}
+echo -e "${GREEN}✓ Viewer3D + splatPick (Babylon.js splat-center cone pick) sources OK${NC}"
 
-# Vite env template (Vercel / local): API base URL + optional GS3D legacy worker flag (see README §3)
+# Vite env template (Vercel / local): API base URL + optional scene scale (see README §3)
 echo -e "${BLUE}Verifying frontend/.env.example...${NC}"
 if [ ! -f "frontend/.env.example" ]; then
     echo -e "${RED}❌ Missing frontend/.env.example${NC}"
@@ -80,15 +82,11 @@ grep -q "VITE_API_BASE_URL" frontend/.env.example || {
     echo -e "${RED}❌ frontend/.env.example must document VITE_API_BASE_URL${NC}"
     exit 1
 }
-grep -q "VITE_GS3D_FORCE_LEGACY_WORKERS" frontend/.env.example || {
-    echo -e "${RED}❌ frontend/.env.example must mention VITE_GS3D_FORCE_LEGACY_WORKERS (see ARCHITECTURE.md viewer troubleshooting)${NC}"
+grep -q "VITE_VIEWER_SCENE_SCALE" frontend/.env.example || {
+    echo -e "${RED}❌ frontend/.env.example must mention VITE_VIEWER_SCENE_SCALE${NC}"
     exit 1
 }
-grep -qE '^# VITE_GS3D_FORCE_LEGACY_WORKERS=(true|1)' frontend/.env.example || {
-    echo -e "${RED}❌ frontend/.env.example must include commented template: # VITE_GS3D_FORCE_LEGACY_WORKERS=true (or =1)${NC}"
-    exit 1
-}
-echo -e "${GREEN}✓ frontend/.env.example OK (VITE_API_BASE_URL + VITE_GS3D_FORCE_LEGACY_WORKERS)${NC}"
+echo -e "${GREEN}✓ frontend/.env.example OK (VITE_API_BASE_URL + VITE_VIEWER_SCENE_SCALE)${NC}"
 
 # Verify key backend files exist (new optimized pipeline)
 echo -e "${BLUE}Verifying backend structure...${NC}"
@@ -121,18 +119,6 @@ echo -e "${GREEN}✓ Backend structure OK${NC}"
 grep -q "passlib" backend/requirements.txt || { echo -e "${RED}❌ passlib missing from requirements.txt${NC}"; exit 1; }
 grep -q "plyfile" backend/requirements.txt || { echo -e "${RED}❌ plyfile missing from requirements.txt${NC}"; exit 1; }
 echo -e "${GREEN}✓ Backend requirements OK${NC}"
-
-# COOP/COEP + CORP (SharedArrayBuffer in GS3D workers; Vercel SPA must also send COOP/COEP — see frontend/vercel.json)
-echo -e "${BLUE}Verifying cross-origin isolation headers in backend...${NC}"
-grep -q "Cross-Origin-Embedder-Policy" backend/main.py || {
-    echo -e "${RED}❌ backend/main.py missing Cross-Origin-Embedder-Policy (COEP)${NC}"
-    exit 1
-}
-grep -q "Cross-Origin-Resource-Policy" backend/main.py || {
-    echo -e "${RED}❌ backend/main.py missing Cross-Origin-Resource-Policy (CORP)${NC}"
-    exit 1
-}
-echo -e "${GREEN}✓ Backend isolation headers present${NC}"
 
 # ============================================
 # STEP 1: DOCKER LOGIN
@@ -194,9 +180,9 @@ if [ ${PIPESTATUS[0]} -eq 0 ]; then
     echo -e "  │ Expose HTTP Ports  │ 8000                                         │"
     echo -e "  └────────────────────┴──────────────────────────────────────────────┘"
     echo ""
-    echo -e "${PURPLE}Pipeline: video → frames → LongSplat MASt3R + 3DGS → PLY + gzip, optional OBJ. Viewer: GaussianSplats3D + splatPick — measure snaps to splat world centers (cone pick on center cache; canvas/getRenderDimensions alignment).${NC}"
-    echo -e "${PURPLE}GPU splat sort + SharedArrayBuffer workers when crossOriginIsolated unless VITE_GS3D_FORCE_LEGACY_WORKERS=true|1 — CPU sort path. GET /api/jobs/{id}/initial_camera: first cameras_all pose, look-at along forward (bbox-scaled).${NC}"
-    echo -e "${BLUE}Vercel: COOP+COEP in frontend/vercel.json. Env: VITE_API_BASE_URL and/or rewrites — README §3. If splats hang: add VITE_GS3D_FORCE_LEGACY_WORKERS=true or 1 in Production → redeploy — frontend/.env.example + ARCHITECTURE.md — tradeoff: smoother loads, choppier orbit.${NC}"
+    echo -e "${PURPLE}Pipeline: video → frames → LongSplat MASt3R + 3DGS → PLY + gzip, optional OBJ. Viewer: Babylon.js GaussianSplattingMesh + splatPick — measure snaps to splat world centers (cone pick on splatsData center cache).${NC}"
+    echo -e "${PURPLE}GET /api/jobs/{id}/initial_camera: first cameras_all pose, look-at along forward (bbox-scaled).${NC}"
+    echo -e "${BLUE}Env: VITE_API_BASE_URL and/or rewrites — README §3. Optional VITE_VIEWER_SCENE_SCALE — frontend/.env.example.${NC}"
     echo -e "${BLUE}Tip: BUILD_NO_CACHE=1 ./build-and-push.sh for a full CUDA layer rebuild${NC}"
     echo ""
 else

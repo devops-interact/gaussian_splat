@@ -1,4 +1,13 @@
-import * as THREE from 'three';
+import {
+  Camera,
+  Matrix,
+  Plane,
+  Ray,
+  Scene,
+  Vector2,
+  Vector3,
+} from '@babylonjs/core';
+import type { GaussianSplattingMesh } from '@babylonjs/core/Meshes/GaussianSplatting/gaussianSplattingMesh';
 
 /** Scene-scale max ray distance for accepting a splat hit (axis-aligned bbox diagonal). */
 export function maxSplatPickDistance(bbox: {
@@ -19,41 +28,23 @@ export const PICK_RADIUS_PX = 28;
 /** Build uniform grid over centers when count exceeds this (plan: large-PLY acceleration). */
 export const CENTER_GRID_MIN_SPLATS = 50_000;
 
-export type SplatMeshWithCenters = THREE.Object3D & {
-  getSplatCount?: (includeSinceLastBuild?: boolean) => number;
-  /** GS3D < 0.3.x: boolean; newer: Matrix4 | null */
-  getSplatCenter?: (
-    globalIndex: number,
-    outCenter: THREE.Vector3,
-    sceneTransform?: boolean | THREE.Matrix4 | null,
-  ) => void;
-};
+/** Splats with alpha below this (0-255) are excluded from the pick center cache. */
+export const PICK_CENTER_ALPHA_FLOOR = 40;
+
+const SPLAT_ROW_BYTES = 32;
+const SPLAT_FLOATS = 8;
+const SPLAT_ALPHA_BYTE_OFFSET = 27;
+
+export type SplatMeshWithCenters = Pick<
+  GaussianSplattingMesh,
+  'splatsData' | 'getWorldMatrix' | 'computeWorldMatrix'
+>;
 
 export interface PickResult {
-  position: THREE.Vector3;
+  position: Vector3;
   isSnapped: boolean;
   /** Set when the pick resolved to a splat world center (cone / center-cache path). */
   splatCenterIndex?: number;
-}
-
-export interface SplatHit {
-  origin: THREE.Vector3;
-  distance: number;
-  splatIndex: number;
-}
-
-export interface GaussianSplatPickAdapter {
-  setFromCameraAndScreenPosition(
-    camera: THREE.Camera,
-    screenPosition: THREE.Vector2,
-    screenDimensions: THREE.Vector2,
-  ): void;
-  intersectSplatMesh(
-    splatMesh: THREE.Object3D,
-    outHits?: SplatHit[],
-  ): SplatHit[];
-  splatMesh: THREE.Object3D;
-  isLoading: () => boolean;
 }
 
 /** Uniform axis-aligned grid: ~equal cells per axis, variable cell size per axis. */
@@ -69,56 +60,68 @@ export interface SplatCenterGridAccel {
   nz: number;
   /** flat: ix + nx * (iy + ny * iz) */
   buckets: number[][];
+  /** Per-cell visit stamps (generation counter) for traversal dedupe; internal. */
+  cellStamp: Int32Array;
+  /** Current stamp generation; internal. */
+  stampGen: number;
 }
 
-const _sharedRaycaster = new THREE.Raycaster();
-const _ndc = new THREE.Vector2();
-const _vProj = new THREE.Vector3();
-const _oc = new THREE.Vector3();
+const _vProj = new Vector3();
+const _clip = new Vector3();
+const _oc = new Vector3();
+/** Reusable candidate index list for grid traversal (module-scoped, single-threaded). */
+const _gridCandidates: number[] = [];
 
-export function buildSplatCenterWorldCache(splatMesh: SplatMeshWithCenters): Float32Array | null {
-  const countFn = splatMesh.getSplatCount;
-  const centerFn = splatMesh.getSplatCenter;
-  if (!countFn || !centerFn) return null;
+function clamp(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v));
+}
 
-  // Pass false to count only splats committed to the last SplatTree build.
-  // If the tree hasn't been built yet this returns 0 and we bail out cleanly.
-  const n = countFn.call(splatMesh, false);
-  if (!n || n <= 0) return null;
+/**
+ * Read world-space splat centers from Babylon GaussianSplattingMesh.splatsData (32 B / splat).
+ * Splats with alpha below `alphaFloor` (0-255) are skipped so measure picks never snap to
+ * near-invisible floaters; the returned buffer is compacted (indices are cache-local).
+ */
+export function buildSplatCenterWorldCache(
+  splatMesh: SplatMeshWithCenters,
+  alphaFloor: number = PICK_CENTER_ALPHA_FLOOR,
+): Float32Array | null {
+  const data = splatMesh.splatsData;
+  if (!data || data.byteLength < SPLAT_ROW_BYTES) return null;
 
-  // Always obtain the current world transform so we are independent of whether
-  // the third parameter of getSplatCenter is a boolean or a Matrix4.
-  splatMesh.updateMatrixWorld(true);
-  const matWorld = (splatMesh as unknown as THREE.Object3D).matrixWorld;
-  const isIdentity =
-    matWorld.elements[0] === 1 &&
-    matWorld.elements[5] === 1 &&
-    matWorld.elements[10] === 1 &&
-    matWorld.elements[15] === 1 &&
-    matWorld.elements[12] === 0 &&
-    matWorld.elements[13] === 0 &&
-    matWorld.elements[14] === 0;
+  const n = Math.floor(data.byteLength / SPLAT_ROW_BYTES);
+  if (n <= 0) return null;
 
+  splatMesh.computeWorldMatrix(true);
+  const matWorld = splatMesh.getWorldMatrix();
+  const fBuffer = new Float32Array(data);
+  const uBuffer = new Uint8Array(data);
   const buf = new Float32Array(n * 3);
-  const p = new THREE.Vector3();
+  const p = new Vector3();
 
+  let kept = 0;
   for (let i = 0; i < n; i++) {
-    // Pass 'false' for the third param (local space) and apply matrixWorld ourselves.
-    // This is safe for both old (boolean) and new (Matrix4) versions of the API.
-    centerFn.call(splatMesh, i, p, false);
-    if (!isIdentity) p.applyMatrix4(matWorld);
-    buf[i * 3] = p.x;
-    buf[i * 3 + 1] = p.y;
-    buf[i * 3 + 2] = p.z;
+    if (uBuffer[i * SPLAT_ROW_BYTES + SPLAT_ALPHA_BYTE_OFFSET] < alphaFloor) continue;
+    const base = i * SPLAT_FLOATS;
+    p.set(fBuffer[base], fBuffer[base + 1], fBuffer[base + 2]);
+    Vector3.TransformCoordinatesToRef(p, matWorld, p);
+    buf[kept * 3] = p.x;
+    buf[kept * 3 + 1] = p.y;
+    buf[kept * 3 + 2] = p.z;
+    kept++;
   }
 
+  // Fall back to no alpha filtering if the floor would leave nothing pickable.
+  if (kept === 0 && alphaFloor > 0) {
+    return buildSplatCenterWorldCache(splatMesh, 0);
+  }
+  if (kept === 0) return null;
+
+  const out = kept === n ? buf : buf.slice(0, kept * 3);
   console.log(
-    `[splatPick] center cache built: ${n} splats,`,
-    `matWorld identity: ${isIdentity}`,
-    `sample[0]: (${buf[0].toFixed(3)}, ${buf[1].toFixed(3)}, ${buf[2].toFixed(3)})`,
+    `[splatPick] center cache built: ${kept}/${n} splats (alphaFloor=${alphaFloor}), sample[0]: (${out[0].toFixed(3)}, ${out[1].toFixed(3)}, ${out[2].toFixed(3)})`,
   );
 
-  return buf;
+  return out;
 }
 
 /**
@@ -165,19 +168,32 @@ export function buildCenterGridAcceleration(centers: Float32Array): SplatCenterG
     const x = centers[i * 3];
     const y = centers[i * 3 + 1];
     const z = centers[i * 3 + 2];
-    const ix = THREE.MathUtils.clamp(Math.floor((x - minX) / cellSizeX), 0, nx - 1);
-    const iy = THREE.MathUtils.clamp(Math.floor((y - minY) / cellSizeY), 0, ny - 1);
-    const iz = THREE.MathUtils.clamp(Math.floor((z - minZ) / cellSizeZ), 0, nz - 1);
+    const ix = clamp(Math.floor((x - minX) / cellSizeX), 0, nx - 1);
+    const iy = clamp(Math.floor((y - minY) / cellSizeY), 0, ny - 1);
+    const iz = clamp(Math.floor((z - minZ) / cellSizeZ), 0, nz - 1);
     const flat = ix + nx * (iy + ny * iz);
     buckets[flat].push(i);
   }
 
-  return { minX, minY, minZ, cellSizeX, cellSizeY, cellSizeZ, nx, ny, nz, buckets };
+  return {
+    minX,
+    minY,
+    minZ,
+    cellSizeX,
+    cellSizeY,
+    cellSizeZ,
+    nx,
+    ny,
+    nz,
+    buckets,
+    cellStamp: new Int32Array(numCells),
+    stampGen: 0,
+  };
 }
 
 export function ndcFromMousePos(
-  mousePos: THREE.Vector2,
-  renderDims: THREE.Vector2,
+  mousePos: Vector2,
+  renderDims: Vector2,
 ): { ndcX: number; ndcY: number } {
   const w = Math.max(1e-6, renderDims.x);
   const h = Math.max(1e-6, renderDims.y);
@@ -188,17 +204,17 @@ export function ndcFromMousePos(
 }
 
 export function worldRayFromCameraScreen(
-  camera: THREE.PerspectiveCamera,
-  mousePos: THREE.Vector2,
-  renderDims: THREE.Vector2,
-): { origin: THREE.Vector3; direction: THREE.Vector3 } {
-  const { ndcX, ndcY } = ndcFromMousePos(mousePos, renderDims);
-  _ndc.set(ndcX, ndcY);
-  _sharedRaycaster.setFromCamera(_ndc, camera);
-  return {
-    origin: _sharedRaycaster.ray.origin.clone(),
-    direction: _sharedRaycaster.ray.direction.clone(),
-  };
+  scene: Scene,
+  camera: Camera,
+  mousePos: Vector2,
+): Ray {
+  return scene.createPickingRay(mousePos.x, mousePos.y, Matrix.Identity(), camera, false);
+}
+
+/** Project world position to NDC via a cached view-projection matrix; writes into `out`. */
+function projectWorldToNdcRef(viewProj: Matrix, worldPos: Vector3, out: Vector3): boolean {
+  Vector3.TransformCoordinatesToRef(worldPos, viewProj, out);
+  return out.z >= 0 && out.z <= 1;
 }
 
 function flatCellIndex(
@@ -253,19 +269,60 @@ function rayAabbSlab(
 }
 
 /**
- * Collect splat indices whose grid cells the ray traverses (Amanatides & Woo style, t from ray origin).
+ * Emit splat indices from a cell's 3x3x3 neighborhood into `out`, deduped by cell stamps.
+ * The 1-cell dilation makes the traversal cover the screen-space pick cone so no
+ * full-scan fallback is needed when the ray itself misses populated cells.
  */
-function collectGridCandidatesAlongRay(
+function emitCellNeighborhood(
   grid: SplatCenterGridAccel,
-  O: THREE.Vector3,
-  D: THREE.Vector3,
-  tRayMax: number,
-  outSet: Set<number>,
+  ix: number,
+  iy: number,
+  iz: number,
+  out: number[],
 ): void {
+  for (let dz = -1; dz <= 1; dz++) {
+    const z = iz + dz;
+    if (z < 0 || z >= grid.nz) continue;
+    for (let dy = -1; dy <= 1; dy++) {
+      const y = iy + dy;
+      if (y < 0 || y >= grid.ny) continue;
+      for (let dx = -1; dx <= 1; dx++) {
+        const x = ix + dx;
+        if (x < 0 || x >= grid.nx) continue;
+        const fi = flatCellIndex(grid, x, y, z);
+        if (grid.cellStamp[fi] === grid.stampGen) continue;
+        grid.cellStamp[fi] = grid.stampGen;
+        const bucket = grid.buckets[fi];
+        for (let b = 0; b < bucket.length; b++) out.push(bucket[b]);
+      }
+    }
+  }
+}
+
+/**
+ * Collect splat indices whose grid cells the ray traverses (Amanatides & Woo style, t from ray origin),
+ * dilated by one neighbor ring per visited cell. Indices are unique (cell-stamp dedupe).
+ */
+export function collectGridCandidatesAlongRay(
+  grid: SplatCenterGridAccel,
+  O: Vector3,
+  D: Vector3,
+  tRayMax: number,
+  out: number[],
+): void {
+  grid.stampGen++;
+  if (grid.stampGen >= 0x7fffffff) {
+    grid.cellStamp.fill(0);
+    grid.stampGen = 1;
+  }
+
   const maxGX = grid.minX + grid.nx * grid.cellSizeX;
   const maxGY = grid.minY + grid.ny * grid.cellSizeY;
   const maxGZ = grid.minZ + grid.nz * grid.cellSizeZ;
 
+  // Pad the bounds by one cell so rays that graze the grid border (within the
+  // screen-space pick cone of border splats) still start a traversal; the 1-ring
+  // dilation covers the border cells from the clamped lattice position.
   const slab = rayAabbSlab(
     O.x,
     O.y,
@@ -273,12 +330,12 @@ function collectGridCandidatesAlongRay(
     D.x,
     D.y,
     D.z,
-    grid.minX,
-    grid.minY,
-    grid.minZ,
-    maxGX,
-    maxGY,
-    maxGZ,
+    grid.minX - grid.cellSizeX,
+    grid.minY - grid.cellSizeY,
+    grid.minZ - grid.cellSizeZ,
+    maxGX + grid.cellSizeX,
+    maxGY + grid.cellSizeY,
+    maxGZ + grid.cellSizeZ,
   );
   if (!slab) return;
 
@@ -290,51 +347,48 @@ function collectGridCandidatesAlongRay(
   const py = O.y + D.y * t0;
   const pz = O.z + D.z * t0;
 
-  let ix = THREE.MathUtils.clamp(
-    Math.floor((px - grid.minX) / grid.cellSizeX),
-    0,
-    grid.nx - 1,
-  );
-  let iy = THREE.MathUtils.clamp(
-    Math.floor((py - grid.minY) / grid.cellSizeY),
-    0,
-    grid.ny - 1,
-  );
-  let iz = THREE.MathUtils.clamp(
-    Math.floor((pz - grid.minZ) / grid.cellSizeZ),
-    0,
-    grid.nz - 1,
-  );
+  let ix = clamp(Math.floor((px - grid.minX) / grid.cellSizeX), 0, grid.nx - 1);
+  let iy = clamp(Math.floor((py - grid.minY) / grid.cellSizeY), 0, grid.ny - 1);
+  let iz = clamp(Math.floor((pz - grid.minZ) / grid.cellSizeZ), 0, grid.nz - 1);
 
-  const stepX = D.x > 0 ? 1 : D.x < 0 ? -1 : 0;
-  const stepY = D.y > 0 ? 1 : D.y < 0 ? -1 : 0;
-  const stepZ = D.z > 0 ? 1 : D.z < 0 ? -1 : 0;
+  // Quantize near-zero direction components: if the ray moves less than half a cell
+  // along an axis over the clipped segment, don't step on that axis (the neighbor-ring
+  // dilation absorbs the sub-cell drift). Prevents boundary-grazing rays from being
+  // stepped out of the lattice immediately.
+  const span = t1 - t0;
+  const Dx = Math.abs(D.x) * span < grid.cellSizeX * 0.5 ? 0 : D.x;
+  const Dy = Math.abs(D.y) * span < grid.cellSizeY * 0.5 ? 0 : D.y;
+  const Dz = Math.abs(D.z) * span < grid.cellSizeZ * 0.5 ? 0 : D.z;
 
-  const tDeltaX = D.x !== 0 ? grid.cellSizeX / Math.abs(D.x) : Infinity;
-  const tDeltaY = D.y !== 0 ? grid.cellSizeY / Math.abs(D.y) : Infinity;
-  const tDeltaZ = D.z !== 0 ? grid.cellSizeZ / Math.abs(D.z) : Infinity;
+  const stepX = Dx > 0 ? 1 : Dx < 0 ? -1 : 0;
+  const stepY = Dy > 0 ? 1 : Dy < 0 ? -1 : 0;
+  const stepZ = Dz > 0 ? 1 : Dz < 0 ? -1 : 0;
+
+  const tDeltaX = Dx !== 0 ? grid.cellSizeX / Math.abs(Dx) : Infinity;
+  const tDeltaY = Dy !== 0 ? grid.cellSizeY / Math.abs(Dy) : Infinity;
+  const tDeltaZ = Dz !== 0 ? grid.cellSizeZ / Math.abs(Dz) : Infinity;
 
   let tMaxX: number;
   let tMaxY: number;
   let tMaxZ: number;
   if (stepX > 0) {
-    tMaxX = (grid.minX + (ix + 1) * grid.cellSizeX - O.x) / D.x;
+    tMaxX = (grid.minX + (ix + 1) * grid.cellSizeX - O.x) / Dx;
   } else if (stepX < 0) {
-    tMaxX = (grid.minX + ix * grid.cellSizeX - O.x) / D.x;
+    tMaxX = (grid.minX + ix * grid.cellSizeX - O.x) / Dx;
   } else {
     tMaxX = Infinity;
   }
   if (stepY > 0) {
-    tMaxY = (grid.minY + (iy + 1) * grid.cellSizeY - O.y) / D.y;
+    tMaxY = (grid.minY + (iy + 1) * grid.cellSizeY - O.y) / Dy;
   } else if (stepY < 0) {
-    tMaxY = (grid.minY + iy * grid.cellSizeY - O.y) / D.y;
+    tMaxY = (grid.minY + iy * grid.cellSizeY - O.y) / Dy;
   } else {
     tMaxY = Infinity;
   }
   if (stepZ > 0) {
-    tMaxZ = (grid.minZ + (iz + 1) * grid.cellSizeZ - O.z) / D.z;
+    tMaxZ = (grid.minZ + (iz + 1) * grid.cellSizeZ - O.z) / Dz;
   } else if (stepZ < 0) {
-    tMaxZ = (grid.minZ + iz * grid.cellSizeZ - O.z) / D.z;
+    tMaxZ = (grid.minZ + iz * grid.cellSizeZ - O.z) / Dz;
   } else {
     tMaxZ = Infinity;
   }
@@ -360,9 +414,7 @@ function collectGridCandidatesAlongRay(
 
   while (steps < maxSteps) {
     steps++;
-    const fi = flatCellIndex(grid, ix, iy, iz);
-    const bucket = grid.buckets[fi];
-    for (let b = 0; b < bucket.length; b++) outSet.add(bucket[b]);
+    emitCellNeighborhood(grid, ix, iy, iz, out);
 
     if (tMaxX <= tMaxY && tMaxX <= tMaxZ) {
       if (tMaxX > t1) break;
@@ -383,19 +435,19 @@ function collectGridCandidatesAlongRay(
   }
 }
 
-export type NearestSplatCenterHit = { position: THREE.Vector3; splatIndex: number };
+export type NearestSplatCenterHit = { position: Vector3; splatIndex: number };
 
 /**
  * Nearest splat center along the view ray within screen cone; smallest ray parameter t wins.
  */
 export function pickNearestCenterConeAlongRay(
-  camera: THREE.PerspectiveCamera,
-  rayOrigin: THREE.Vector3,
-  rayDirection: THREE.Vector3,
+  camera: Camera,
+  rayOrigin: Vector3,
+  rayDirection: Vector3,
   ndcX: number,
   ndcY: number,
   centers: Float32Array,
-  renderDims: THREE.Vector2,
+  renderDims: Vector2,
   maxDistAlongRay: number,
   grid: SplatCenterGridAccel | null,
 ): NearestSplatCenterHit | null {
@@ -403,6 +455,8 @@ export function pickNearestCenterConeAlongRay(
   const ndcTolPerPx = 2 / shortAxis;
   const ndcTol = PICK_RADIUS_PX * ndcTolPerPx;
   const ndcTolSq = ndcTol * ndcTol;
+
+  const viewProj = camera.getTransformationMatrix();
 
   let bestT = Infinity;
   let bestI = -1;
@@ -413,15 +467,15 @@ export function pickNearestCenterConeAlongRay(
     const pz = centers[i * 3 + 2];
 
     _oc.set(px - rayOrigin.x, py - rayOrigin.y, pz - rayOrigin.z);
-    const t = _oc.dot(rayDirection);
+    const t = Vector3.Dot(_oc, rayDirection);
     if (t <= 0.01) return;
     if (t > maxDistAlongRay) return;
     if (t >= bestT) return;
 
-    _vProj.set(px, py, pz).project(camera);
-    if (_vProj.z < -1 || _vProj.z > 1) return;
-    const dx = _vProj.x - ndcX;
-    const dy = _vProj.y - ndcY;
+    _vProj.set(px, py, pz);
+    if (!projectWorldToNdcRef(viewProj, _vProj, _clip)) return;
+    const dx = _clip.x - ndcX;
+    const dy = _clip.y - ndcY;
     if (dx * dx + dy * dy > ndcTolSq) return;
 
     bestT = t;
@@ -429,18 +483,9 @@ export function pickNearestCenterConeAlongRay(
   };
 
   if (grid) {
-    const candidates = new Set<number>();
-    collectGridCandidatesAlongRay(grid, rayOrigin, rayDirection, maxDistAlongRay, candidates);
-    if (candidates.size === 0) {
-      const count = centers.length / 3;
-      for (let i = 0; i < count; i++) visitIndex(i);
-    } else {
-      candidates.forEach((i) => visitIndex(i));
-      if (bestI < 0) {
-        const count = centers.length / 3;
-        for (let i = 0; i < count; i++) visitIndex(i);
-      }
-    }
+    _gridCandidates.length = 0;
+    collectGridCandidatesAlongRay(grid, rayOrigin, rayDirection, maxDistAlongRay, _gridCandidates);
+    for (let k = 0; k < _gridCandidates.length; k++) visitIndex(_gridCandidates[k]);
   } else {
     const count = centers.length / 3;
     for (let i = 0; i < count; i++) visitIndex(i);
@@ -449,25 +494,24 @@ export function pickNearestCenterConeAlongRay(
   if (bestI < 0) return null;
   const j = bestI * 3;
   return {
-    position: new THREE.Vector3(centers[j], centers[j + 1], centers[j + 2]),
+    position: new Vector3(centers[j], centers[j + 1], centers[j + 2]),
     splatIndex: bestI,
   };
 }
 
 export interface PickSplatMeasureInput {
-  camera: THREE.PerspectiveCamera;
-  mousePos: THREE.Vector2;
-  renderDims: THREE.Vector2;
+  scene: Scene;
+  camera: Camera;
+  mousePos: Vector2;
+  renderDims: Vector2;
   maxDist: number;
   splatMeshVisible: boolean;
-  splatTreeReady: boolean;
   centers: Float32Array | null;
   centerGrid: SplatCenterGridAccel | null;
-  gs3d: GaussianSplatPickAdapter | null;
   /** Default: horizontal plane through y = 0 */
-  groundPlane?: THREE.Plane;
+  groundPlane?: Plane;
   /**
-   * When true: only nearest splat center under the cursor cone (no GS3D surface hit, no ground plane).
+   * When true: only nearest splat center under the cursor cone (no ground plane).
    * Used for measure mode snapping to discrete splat centers.
    */
   splatCentersOnly?: boolean;
@@ -475,27 +519,25 @@ export interface PickSplatMeasureInput {
 
 export function pickSplatMeasure(input: PickSplatMeasureInput): PickResult | null {
   const {
+    scene,
     camera,
     mousePos,
     renderDims,
     maxDist,
     splatMeshVisible,
-    splatTreeReady,
     centers,
     centerGrid,
-    gs3d,
     splatCentersOnly = false,
   } = input;
 
   if (!splatMeshVisible) return null;
-  if (gs3d?.isLoading()) return null;
 
-  const groundPlane = input.groundPlane ?? new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const groundPlane = input.groundPlane ?? new Plane(0, 1, 0, 0);
 
   if (splatCentersOnly) {
     if (!centers || centers.length < 3) return null;
     const { ndcX, ndcY } = ndcFromMousePos(mousePos, renderDims);
-    const ray = worldRayFromCameraScreen(camera, mousePos, renderDims);
+    const ray = worldRayFromCameraScreen(scene, camera, mousePos);
     const centerHit = pickNearestCenterConeAlongRay(
       camera,
       ray.origin,
@@ -517,44 +559,8 @@ export function pickSplatMeasure(input: PickSplatMeasureInput): PickResult | nul
     return null;
   }
 
-  if (splatTreeReady && gs3d) {
-    try {
-      gs3d.setFromCameraAndScreenPosition(camera, mousePos, renderDims);
-      const hits: SplatHit[] = [];
-      gs3d.intersectSplatMesh(gs3d.splatMesh, hits);
-      let bestLib: SplatHit | null = null;
-      for (const h of hits) {
-        if (!isFinite(h.distance) || h.distance > maxDist) continue;
-        if (!bestLib || h.distance < bestLib.distance) bestLib = h;
-      }
-      if (bestLib) {
-        // GS3D < 0.3.x names the hit position 'origin'; newer versions use 'point'.
-        // Guard both and fall through to center-cache if neither looks plausible.
-        const hitAny = bestLib as unknown as Record<string, unknown>;
-        const rawPos = (
-          hitAny['point'] instanceof THREE.Vector3
-            ? hitAny['point']
-            : hitAny['origin'] instanceof THREE.Vector3
-              ? hitAny['origin']
-              : null
-        ) as THREE.Vector3 | null;
-
-        if (rawPos) {
-          const idx =
-            typeof bestLib.splatIndex === 'number' && Number.isFinite(bestLib.splatIndex)
-              ? bestLib.splatIndex
-              : undefined;
-          return { position: rawPos.clone(), isSnapped: true, splatCenterIndex: idx };
-        }
-        // Fall through to center cache.
-      }
-    } catch {
-      // fall through to center cache
-    }
-  }
-
   const { ndcX, ndcY } = ndcFromMousePos(mousePos, renderDims);
-  const ray = worldRayFromCameraScreen(camera, mousePos, renderDims);
+  const ray = worldRayFromCameraScreen(scene, camera, mousePos);
 
   if (centers && centers.length >= 3) {
     const centerHit = pickNearestCenterConeAlongRay(
@@ -577,9 +583,9 @@ export function pickSplatMeasure(input: PickSplatMeasureInput): PickResult | nul
     }
   }
 
-  const groundHit = new THREE.Vector3();
-  _sharedRaycaster.setFromCamera(_ndc.set(ndcX, ndcY), camera);
-  if (_sharedRaycaster.ray.intersectPlane(groundPlane, groundHit)) {
+  const dist = ray.intersectsPlane(groundPlane);
+  if (dist !== null && dist >= 0 && dist <= maxDist) {
+    const groundHit = ray.origin.add(ray.direction.scale(dist));
     return { position: groundHit, isSnapped: false };
   }
 
@@ -588,14 +594,10 @@ export function pickSplatMeasure(input: PickSplatMeasureInput): PickResult | nul
 
 /**
  * Dev-only: project the first N cached splat centers through the camera and log
- * where they would appear on screen. Useful to confirm center cache + render dims alignment.
- *
- * Usage in browser console (after model loads):
- *   import { diagPickAlignment } from '@/lib/splatPick';
- *   diagPickAlignment(camera, centersRef, renderW, renderH);
+ * where they would appear on screen.
  */
 export function diagPickAlignment(
-  camera: THREE.PerspectiveCamera,
+  camera: Camera,
   centers: Float32Array | null,
   renderW: number,
   renderH: number,
@@ -606,21 +608,49 @@ export function diagPickAlignment(
     return;
   }
   const step = Math.max(1, Math.floor(centers.length / 3 / sampleCount));
-  const v = new THREE.Vector3();
+  const v = new Vector3();
+  const clip = new Vector3();
+  const viewProj = camera.getTransformationMatrix();
   console.groupCollapsed(
     `[diagPick] ${sampleCount} sample splat centers → screen pos (renderDims ${renderW}x${renderH})`,
   );
   for (let i = 0; i < sampleCount; i++) {
     const idx = i * step;
     v.set(centers[idx * 3], centers[idx * 3 + 1], centers[idx * 3 + 2]);
-    const ndc = v.clone().project(camera);
-    const sx = ((ndc.x + 1) / 2) * renderW;
-    const sy = ((-ndc.y + 1) / 2) * renderH;
+    projectWorldToNdcRef(viewProj, v, clip);
+    const ndcX = clip.x;
+    const ndcY = clip.y;
+    const sx = ((ndcX + 1) / 2) * renderW;
+    const sy = ((-ndcY + 1) / 2) * renderH;
     console.log(
       `  splat[${idx}]: world=(${v.x.toFixed(2)},${v.y.toFixed(2)},${v.z.toFixed(2)})`,
-      `ndc=(${ndc.x.toFixed(3)},${ndc.y.toFixed(3)})`,
+      `ndc=(${ndcX.toFixed(3)},${ndcY.toFixed(3)})`,
       `screen=(${sx.toFixed(0)}px, ${sy.toFixed(0)}px)`,
     );
   }
   console.groupEnd();
+}
+
+/** Filter .splat buffer rows by alpha byte (offset 27 in each 32-byte record). */
+export function filterSplatsByMinAlpha(data: ArrayBuffer, minAlpha: number): ArrayBuffer {
+  const threshold = Math.max(0, Math.min(255, Math.round(minAlpha)));
+  const src = new Uint8Array(data);
+  const stride = SPLAT_ROW_BYTES;
+  const n = Math.floor(src.length / stride);
+
+  let keptCount = 0;
+  for (let i = 0; i < n; i++) {
+    if (src[i * stride + SPLAT_ALPHA_BYTE_OFFSET] >= threshold) keptCount++;
+  }
+
+  const out = new Uint8Array(keptCount * stride);
+  let dst = 0;
+  for (let i = 0; i < n; i++) {
+    const off = i * stride;
+    if (src[off + SPLAT_ALPHA_BYTE_OFFSET] >= threshold) {
+      out.set(src.subarray(off, off + stride), dst);
+      dst += stride;
+    }
+  }
+  return out.buffer;
 }

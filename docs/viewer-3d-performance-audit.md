@@ -1,5 +1,7 @@
 # Viewer 3D canvas — performance audit (SuperSplat-inspired)
 
+> **Historical note:** This audit was written against the previous **Three.js + `@mkkellogg/gaussian-splats-3d`** viewer. The viewer has since migrated to **Babylon.js** (`GaussianSplattingMesh` + SPLAT loader), so GS3D-specific knobs (COOP/COEP, legacy workers, `gaussian-splats-3d.d.ts`) no longer exist in the codebase. Kept for reference on methodology and hypotheses.
+
 This document implements the **learn, don’t merge** audit: we compare our **Three.js + `@mkkellogg/gaussian-splats-3d`** viewer to patterns in **[playcanvas/supersplat](https://github.com/playcanvas/supersplat)** (PlayCanvas + custom splat stack). SuperSplat is **not** integrated or vendored; paths below refer to a **read-only clone** for research (e.g. `/tmp/supersplat-audit-readonly` or your own shallow clone).
 
 **Primary code in this repo:** [`frontend/src/components/Viewer3D.tsx`](../frontend/src/components/Viewer3D.tsx), [`frontend/src/lib/splatPick.ts`](../frontend/src/lib/splatPick.ts), [`frontend/src/types/gaussian-splats-3d.d.ts`](../frontend/src/types/gaussian-splats-3d.d.ts).

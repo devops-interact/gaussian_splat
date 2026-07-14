@@ -24,7 +24,7 @@ docker system prune -af && docker builder prune -af
 ./build-and-push.sh
 ```
 
-The script runs **`npm run build`** and **`npm test`** in `frontend/`, checks COOP/COEP/CORP headers, **`frontend/.env.example`**, the **`initial_camera`** API wiring, viewer + **`src/lib/splatPick.ts`** sources (existence + `@mkkellogg/gaussian-splats-3d` in `package.json`), and required LongSplat/backend files before Docker buildx push. Vercel-facing **`VITE_*`** variables are listed in **§ 3** and in [`frontend/.env.example`](frontend/.env.example).
+The script runs **`npm run build`** and **`npm test`** in `frontend/`, checks **`frontend/.env.example`**, the **`initial_camera`** API wiring, viewer + **`src/lib/splatPick.ts`** sources (existence + `@babylonjs/core` in `package.json`), and required LongSplat/backend files before Docker buildx push. Vercel-facing **`VITE_*`** variables are listed in **§ 3** and in [`frontend/.env.example`](frontend/.env.example).
 
 ### 2. Deploy Backend to RunPod
 
@@ -48,16 +48,14 @@ The SPA must reach your RunPod API over HTTPS. Pick **one** of these patterns:
 | Approach | What to do |
 |---|---|
 | **A. Explicit API URL (simplest)** | In Vercel → Settings → Environment Variables → **Production**, set `VITE_API_BASE_URL` to your RunPod HTTPS origin with **no trailing slash**, e.g. `https://your-pod-id-8000.proxy.runpod.net`. Rebuild the project after changing env vars (Vite bakes this in at build time). |
-| **B. Same-origin `/api` proxy** | Leave `VITE_API_BASE_URL` **unset** for Production. The app then calls relative URLs like `/api/projects`. Merge the **`rewrites`** block from [`frontend/vercel.rewrites.example.json`](frontend/vercel.rewrites.example.json) into [`frontend/vercel.json`](frontend/vercel.json) (same JSON object as the existing `headers` array), replacing `YOUR_RUNPOD_ORIGIN` with your HTTPS origin (no trailing slash). |
-| **C. Viewer hangs on load (optional)** | In Vercel → **Environment Variables** → **Production**, add **`VITE_GS3D_FORCE_LEGACY_WORKERS`** with value **`true`** or **`1`**, then **redeploy**. This forces GaussianSplats3D to use CPU splat sort and non–shared-memory workers (see [`ARCHITECTURE.md`](ARCHITECTURE.md) § 3D viewer troubleshooting). Same line in `frontend/.env` or **`frontend/.env.local`** for local dev — see [`frontend/.env.example`](frontend/.env.example). |
+| **B. Same-origin `/api` proxy** | Leave `VITE_API_BASE_URL` **unset** for Production. The app then calls relative URLs like `/api/projects`. Merge the **`rewrites`** block from [`frontend/vercel.rewrites.example.json`](frontend/vercel.rewrites.example.json) into [`frontend/vercel.json`](frontend/vercel.json), replacing `YOUR_RUNPOD_ORIGIN` with your HTTPS origin (no trailing slash). |
 
 If Production is built **without** `VITE_API_BASE_URL` and **without** rewrites, the browser will request `/api/...` on the Vercel domain only — those routes will 404 unless you add rewrites or a serverless proxy.
 
-Example env (approach A); add the second line only if the splat viewer hangs on load:
+Example env (approach A):
 
 ```
 VITE_API_BASE_URL=https://your-pod-id-8000.proxy.runpod.net
-VITE_GS3D_FORCE_LEGACY_WORKERS=true
 ```
 
 See [`frontend/.env.example`](frontend/.env.example) for all documented `VITE_*` keys.
@@ -106,17 +104,17 @@ Defined in `backend/core/config.py` (`QUALITY_PRESETS`). Sub-iterations and `con
 
 Wall time is **main `train.py` + second GPU phase `convert_3dgs.py`** (Scaffold→3DGS SH), then CPU PLY conversion—see [`ARCHITECTURE.md`](ARCHITECTURE.md) Quality Presets and server logs `[LongSplat timing]`.
 
-### 3D viewer (GaussianSplats3D)
+### 3D viewer (Babylon.js)
 
-The scan viewer uses [`@mkkellogg/gaussian-splats-3d`](https://github.com/mkkellogg/GaussianSplats3D). The **Display** panel (bottom-right) exposes **min alpha** (reloads the splat scene), **SH level** 0/1/2, and optional **Download .ksplat** in the browser (same idea as the [official demo / converter](https://projects.markkellogg.org/threejs/demo_gaussian_splats_3d.php)). For batch conversion without the app, clone GaussianSplats3D and run `node util/create-ksplat.js` (not included in the npm package). Jobs still export **PLY**; `.ksplat` is optional for faster reloads elsewhere.
+The scan viewer uses [Babylon.js](https://github.com/BabylonJS/Babylon.js) native Gaussian splatting (`GaussianSplattingMesh` + SPLAT loader). The **Display** panel (bottom-right) exposes **min alpha** (live filter on in-memory splat data), **SH level** 0/1/2 when the model has spherical harmonics, and **Download .splat** (exports the Babylon in-memory splat buffer). Jobs still export **PLY** from the backend.
 
-If the viewer stays on **“Loading Gaussian Splats…”**, set **`VITE_GS3D_FORCE_LEGACY_WORKERS=true`** in Vercel env (or `frontend/.env.local` locally), redeploy / restart dev, and check **`[GS3D] phase:`** logs in the browser console — details in [`ARCHITECTURE.md`](ARCHITECTURE.md).
+If the viewer stays on **“Loading Gaussian Splats…”**, check **`[Babylon] phase:`** logs in the browser console — details in [`ARCHITECTURE.md`](ARCHITECTURE.md).
 
-If the room looks **upside-down** with pose-based framing, or orbit feels **choppy** while legacy workers are on, or you see **`lockdown-install.js` / SES** `DOMException` spam, see **§ 3D viewer troubleshooting** items **7–9** in [`ARCHITECTURE.md`](ARCHITECTURE.md) (camera up for `initial_camera`, legacy-worker tradeoff, MetaMask / extensions).
+If the room looks **upside-down** with pose-based framing, see **§ 3D viewer troubleshooting** in [`ARCHITECTURE.md`](ARCHITECTURE.md) (camera up for `initial_camera`).
 
-If **Measure** clicks still feel misaligned, open the console once per measure session and read **`[Pick:dims]`**: it logs **`physical`** (canvas backing store), **`gs3dReported`**, and **`pickUsing=canvas|gs3d (WxH)`** — when the library’s internal render size differs from the canvas, picks intentionally use **`getRenderDimensions`** for both **`renderDims`** and mouse scaling. Picking uses [`frontend/src/lib/splatPick.ts`](frontend/src/lib/splatPick.ts) (GS3D raycast + world-space center cache after each **SplatTree** build). See **ARCHITECTURE.md** §3D Viewer — splat picking.
+**Measure** mode snaps to splat world centers via [`frontend/src/lib/splatPick.ts`](frontend/src/lib/splatPick.ts) (cone pick over a center cache built from `splatsData`). See **ARCHITECTURE.md** §3D Viewer — splat picking.
 
-**Orbit zoom feels capped:** the viewer patches **OrbitControls** `minDistance` / `maxDistance` from the PLY bbox diagonal (after optional scene scale). If you want the room **visually larger** in the same units, set **`VITE_VIEWER_SCENE_SCALE`** (e.g. `2`) in **`frontend/.env.local`** or Vercel Production, then rebuild — see [`frontend/.env.example`](frontend/.env.example). Calibration still maps to meters because measure picks live in the same scaled space.
+**Orbit zoom feels capped:** the viewer sets the `ArcRotateCamera` **`lowerRadiusLimit` / `upperRadiusLimit`** from the PLY bbox diagonal (after optional scene scale). If you want the room **visually larger** in the same units, set **`VITE_VIEWER_SCENE_SCALE`** (e.g. `2`) in **`frontend/.env.local`** or Vercel Production, then rebuild — see [`frontend/.env.example`](frontend/.env.example). Calibration still maps to meters because measure picks live in the same scaled space.
 
 ---
 
@@ -125,7 +123,7 @@ If **Measure** clicks still feel misaligned, open the console once per measure s
 ### Frontend (Vercel)
 
 - **React 18** + TypeScript + Vite
-- **Three.js** + **GaussianSplats3D** — splat viewer (orbit / walk / measure); optional OBJ mesh download from API
+- **Babylon.js** (`@babylonjs/core`, `@babylonjs/loaders`) — native Gaussian splat viewer (orbit / walk / measure); optional OBJ mesh download from API
 - **Tailwind CSS** — styling
 - Custom binary PLY parser with SH→RGB and direct RGB priority
 
@@ -155,7 +153,7 @@ If **Measure** clicks still feel misaligned, open the console once per measure s
 | `GET` | `/api/presets` | List quality presets |
 | `POST` | `/api/jobs/upload` | Upload video (multipart + quality_preset) |
 | `GET` | `/api/jobs/{id}/status` | Job status, progress, model URLs |
-| `GET` | `/api/jobs/{id}/model` | Download PLY (CORP-safe for COEP pages) |
+| `GET` | `/api/jobs/{id}/model` | Download PLY |
 | `GET` | `/api/jobs/{id}/model?compressed=true` | Download compressed PLY.gz |
 | `GET` | `/api/jobs/{id}/initial_camera` | Optional pose hint (`position` / `target`) for viewer first frame |
 | `GET` | `/api/jobs/{id}/cameras` | Optional `cameras_all.json` from training |
@@ -238,11 +236,11 @@ gaussian-room-reconstruction/
 ├── frontend/
 │   ├── src/
 │   │   ├── lib/
-│   │   │   └── splatPick.ts                 # Measure picks: GS3D ray + dims/center cache
+│   │   │   └── splatPick.ts                 # Measure picks: cone pick on splatsData center cache
 │   │   ├── components/
 │   │   │   ├── VideoUpload.tsx              # Preset selector, file upload
 │   │   │   ├── JobStatus.tsx                # Progress bar, status
-│   │   │   ├── Viewer3D.tsx                 # GaussianSplats3D PLY viewer + measure / walk
+│   │   │   ├── Viewer3D.tsx                 # Babylon.js PLY splat viewer + measure / walk
 │   │   │   ├── TechnicalDetails.tsx         # Metadata panel
 │   │   │   ├── layout/dashboard-layout.tsx
 │   │   │   └── ui/{button,card}.tsx
@@ -269,7 +267,7 @@ gaussian-room-reconstruction/
 | Stale frontend after deploy | Hard-refresh (`Ctrl+Shift+R`) or redeploy on Vercel |
 | Training fails immediately | Check GPU availability, PYTHONPATH, frame count (30+) |
 | No PLY generated | Check `/app/storage/models/{job_id}/` and training logs |
-| Measure picks miss / offset | See [`ARCHITECTURE.md`](ARCHITECTURE.md) splat picking; check **`[Pick:dims]`** (`pickUsing`, `gs3dReported` vs `physical`); ensure SPA/backend commit matches after viewer changes |
+| Measure picks miss / offset | See [`ARCHITECTURE.md`](ARCHITECTURE.md) splat picking; check **`[Pick:dims]`** console logs (canvas backing-store vs. CSS pixels); ensure SPA/backend commit matches after viewer changes |
 | Open3D build error | Expected under QEMU — works at runtime on real A40 hardware |
 
 ---
