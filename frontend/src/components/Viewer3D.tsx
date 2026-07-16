@@ -923,7 +923,10 @@ export default function Viewer3D({
         addSceneOverlays(scene);
 
         console.log('[Babylon] phase: ImportMeshAsync start');
-        const loadPromise = ImportMeshAsync(new Uint8Array(buffer), scene, {
+        // The SPLAT loader plugin has no loadFile(), so raw ArrayBufferView input throws
+        // "Plugin does not support loading ArrayBufferView." — wrap the buffer in a File instead.
+        const plyFile = new File([buffer], 'model.ply', { type: 'application/octet-stream' });
+        const loadPromise = ImportMeshAsync(plyFile, scene, {
           pluginExtension: '.ply',
           pluginOptions: {
             splat: { keepInRam: true },

@@ -4,6 +4,9 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { motion } from 'framer-motion';
+import { ApiConfigBanner } from '@/components/ApiConfigBanner';
+import { formatLoginError } from '@/lib/authErrors';
+import { getApiBaseUrl } from '@/lib/apiBase';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -26,8 +29,8 @@ export default function Login() {
     try {
       await login(email, password);
       navigate('/dashboard');
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Invalid email or password');
+    } catch (err: unknown) {
+      setError(formatLoginError(err));
     } finally {
       setSubmitting(false);
     }
@@ -40,11 +43,18 @@ export default function Login() {
         animate={{ opacity: 1, y: 0 }}
         className="w-full max-w-md"
       >
+        <ApiConfigBanner />
         <div className="rounded-2xl border border-white/[0.22] bg-black p-8 shadow-2xl">
           <h1 className="text-2xl font-mono font-bold text-[#efe752] mb-2 tracking-tighter">
             METROA
           </h1>
-          <p className="text-gray-500 text-sm mb-6">Sign in to access your projects</p>
+          <p className="text-gray-500 text-sm mb-2">Sign in to access your projects</p>
+          {import.meta.env.PROD && (
+            <p className="text-gray-600 text-xs font-mono mb-6 break-all">
+              API: {getApiBaseUrl() || '(unset — requests go to this Vercel domain)'}
+            </p>
+          )}
+          {!import.meta.env.PROD && <div className="mb-6" />}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
