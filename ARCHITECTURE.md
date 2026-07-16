@@ -384,7 +384,7 @@ The script handles Docker buildx setup, `linux/amd64` platform targeting, build 
 
 ### Vercel Frontend
 
-Deploys automatically from the GitHub repository. **`VITE_API_BASE_URL`** (build-time) should be the RunPod HTTPS origin with no trailing slash, **or** leave it unset and add **`/api` → RunPod** rewrites in `frontend/vercel.json` (see `frontend/vercel.rewrites.example.json`) so the browser uses same-origin `/api/...`. All documented **`VITE_*`** keys live in **`frontend/.env.example`**. If the splat viewer hangs on **“Loading Gaussian Splats…”**, follow the **`[Babylon] phase:`** console logs (see **3D viewer troubleshooting** above).
+Deploys automatically from the GitHub repository. `frontend/vercel.json` ships with an **SPA fallback rewrite** (all non-`/api`, non-`/static`, non-`/assets` paths → `index.html`) so deep links like `/projects/1` work with client-side routing. **`VITE_API_BASE_URL`** (build-time) should be the RunPod HTTPS origin with no trailing slash, **or** leave it unset and add **`/api` → RunPod** rewrites in `frontend/vercel.json` (see `frontend/vercel.rewrites.example.json`, which includes the API, `/static`, and SPA-fallback rules in the correct order) so the browser uses same-origin `/api/...`. All documented **`VITE_*`** keys live in **`frontend/.env.example`**. If the splat viewer hangs on **“Loading Gaussian Splats…”**, follow the **`[Babylon] phase:`** console logs (see **3D viewer troubleshooting** above).
 
 ---
 

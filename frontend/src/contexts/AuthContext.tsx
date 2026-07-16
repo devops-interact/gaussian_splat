@@ -39,14 +39,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (token) {
       loadUser(token).finally(() => setLoading(false));
     } else {
-      const stored = localStorage.getItem(USER_KEY);
-      if (stored) {
-        try {
-          setUser(JSON.parse(stored));
-        } catch {
-          localStorage.removeItem(USER_KEY);
-        }
-      }
+      // No token means not authenticated — a cached user without a token would
+      // render the app "logged in" while every API call fails with 401.
+      setUser(null);
+      localStorage.removeItem(USER_KEY);
       setLoading(false);
     }
   }, [token, loadUser]);

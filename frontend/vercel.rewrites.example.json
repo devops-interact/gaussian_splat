@@ -3,6 +3,14 @@
     {
       "source": "/api/:path*",
       "destination": "https://YOUR_RUNPOD_ORIGIN/api/:path*"
+    },
+    {
+      "source": "/static/:path*",
+      "destination": "https://YOUR_RUNPOD_ORIGIN/static/:path*"
+    },
+    {
+      "source": "/((?!api/|static/|assets/).*)",
+      "destination": "/index.html"
     }
   ]
 }
