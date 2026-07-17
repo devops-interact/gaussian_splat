@@ -85,6 +85,68 @@ class JobManager:
         self.jobs[job.job_id] = job
         self._save_jobs()
 
+    def recover_stale_jobs(self):
+        """
+        Resolve jobs left in an in-flight status by a crash/restart.
+
+        The pipeline coroutine dies with the process (e.g. OOM kill), leaving
+        jobs frozen at their last persisted status. On startup:
+        - If the exported PLY exists, finalize the job as completed (training
+          finished; only post-processing was interrupted).
+        - Otherwise mark it as an error so the UI stops showing a live job.
+        """
+        in_flight = {
+            JobStatus.VALIDATING,
+            JobStatus.EXTRACTING_FRAMES,
+            JobStatus.TRAINING,
+            JobStatus.EXPORTING,
+            JobStatus.COMPRESSING,
+            JobStatus.MESHING,
+        }
+        recovered = 0
+        for job in self.jobs.values():
+            if job.status not in in_flight:
+                continue
+            recovered += 1
+            ply_path = settings.MODELS_DIR / f"{job.job_id}.ply"
+            if ply_path.exists():
+                job.model_filename = f"{job.job_id}.ply"
+                job.model_url = f"/api/jobs/{job.job_id}/model"
+                gz_path = ply_path.with_suffix(".ply.gz")
+                if gz_path.exists():
+                    job.model_url_compressed = f"/static/models/{job.job_id}.ply.gz"
+                glb_path = settings.MODELS_DIR / job.job_id / f"{job.job_id}.glb"
+                if glb_path.exists():
+                    job.model_url_glb = f"/static/models/{job.job_id}/{job.job_id}.glb"
+                if job.model_metadata is None:
+                    try:
+                        # Lazy import: core.pipeline imports this module at load time.
+                        from core.pipeline import _extract_ply_metadata
+                        job.model_metadata = _extract_ply_metadata(ply_path)
+                    except Exception as e:
+                        logger.warning(f"Metadata extraction during recovery failed: {e}")
+                job.status = JobStatus.COMPLETED
+                job.progress = 1.0
+                logger.info(
+                    f"Recovered job {job.job_id}: backend restarted mid-pipeline but the "
+                    f"PLY exists — finalized as completed"
+                )
+            else:
+                last_step = job.status.value
+                job.status = JobStatus.ERROR
+                job.error_message = (
+                    "The backend restarted while this job was in progress "
+                    f"(last step: {last_step}) and no trained model was found. "
+                    "Please re-run the scan."
+                )
+                logger.warning(
+                    f"Recovered job {job.job_id}: no PLY found after restart — marked as error"
+                )
+            job.updated_at = datetime.now()
+        if recovered:
+            self._save_jobs()
+            logger.info(f"Startup recovery resolved {recovered} stale in-flight job(s)")
+
 # Global job manager instance
 _job_manager = None
 

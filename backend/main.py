@@ -39,6 +39,11 @@ CORS_ALLOW_HEADERS_VALUE = ", ".join(CORS_ALLOW_HEADERS)
 from database import init_db
 init_db()
 
+# Resolve jobs left in-flight by a previous crash/restart (finalize if the PLY
+# exists, otherwise mark as error) so the UI never shows zombie active jobs.
+from jobs.job_manager import get_job_manager
+get_job_manager().recover_stale_jobs()
+
 app = FastAPI(title="Gaussian Splatting Room Reconstruction API")
 
 # CORS middleware - allow all origins for production

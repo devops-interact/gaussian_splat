@@ -16,6 +16,7 @@ class JobStatus(str, Enum):
     TRAINING = "training"  # LongSplat handles pose estimation + training together
     EXPORTING = "exporting"
     COMPRESSING = "compressing"
+    MESHING = "meshing"  # Poisson mesh GLB sidecar generation (subprocess)
     COMPLETED = "completed"
     ERROR = "error"
 

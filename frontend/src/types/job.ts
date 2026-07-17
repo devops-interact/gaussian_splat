@@ -5,6 +5,7 @@ export enum JobStatus {
   TRAINING = "training",  // LongSplat handles pose estimation + training together
   EXPORTING = "exporting",
   COMPRESSING = "compressing",
+  MESHING = "meshing",  // Poisson mesh GLB sidecar generation (subprocess on the backend)
   COMPLETED = "completed",
   ERROR = "error",
 }

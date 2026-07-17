@@ -26,6 +26,7 @@ const STATUS_LABELS: Record<JobStatusEnum, string> = {
   [JobStatusEnum.TRAINING]: 'Training 3D Splats (this takes time)',
   [JobStatusEnum.EXPORTING]: 'Exporting PLY model',
   [JobStatusEnum.COMPRESSING]: 'Compressing output file',
+  [JobStatusEnum.MESHING]: 'Generating measurement mesh',
   [JobStatusEnum.COMPLETED]: 'Completed',
   [JobStatusEnum.ERROR]: 'Processing Error',
 };

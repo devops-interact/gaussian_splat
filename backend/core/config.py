@@ -102,7 +102,12 @@ class Settings(BaseSettings):
 
     # Open3D Poisson surface reconstruction → GLB sidecar (viewer vertex/edge measure
     # snapping). Non-fatal on failure; set EXPORT_MESH_GLB=false to skip the CPU cost.
+    # Runs in a child process so an OOM there cannot kill the API server.
     EXPORT_MESH_GLB: bool = True
+    # Point cap before normal estimation / Poisson — bounds worker RAM on dense splats.
+    MESH_GLB_MAX_POINTS: int = 1_500_000
+    # Kill the mesh worker if it exceeds this wall-clock budget (seconds).
+    MESH_GLB_TIMEOUT_S: int = 1800
 
     class Config:
         env_file = ".env"

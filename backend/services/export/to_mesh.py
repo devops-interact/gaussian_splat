@@ -7,12 +7,18 @@ watertight triangle mesh, then exports as GLB for browser-native rendering.
 Pipeline:
   1. Load PLY point cloud with colors
   2. Statistical outlier removal
-  3. Estimate normals with adaptive radius
-  4. Poisson surface reconstruction
-  5. Trim low-density faces to remove artefacts
-  6. Transfer vertex colors from original points
-  7. Decimate to a target face count for browser performance
-  8. Export as GLB (binary glTF)
+  3. Downsample to a point cap (bounds memory for normals/Poisson)
+  4. Estimate normals with adaptive radius
+  5. Poisson surface reconstruction
+  6. Trim low-density faces to remove artefacts
+  7. Transfer vertex colors from original points
+  8. Decimate to a target face count for browser performance
+  9. Export as GLB (binary glTF)
+
+Run via `reconstruct_mesh_subprocess()` from the API server: Poisson + normal
+orientation can consume tens of GB on dense splats, and a kernel OOM kill is
+not a catchable exception — isolating the work in a child process means an
+OOM only loses the optional GLB sidecar instead of taking down uvicorn.
 """
 import logging
 from pathlib import Path
@@ -20,6 +26,9 @@ from pathlib import Path
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_MAX_POINTS = 1_500_000
+DEFAULT_TIMEOUT_S = 1800
 
 
 def _compute_adaptive_radius(pcd) -> float:
@@ -51,6 +60,39 @@ def _compute_adaptive_radius(pcd) -> float:
     return radius
 
 
+def _downsample_to_cap(pcd, max_points: int):
+    """
+    Downsample a point cloud so it holds at most ~max_points points.
+
+    Tries voxel downsampling with a grid sized from the bbox volume; falls back
+    to uniform downsampling if the voxel estimate misses the target.
+    """
+    import open3d as o3d  # noqa: F401  (kept for parity with callers)
+
+    n = len(np.asarray(pcd.points))
+    if n <= max_points:
+        return pcd
+
+    bbox = pcd.get_axis_aligned_bounding_box()
+    extent = np.maximum(bbox.get_extent(), 1e-6)
+    # Voxel size such that (volume / voxel^3) ≈ max_points, assuming points
+    # roughly fill the bbox; real clouds are surfaces so this overshoots the
+    # reduction — the uniform fallback below tightens it.
+    voxel = float(np.cbrt(np.prod(extent) / max_points))
+    ds = pcd.voxel_down_sample(voxel_size=voxel)
+    n_ds = len(np.asarray(ds.points))
+    logger.info(f"Voxel downsample (voxel={voxel:.4f}): {n:,} → {n_ds:,} points")
+
+    if n_ds > max_points:
+        every_k = int(np.ceil(n_ds / max_points))
+        ds = ds.uniform_down_sample(every_k)
+        logger.info(
+            f"Uniform downsample (every {every_k}th): → "
+            f"{len(np.asarray(ds.points)):,} points"
+        )
+    return ds
+
+
 def reconstruct_mesh(
     ply_path: Path,
     output_glb: Path,
@@ -58,6 +100,7 @@ def reconstruct_mesh(
     poisson_depth: int = 8,
     target_faces: int = 500_000,
     density_quantile: float = 0.05,
+    max_points: int = DEFAULT_MAX_POINTS,
 ) -> bool:
     """
     Run the full surface reconstruction pipeline.
@@ -68,6 +111,7 @@ def reconstruct_mesh(
         poisson_depth:    Octree depth for Poisson reconstruction (7-10).
         target_faces:     Maximum triangle count after decimation.
         density_quantile: Bottom % of low-density vertices to remove.
+        max_points:       Point cap before normal estimation / Poisson (bounds RAM).
 
     Returns:
         True on success, False on failure.
@@ -102,6 +146,13 @@ def reconstruct_mesh(
             f"(removed {n_points - n_after:,})"
         )
         pcd = pcd_clean
+
+        # ── 2.5 Cap point count (memory guard) ──────────────────────────
+        # orient_normals_consistent_tangent_plane and Poisson blow up in RAM
+        # on multi-million-point splats; downsample before either runs.
+        if max_points > 0 and n_after > max_points:
+            pcd = _downsample_to_cap(pcd, max_points)
+            n_after = len(np.asarray(pcd.points))
 
         # ── 3. Estimate & orient normals (adaptive radius) ──────────────
         logger.info("Estimating normals with adaptive radius …")
@@ -239,3 +290,95 @@ def _export_glb_via_trimesh(o3d_mesh, output_path: Path) -> None:
     )
 
     tmesh.export(str(output_path), file_type="glb")
+
+
+async def reconstruct_mesh_subprocess(
+    ply_path: Path,
+    output_glb: Path,
+    *,
+    max_points: int = DEFAULT_MAX_POINTS,
+    timeout_s: int = DEFAULT_TIMEOUT_S,
+) -> bool:
+    """
+    Run reconstruct_mesh in a child Python process.
+
+    An OOM kill (SIGKILL from the kernel) or a native crash inside Open3D only
+    terminates the child; the API server keeps serving and the job completes
+    without the optional GLB. Returns True iff the child exited 0 and the GLB
+    file exists.
+    """
+    import asyncio
+    import sys
+
+    backend_dir = Path(__file__).resolve().parents[2]
+    cmd = [
+        sys.executable,
+        "-m",
+        "services.export.to_mesh",
+        str(ply_path),
+        str(output_glb),
+        "--max-points",
+        str(max_points),
+    ]
+    logger.info(f"Spawning mesh reconstruction subprocess: {' '.join(cmd)}")
+
+    proc = await asyncio.create_subprocess_exec(
+        *cmd,
+        cwd=str(backend_dir),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout_s)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        logger.warning(f"Mesh subprocess timed out after {timeout_s}s and was killed")
+        return False
+
+    output = out.decode(errors="replace").strip()
+    if output:
+        # Child logs are indented so they read as one block in the server log.
+        logger.info("Mesh subprocess output:\n  " + output.replace("\n", "\n  "))
+
+    if proc.returncode != 0:
+        # Negative return code = killed by signal; -9 is the kernel OOM killer.
+        logger.warning(
+            f"Mesh subprocess exited with code {proc.returncode}"
+            + (" (SIGKILL — likely OOM)" if proc.returncode == -9 else "")
+        )
+        return False
+
+    return output_glb.exists()
+
+
+def _cli_main() -> int:
+    import argparse
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [mesh-worker] %(levelname)s %(message)s",
+    )
+
+    parser = argparse.ArgumentParser(description="Poisson mesh GLB reconstruction worker")
+    parser.add_argument("ply_path", type=Path)
+    parser.add_argument("output_glb", type=Path)
+    parser.add_argument("--poisson-depth", type=int, default=8)
+    parser.add_argument("--target-faces", type=int, default=500_000)
+    parser.add_argument("--density-quantile", type=float, default=0.05)
+    parser.add_argument("--max-points", type=int, default=DEFAULT_MAX_POINTS)
+    args = parser.parse_args()
+
+    ok = reconstruct_mesh(
+        args.ply_path,
+        args.output_glb,
+        poisson_depth=args.poisson_depth,
+        target_faces=args.target_faces,
+        density_quantile=args.density_quantile,
+        max_points=args.max_points,
+    )
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(_cli_main())

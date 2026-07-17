@@ -174,17 +174,23 @@ async def process_job(job: Job) -> Job:
 
         # Step 5.5: Poisson surface reconstruction → GLB (viewer vertex/edge measure snapping).
         # Runs on the centered PLY so the mesh shares the splat's coordinate frame 1:1.
+        # Executed in a child process: Poisson/normal orientation can OOM on dense
+        # splats, and a kernel OOM kill would otherwise take down the API server.
+        job.status = JobStatus.MESHING
         job.progress = 0.97
         await job_manager.update_job(job)
 
         job.model_url_glb = None
         if settings.EXPORT_MESH_GLB:
             try:
-                from services.export.to_mesh import reconstruct_mesh
+                from services.export.to_mesh import reconstruct_mesh_subprocess
 
                 glb_path = longsplat_output_dir / f"{job.job_id}.glb"
-                ok = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: reconstruct_mesh(ply_path, glb_path)
+                ok = await reconstruct_mesh_subprocess(
+                    ply_path,
+                    glb_path,
+                    max_points=settings.MESH_GLB_MAX_POINTS,
+                    timeout_s=settings.MESH_GLB_TIMEOUT_S,
                 )
                 if ok and glb_path.exists():
                     job.model_url_glb = f"/static/models/{job.job_id}/{job.job_id}.glb"
