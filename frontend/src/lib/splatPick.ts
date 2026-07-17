@@ -25,6 +25,12 @@ export function maxSplatPickDistance(bbox: {
 // which is too tight. 28 physical px ≈ 9 CSS px at DPR=3 — comfortable for finger / mouse.
 export const PICK_RADIUS_PX = 28;
 
+/** Cap for size-aware acceptance: huge splats never grab picks farther than this. */
+export const PICK_RADIUS_MAX_PX = 64;
+
+/** Depth-cluster window along the ray as a fraction of maxDist (see pick scoring). */
+export const PICK_DEPTH_WINDOW_FRAC = 0.005;
+
 /** Build uniform grid over centers when count exceeds this (plan: large-PLY acceleration). */
 export const CENTER_GRID_MIN_SPLATS = 50_000;
 
@@ -33,6 +39,8 @@ export const PICK_CENTER_ALPHA_FLOOR = 40;
 
 const SPLAT_ROW_BYTES = 32;
 const SPLAT_FLOATS = 8;
+/** .splat row layout: pos f32×3 (floats 0-2), scale f32×3 (floats 3-5), RGBA u8×4, quat u8×4. */
+const SPLAT_SCALE_FLOAT_OFFSET = 3;
 const SPLAT_ALPHA_BYTE_OFFSET = 27;
 
 export type SplatMeshWithCenters = Pick<
@@ -76,15 +84,23 @@ function clamp(v: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, v));
 }
 
+export interface SplatCenterCache {
+  /** Compacted world-space xyz per kept splat. */
+  positions: Float32Array;
+  /** World-space max-axis Gaussian scale per kept splat (linear .splat scale × mesh scale). */
+  radii: Float32Array;
+}
+
 /**
- * Read world-space splat centers from Babylon GaussianSplattingMesh.splatsData (32 B / splat).
- * Splats with alpha below `alphaFloor` (0-255) are skipped so measure picks never snap to
- * near-invisible floaters; the returned buffer is compacted (indices are cache-local).
+ * Read world-space splat centers + sizes from Babylon GaussianSplattingMesh.splatsData
+ * (32 B / splat). Splats with alpha below `alphaFloor` (0-255) are skipped so measure
+ * picks never snap to near-invisible floaters; buffers are compacted (indices are
+ * cache-local).
  */
 export function buildSplatCenterWorldCache(
   splatMesh: SplatMeshWithCenters,
   alphaFloor: number = PICK_CENTER_ALPHA_FLOOR,
-): Float32Array | null {
+): SplatCenterCache | null {
   const data = splatMesh.splatsData;
   if (!data || data.byteLength < SPLAT_ROW_BYTES) return null;
 
@@ -93,9 +109,13 @@ export function buildSplatCenterWorldCache(
 
   splatMesh.computeWorldMatrix(true);
   const matWorld = splatMesh.getWorldMatrix();
+  // Uniform mesh scale from the world matrix basis (rotation preserves row length).
+  const m = matWorld.m;
+  const worldScale = Math.sqrt(m[0] * m[0] + m[1] * m[1] + m[2] * m[2]) || 1;
   const fBuffer = new Float32Array(data);
   const uBuffer = new Uint8Array(data);
   const buf = new Float32Array(n * 3);
+  const rad = new Float32Array(n);
   const p = new Vector3();
 
   let kept = 0;
@@ -107,6 +127,10 @@ export function buildSplatCenterWorldCache(
     buf[kept * 3] = p.x;
     buf[kept * 3 + 1] = p.y;
     buf[kept * 3 + 2] = p.z;
+    const s0 = Math.abs(fBuffer[base + SPLAT_SCALE_FLOAT_OFFSET]);
+    const s1 = Math.abs(fBuffer[base + SPLAT_SCALE_FLOAT_OFFSET + 1]);
+    const s2 = Math.abs(fBuffer[base + SPLAT_SCALE_FLOAT_OFFSET + 2]);
+    rad[kept] = Math.max(s0, s1, s2) * worldScale;
     kept++;
   }
 
@@ -116,12 +140,13 @@ export function buildSplatCenterWorldCache(
   }
   if (kept === 0) return null;
 
-  const out = kept === n ? buf : buf.slice(0, kept * 3);
+  const positions = kept === n ? buf : buf.slice(0, kept * 3);
+  const radii = kept === n ? rad : rad.slice(0, kept);
   console.log(
-    `[splatPick] center cache built: ${kept}/${n} splats (alphaFloor=${alphaFloor}), sample[0]: (${out[0].toFixed(3)}, ${out[1].toFixed(3)}, ${out[2].toFixed(3)})`,
+    `[splatPick] center cache built: ${kept}/${n} splats (alphaFloor=${alphaFloor}), sample[0]: (${positions[0].toFixed(3)}, ${positions[1].toFixed(3)}, ${positions[2].toFixed(3)})`,
   );
 
-  return out;
+  return { positions, radii };
 }
 
 /**
@@ -437,8 +462,19 @@ export function collectGridCandidatesAlongRay(
 
 export type NearestSplatCenterHit = { position: Vector3; splatIndex: number };
 
+/** Reusable accepted-candidate scratch (module-scoped, single-threaded). */
+const _candIdx: number[] = [];
+const _candT: number[] = [];
+const _candDistSq: number[] = [];
+
 /**
- * Nearest splat center along the view ray within screen cone; smallest ray parameter t wins.
+ * Splat-center pick within the screen cone, two-stage scoring:
+ * 1. Accept candidates whose screen distance to the cursor is within
+ *    `max(PICK_RADIUS_PX, projected splat radius px)` (capped at PICK_RADIUS_MAX_PX),
+ *    so large splats are pickable across their footprint.
+ * 2. Depth-cluster: among accepted candidates keep `t ≤ minT + window`
+ *    (`window = max(PICK_DEPTH_WINDOW_FRAC · maxDist, 2 × front splat radius)`),
+ *    then return the candidate closest to the cursor on screen (ties → nearer t).
  */
 export function pickNearestCenterConeAlongRay(
   camera: Camera,
@@ -450,16 +486,23 @@ export function pickNearestCenterConeAlongRay(
   renderDims: Vector2,
   maxDistAlongRay: number,
   grid: SplatCenterGridAccel | null,
+  radii?: Float32Array | null,
 ): NearestSplatCenterHit | null {
   const shortAxis = Math.max(1, Math.min(renderDims.x, renderDims.y));
   const ndcTolPerPx = 2 / shortAxis;
-  const ndcTol = PICK_RADIUS_PX * ndcTolPerPx;
-  const ndcTolSq = ndcTol * ndcTol;
+  const baseNdcTolSq = (PICK_RADIUS_PX * ndcTolPerPx) ** 2;
+  const maxNdcTolSq = (PICK_RADIUS_MAX_PX * ndcTolPerPx) ** 2;
 
   const viewProj = camera.getTransformationMatrix();
+  // Vertical projection scale (cot(fov/2)): projected NDC-y radius ≈ r · projY / depth.
+  const projY = camera.getProjectionMatrix().m[5];
+  const halfH = renderDims.y / 2;
 
-  let bestT = Infinity;
-  let bestI = -1;
+  _candIdx.length = 0;
+  _candT.length = 0;
+  _candDistSq.length = 0;
+  let minT = Infinity;
+  let minTRadius = 0;
 
   const visitIndex = (i: number) => {
     const px = centers[i * 3];
@@ -470,16 +513,32 @@ export function pickNearestCenterConeAlongRay(
     const t = Vector3.Dot(_oc, rayDirection);
     if (t <= 0.01) return;
     if (t > maxDistAlongRay) return;
-    if (t >= bestT) return;
 
     _vProj.set(px, py, pz);
     if (!projectWorldToNdcRef(viewProj, _vProj, _clip)) return;
     const dx = _clip.x - ndcX;
     const dy = _clip.y - ndcY;
-    if (dx * dx + dy * dy > ndcTolSq) return;
+    const distSq = dx * dx + dy * dy;
 
-    bestT = t;
-    bestI = i;
+    let acceptSq = baseNdcTolSq;
+    if (radii && radii[i] > 0) {
+      // Projected splat radius in px (via NDC-y), converted to the short-axis NDC
+      // units the cursor distance uses; approximation is fine for acceptance.
+      const radiusPx = ((radii[i] * projY) / t) * halfH;
+      if (radiusPx > PICK_RADIUS_PX) {
+        const accept = Math.min(radiusPx, PICK_RADIUS_MAX_PX) * ndcTolPerPx;
+        acceptSq = Math.min(accept * accept, maxNdcTolSq);
+      }
+    }
+    if (distSq > acceptSq) return;
+
+    _candIdx.push(i);
+    _candT.push(t);
+    _candDistSq.push(distSq);
+    if (t < minT) {
+      minT = t;
+      minTRadius = radii ? radii[i] : 0;
+    }
   };
 
   if (grid) {
@@ -489,6 +548,25 @@ export function pickNearestCenterConeAlongRay(
   } else {
     const count = centers.length / 3;
     for (let i = 0; i < count; i++) visitIndex(i);
+  }
+
+  if (_candIdx.length === 0) return null;
+
+  const depthWindow = Math.max(PICK_DEPTH_WINDOW_FRAC * maxDistAlongRay, 2 * minTRadius);
+  const tCutoff = minT + depthWindow;
+
+  let bestI = -1;
+  let bestDistSq = Infinity;
+  let bestT = Infinity;
+  for (let k = 0; k < _candIdx.length; k++) {
+    const t = _candT[k];
+    if (t > tCutoff) continue;
+    const distSq = _candDistSq[k];
+    if (distSq < bestDistSq || (distSq === bestDistSq && t < bestT)) {
+      bestDistSq = distSq;
+      bestT = t;
+      bestI = _candIdx[k];
+    }
   }
 
   if (bestI < 0) return null;
@@ -507,6 +585,8 @@ export interface PickSplatMeasureInput {
   maxDist: number;
   splatMeshVisible: boolean;
   centers: Float32Array | null;
+  /** Per-splat world radius aligned with `centers` (size-aware acceptance); optional. */
+  centerRadii?: Float32Array | null;
   centerGrid: SplatCenterGridAccel | null;
   /** Default: horizontal plane through y = 0 */
   groundPlane?: Plane;
@@ -526,6 +606,7 @@ export function pickSplatMeasure(input: PickSplatMeasureInput): PickResult | nul
     maxDist,
     splatMeshVisible,
     centers,
+    centerRadii = null,
     centerGrid,
     splatCentersOnly = false,
   } = input;
@@ -548,6 +629,7 @@ export function pickSplatMeasure(input: PickSplatMeasureInput): PickResult | nul
       renderDims,
       maxDist,
       centerGrid,
+      centerRadii,
     );
     if (centerHit) {
       return {
@@ -573,6 +655,7 @@ export function pickSplatMeasure(input: PickSplatMeasureInput): PickResult | nul
       renderDims,
       maxDist,
       centerGrid,
+      centerRadii,
     );
     if (centerHit) {
       return {

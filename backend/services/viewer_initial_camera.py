@@ -41,6 +41,21 @@ def _world_view_transform_from_rt(R: np.ndarray, T: np.ndarray) -> np.ndarray:
     return W.T
 
 
+def _camera_up_in_world(R: np.ndarray) -> np.ndarray:
+    """
+    Camera's physical up in world coords.
+
+    cameras_all.json stores R as the camera-to-world rotation (3DGS / COLMAP convention),
+    and the COLMAP camera frame has +Y pointing down in the image — so the camera up in
+    world space is -R·(0,1,0), i.e. the negated second column of R.
+    """
+    up = -np.asarray(R, dtype=np.float64)[:, 1]
+    n = float(np.linalg.norm(up))
+    if n < 1e-10:
+        return np.array([0.0, 1.0, 0.0], dtype=np.float64)
+    return up / n
+
+
 def _camera_center_and_forward(R: np.ndarray, T: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Camera center in world and unit forward (-Z camera axis in world)."""
     wv = _world_view_transform_from_rt(R, T)
@@ -96,7 +111,9 @@ def compute_initial_camera_from_paths(
     First pose in cameras_all.json only: eye at that camera center (PLY-centered frame),
     look-at one scene-scaled step along its forward axis.
 
-    Returns {"position": [x,y,z], "target": [x,y,z]} or None if required inputs are missing.
+    Returns {"position": [x,y,z], "target": [x,y,z], "up": [x,y,z]} or None if required
+    inputs are missing. `up` is the first camera's physical up in world coords — the
+    viewer uses it to rotate the splat floor-down.
     """
     if not cameras_path.exists():
         logger.info("cameras_all.json missing: %s", cameras_path)
@@ -149,7 +166,10 @@ def compute_initial_camera_from_paths(
         logger.warning("Initial camera degenerate after first-pose fix — bailing out")
         return None
 
+    up = _camera_up_in_world(R)
+
     return {
         "position": [float(position[0]), float(position[1]), float(position[2])],
         "target": [float(target[0]), float(target[1]), float(target[2])],
+        "up": [float(up[0]), float(up[1]), float(up[2])],
     }

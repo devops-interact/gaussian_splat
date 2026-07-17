@@ -6,32 +6,44 @@ import {
   Color4,
   Engine,
   MeshBuilder,
+  Quaternion,
   Scene,
   StandardMaterial,
   Tools,
+  TransformNode,
   UniversalCamera,
   Vector2,
   Vector3,
 } from '@babylonjs/core';
+import type { AbstractMesh } from '@babylonjs/core/Meshes/abstractMesh';
 import type { Mesh } from '@babylonjs/core/Meshes/mesh';
 import type { LinesMesh } from '@babylonjs/core/Meshes/linesMesh';
 import { ImportMeshAsync } from '@babylonjs/core/Loading/sceneLoader';
 import type { GaussianSplattingMesh } from '@babylonjs/core/Meshes/GaussianSplatting/gaussianSplattingMesh';
 import '@babylonjs/loaders/SPLAT/splatFileLoader';
+import '@babylonjs/loaders/glTF';
 import { isAxiosError, isCancel } from 'axios';
 import { getApiBaseUrl } from '@/lib/apiBase';
 import type { InitialCameraResponse } from '@/api/jobs';
-import { getInitialCamera } from '@/api/jobs';
+import { getCameras, getInitialCamera } from '@/api/jobs';
 import type { ModelMetadataResponse } from '@/types/job';
 import {
   buildCenterGridAcceleration,
   buildSplatCenterWorldCache,
   filterSplatsByMinAlpha,
   maxSplatPickDistance,
+  ndcFromMousePos,
   pickSplatMeasure,
   type PickResult,
   type SplatCenterGridAccel,
 } from '@/lib/splatPick';
+import {
+  DEFAULT_SPLAT_WORLD_UP,
+  estimateWorldUpFromCameras,
+  rotateTupleByQuaternion,
+  upAlignQuaternion,
+} from '@/lib/splatOrientation';
+import { snapPickToMeshFeature } from '@/lib/meshSnap';
 import { cn } from '@/lib/utils';
 import {
   Camera,
@@ -53,6 +65,8 @@ interface Viewer3DProps {
   modelUrl: string | null;
   /** When set, viewer may load `/api/jobs/{jobId}/initial_camera` for pose-based default framing. */
   jobId?: string | null;
+  /** Poisson-reconstructed GLB (model_url_glb) — loaded invisibly for vertex/edge measure snapping. */
+  meshUrl?: string | null;
   /** From job status API when the job completes — skips full PLY vertex parse for bbox/metadata. */
   prefetchedJobModelMetadata?: ModelMetadataResponse | null;
   onModelMetadata?: (meta: ModelMetadata) => void;
@@ -69,6 +83,9 @@ export interface ModelMetadata {
 }
 
 type ViewerMode = 'orbit' | 'walkthrough' | 'measure';
+
+/** Measure snapping source: discrete splat centers (default) or Poisson mesh vertices/edges. */
+type MeasureSnapMode = 'splats' | 'mesh';
 
 interface MeasurePoint {
   position: Vector3;
@@ -89,12 +106,16 @@ interface BabylonViewerCtx {
   orbitCamera: ArcRotateCamera;
   walkCamera: UniversalCamera;
   splatMesh: GaussianSplattingMesh | null;
+  /** Invisible Poisson-mesh proxy meshes used for triangle-precise measure picks. */
+  measureProxyMeshes: AbstractMesh[];
 }
 
 /** Bbox fallback camera: eye distance scales as diagonal × mult (lower = closer / fills frame more). */
-const BBOX_CAM_DIST_MULT = 0.92;
+const BBOX_CAM_DIST_MULT = 0.58;
 /** Floor so tiny reconstructions are not framed from too far away (world units). */
 const BBOX_CAM_DIST_MIN = 1.75;
+/** initial_camera hint: clamp eye distance from model center so the first view is never tiny. */
+const HINT_MAX_EYE_DIST_FRAC = 0.8;
 
 /** Measure-mode hover: ms between picks; larger reduces main-thread / scene churn. */
 const MEASURE_HOVER_MIN_MS = 100;
@@ -151,6 +172,32 @@ function scaleCameraPairFromOrigin(
       lookAt[2] + (position[2] - lookAt[2]) * scale,
     ],
     lookAt: [...lookAt] as [number, number, number],
+  };
+}
+
+/**
+ * Auto-fit framing: pull the eye toward the model center (origin) when it sits farther
+ * than `maxDist`, preserving the view direction and eye→target distance.
+ */
+function clampEyeDistanceFromOrigin(
+  position: [number, number, number],
+  lookAt: [number, number, number],
+  maxDist: number,
+): { position: [number, number, number]; lookAt: [number, number, number] } {
+  const eyeDist = Math.hypot(position[0], position[1], position[2]);
+  if (!(maxDist > 0) || eyeDist <= maxDist || eyeDist < 1e-6) {
+    return { position: [...position] as [number, number, number], lookAt: [...lookAt] as [number, number, number] };
+  }
+  const k = maxDist / eyeDist;
+  const newPos: [number, number, number] = [position[0] * k, position[1] * k, position[2] * k];
+  const forward: [number, number, number] = [
+    lookAt[0] - position[0],
+    lookAt[1] - position[1],
+    lookAt[2] - position[2],
+  ];
+  return {
+    position: newPos,
+    lookAt: [newPos[0] + forward[0], newPos[1] + forward[1], newPos[2] + forward[2]],
   };
 }
 
@@ -660,6 +707,7 @@ function logPLYScaleOpacityDiag(buffer: ArrayBuffer) {
 export default function Viewer3D({
   modelUrl,
   jobId = null,
+  meshUrl = null,
   prefetchedJobModelMetadata = null,
   onModelMetadata,
 }: Viewer3DProps) {
@@ -677,6 +725,7 @@ export default function Viewer3D({
   /** Walkthrough speed (world units/sec), scaled from the scene diagonal at load. */
   const walkSpeedRef = useRef(3);
   const splatCentersRef = useRef<Float32Array | null>(null);
+  const splatRadiiRef = useRef<Float32Array | null>(null);
   const splatCenterGridRef = useRef<SplatCenterGridAccel | null>(null);
   const originalSplatsRef = useRef<ArrayBuffer | null>(null);
   const onMetadataRef = useRef(onModelMetadata);
@@ -694,6 +743,8 @@ export default function Viewer3D({
   const [measurePoints, setMeasurePoints] = useState<MeasurePoint[]>([]);
   const [measuredDistance, setMeasuredDistance] = useState<number | null>(null);
   const [measurePickHint, setMeasurePickHint] = useState(MEASURE_PICK_HINT_IDLE);
+  const [snapMode, setSnapMode] = useState<MeasureSnapMode>('splats');
+  const [meshSnapAvailable, setMeshSnapAvailable] = useState(false);
 
   const visibleMeasurePoints = measurePhase === 'calibrate' ? calibPoints : measurePoints;
 
@@ -734,16 +785,18 @@ export default function Viewer3D({
   const rebuildCenterCache = useCallback((mesh: GaussianSplattingMesh | null) => {
     if (!mesh) {
       splatCentersRef.current = null;
+      splatRadiiRef.current = null;
       splatCenterGridRef.current = null;
       return;
     }
-    const buf = buildSplatCenterWorldCache(mesh);
-    splatCentersRef.current = buf;
-    splatCenterGridRef.current = buf ? buildCenterGridAcceleration(buf) : null;
-    if (buf) {
+    const cache = buildSplatCenterWorldCache(mesh);
+    splatCentersRef.current = cache?.positions ?? null;
+    splatRadiiRef.current = cache?.radii ?? null;
+    splatCenterGridRef.current = cache ? buildCenterGridAcceleration(cache.positions) : null;
+    if (cache) {
       console.log(
         '[Babylon] Splat center cache built:',
-        buf.length / 3,
+        cache.positions.length / 3,
         'points',
         splatCenterGridRef.current ? '(spatial grid on)' : '(linear pick)',
       );
@@ -761,6 +814,8 @@ export default function Viewer3D({
 
     setLoading(true);
     setError(null);
+    setMeshSnapAvailable(false);
+    setSnapMode('splats');
     const initialCameraAbort = new AbortController();
 
     (async () => {
@@ -779,6 +834,14 @@ export default function Viewer3D({
                 return null;
               }
               console.info('[Babylon] phase: initial_camera unavailable — using bbox default');
+              return null;
+            })
+          : Promise.resolve(null);
+
+        // Raw camera poses (fetched in parallel with the PLY) for floor-down orientation.
+        const camerasPromise: Promise<unknown> = jobId
+          ? getCameras(jobId, { signal: initialCameraAbort.signal }).catch(() => {
+              console.info('[Babylon] phase: cameras unavailable — using default orientation');
               return null;
             })
           : Promise.resolve(null);
@@ -868,33 +931,59 @@ export default function Viewer3D({
         worldUnitRef.current = Math.min(0.12, Math.max(0.008, effectiveDiagonal * 0.004));
         walkSpeedRef.current = Math.min(20, Math.max(1, effectiveDiagonal * 0.5));
         const camDist = Math.max(diagonal * BBOX_CAM_DIST_MULT, BBOX_CAM_DIST_MIN);
-        let cameraUp: [number, number, number] = [0, -1, 0];
-        let initialCameraPosition: [number, number, number] = [0, camDist * 0.35, camDist * 0.75];
+        // The splat mesh is rotated floor-down (world-up → +Y), so cameras always use +Y up
+        // and the bbox fallback pose is expressed directly in the rotated frame.
+        const cameraUp: [number, number, number] = [0, 1, 0];
+        let initialCameraPosition: [number, number, number] = [0, camDist * 0.45, camDist * 0.85];
         let initialCameraLookAt: [number, number, number] = [0, 0, 0];
 
-        console.log('[Babylon] phase: await initial_camera');
+        console.log('[Babylon] phase: await initial_camera + cameras');
         const hint = await initialCameraPromise;
+        const camerasRaw = await camerasPromise;
+        if (disposed) return;
+
+        // Floor-down orientation: prefer the backend-provided up vector, else estimate
+        // from the first camera poses, else assume the 3DGS Y-down convention (180° flip).
+        let worldUp: Vector3 | null = null;
+        let upSource = 'default (3DGS Y-down)';
+        if (hint?.up && Array.isArray(hint.up) && hint.up.length === 3) {
+          const u = new Vector3(Number(hint.up[0]), Number(hint.up[1]), Number(hint.up[2]));
+          if (Number.isFinite(u.x) && Number.isFinite(u.y) && Number.isFinite(u.z) && u.length() > 1e-6) {
+            worldUp = u;
+            upSource = 'initial_camera.up';
+          }
+        }
+        if (!worldUp && camerasRaw) {
+          worldUp = estimateWorldUpFromCameras(camerasRaw);
+          if (worldUp) upSource = 'cameras_all.json (first poses)';
+        }
+        if (!worldUp) worldUp = DEFAULT_SPLAT_WORLD_UP.clone();
+        const orientationQuat = upAlignQuaternion(worldUp);
+        console.log(
+          `[Babylon] floor-down orientation from ${upSource}; worldUp=(${worldUp.x.toFixed(3)}, ${worldUp.y.toFixed(3)}, ${worldUp.z.toFixed(3)})`,
+        );
+
+        let hintApplied = false;
         if (
-          !disposed &&
           hint &&
           Array.isArray(hint.position) &&
           hint.position.length === 3 &&
           Array.isArray(hint.target) &&
           hint.target.length === 3
         ) {
-          initialCameraPosition = [
-            Number(hint.position[0]),
-            Number(hint.position[1]),
-            Number(hint.position[2]),
-          ];
-          initialCameraLookAt = [
-            Number(hint.target[0]),
-            Number(hint.target[1]),
-            Number(hint.target[2]),
-          ];
-          cameraUp = [0, 1, 0];
-          console.log('[Babylon] phase: initial_camera applied; cameraUp=[0,1,0]', hint);
-        } else if (!disposed && jobId) {
+          // Hint pose is in the raw PLY frame — rotate it with the mesh so the first
+          // view still matches the first shot, but rendered floor-down.
+          initialCameraPosition = rotateTupleByQuaternion(
+            [Number(hint.position[0]), Number(hint.position[1]), Number(hint.position[2])],
+            orientationQuat,
+          );
+          initialCameraLookAt = rotateTupleByQuaternion(
+            [Number(hint.target[0]), Number(hint.target[1]), Number(hint.target[2])],
+            orientationQuat,
+          );
+          hintApplied = true;
+          console.log('[Babylon] phase: initial_camera applied (rotated); cameraUp=[0,1,0]', hint);
+        } else if (jobId) {
           console.log('[Babylon] phase: initial_camera skipped');
         }
 
@@ -902,6 +991,18 @@ export default function Viewer3D({
           const scaled = scaleCameraPairFromOrigin(initialCameraPosition, initialCameraLookAt, sceneScale);
           initialCameraPosition = scaled.position;
           initialCameraLookAt = scaled.lookAt;
+        }
+
+        // Auto-fit: the first training camera can sit far outside the reconstruction —
+        // never start with the model rendered tiny.
+        if (hintApplied) {
+          const clamped = clampEyeDistanceFromOrigin(
+            initialCameraPosition,
+            initialCameraLookAt,
+            effectiveDiagonal * HINT_MAX_EYE_DIST_FRAC,
+          );
+          initialCameraPosition = clamped.position;
+          initialCameraLookAt = clamped.lookAt;
         }
 
         const engine = new Engine(canvas, true, {
@@ -946,17 +1047,21 @@ export default function Viewer3D({
 
         if (!splatMesh) throw new Error('No GaussianSplattingMesh returned from PLY import');
 
+        // Floor-down rotation about the model center (the backend centers the PLY at the
+        // origin, so rotating about the origin is anchored to the center).
+        splatMesh.rotationQuaternion = orientationQuat.clone();
         if (sceneScale !== 1) {
           splatMesh.scaling.setAll(sceneScale);
-          splatMesh.computeWorldMatrix(true);
           console.log('[Babylon] splatMesh.scale applied:', sceneScale);
         }
+        splatMesh.computeWorldMatrix(true);
 
         const rawSplats = splatMesh.splatsData;
         if (rawSplats) {
           originalSplatsRef.current = rawSplats.slice(0);
         }
 
+        // Must run after rotation/scaling: the cache bakes the world matrix.
         rebuildCenterCache(splatMesh);
         setLiveViewerApis({ sh: splatMesh.maxShDegree > 0 });
         if (splatMesh.maxShDegree > 0) {
@@ -964,6 +1069,51 @@ export default function Viewer3D({
         }
 
         console.log('[Babylon] phase: ImportMeshAsync done, splatCount=', splatMesh.splatCount);
+
+        // Optional Poisson-mesh proxy (GLB): invisible but pickable, for triangle-precise
+        // measure snapping. Failure is non-fatal — measure falls back to splat centers.
+        let measureProxyMeshes: AbstractMesh[] = [];
+        if (meshUrl) {
+          try {
+            const fullMeshUrl = meshUrl.startsWith('http') ? meshUrl : `${apiBase}${meshUrl}`;
+            console.log('[Babylon] phase: measure mesh (GLB) load start', fullMeshUrl);
+            const glbResult = await ImportMeshAsync(fullMeshUrl, scene, { pluginExtension: '.glb' });
+            if (disposed) return;
+
+            const proxyRoot = new TransformNode('measureProxyRoot', scene);
+            proxyRoot.rotationQuaternion = orientationQuat.clone();
+            proxyRoot.scaling.setAll(sceneScale);
+
+            for (const m of glbResult.meshes) {
+              if (!m.parent) {
+                // Neutralize the glTF loader's handedness-conversion root so the GLB
+                // shares the raw PLY coordinate frame, then apply our orientation/scale.
+                m.rotationQuaternion = Quaternion.Identity();
+                m.scaling.set(1, 1, 1);
+                m.position.setAll(0);
+                m.parent = proxyRoot;
+              }
+              m.visibility = 0;
+              m.isPickable = true;
+              m.metadata = { ...(m.metadata ?? {}), __measureProxy: true };
+              if (m.material) m.material.wireframe = true;
+              m.computeWorldMatrix(true);
+            }
+            measureProxyMeshes = glbResult.meshes.filter((m) => m.getTotalVertices() > 0);
+            console.log(
+              '[Babylon] phase: measure mesh loaded,',
+              measureProxyMeshes.length,
+              'pickable meshes,',
+              measureProxyMeshes.reduce((acc, m) => acc + m.getTotalVertices(), 0),
+              'vertices',
+            );
+          } catch (e) {
+            console.warn('[Babylon] measure mesh (GLB) load failed — splat snapping only:', e);
+            measureProxyMeshes = [];
+          }
+          if (disposed) return;
+        }
+        setMeshSnapAvailable(measureProxyMeshes.length > 0);
 
         engine.runRenderLoop(() => {
           scene.render();
@@ -974,7 +1124,7 @@ export default function Viewer3D({
         });
         resizeObserver.observe(canvas);
 
-        viewerRef.current = { engine, scene, orbitCamera, walkCamera, splatMesh };
+        viewerRef.current = { engine, scene, orbitCamera, walkCamera, splatMesh, measureProxyMeshes };
         console.log('[Babylon] phase: init chain complete');
         setLoading(false);
       } catch (err: unknown) {
@@ -991,6 +1141,7 @@ export default function Viewer3D({
       disposed = true;
       initialCameraAbort.abort();
       splatCentersRef.current = null;
+      splatRadiiRef.current = null;
       splatCenterGridRef.current = null;
       originalSplatsRef.current = null;
       sceneScaleRef.current = 1;
@@ -1009,7 +1160,17 @@ export default function Viewer3D({
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modelUrl, jobId, prefetchedJobModelMetadata]);
+  }, [modelUrl, jobId, meshUrl, prefetchedJobModelMetadata]);
+
+  // Wireframe preview of the Poisson mesh while snapping to it in measure mode.
+  useEffect(() => {
+    const ctx = viewerRef.current;
+    if (!ctx || loading) return;
+    const showWire = mode === 'measure' && snapMode === 'mesh';
+    for (const m of ctx.measureProxyMeshes) {
+      m.visibility = showWire ? 0.18 : 0;
+    }
+  }, [mode, snapMode, loading, meshSnapAvailable]);
 
   // Min-alpha filter (debounced via loadMinAlpha)
   useEffect(() => {
@@ -1258,6 +1419,34 @@ export default function Viewer3D({
         : 100;
       const maxDist = baseMax * sceneScaleRef.current;
 
+      // Mesh snap mode: triangle-precise scene.pick on the invisible Poisson proxy,
+      // snapped to the nearest vertex/edge. Falls back to splat centers on a miss.
+      if (snapMode === 'mesh' && ctx.measureProxyMeshes.length > 0) {
+        const pickInfo = scene.pick(
+          mouseX,
+          mouseY,
+          (m) => m.metadata?.__measureProxy === true && m.isEnabled(),
+          false,
+          camera,
+        );
+        if (pickInfo?.hit && pickInfo.pickedPoint && pickInfo.pickedMesh && pickInfo.faceId >= 0) {
+          const { ndcX, ndcY } = ndcFromMousePos(
+            new Vector2(mouseX, mouseY),
+            new Vector2(pickW, pickH),
+          );
+          const snap = snapPickToMeshFeature(
+            pickInfo.pickedMesh,
+            pickInfo.faceId,
+            pickInfo.pickedPoint,
+            camera,
+            ndcX,
+            ndcY,
+            new Vector2(pickW, pickH),
+          );
+          return { position: snap.position, isSnapped: true };
+        }
+      }
+
       return pickSplatMeasure({
         scene,
         camera,
@@ -1266,6 +1455,7 @@ export default function Viewer3D({
         maxDist,
         splatMeshVisible: splatMesh.isEnabled(),
         centers: splatCentersRef.current,
+        centerRadii: splatRadiiRef.current,
         centerGrid: splatCenterGridRef.current,
         splatCentersOnly: true,
       });
@@ -1393,7 +1583,7 @@ export default function Viewer3D({
       window.removeEventListener('keydown', onKeyDown);
       gizmo.dispose();
     };
-  }, [mode, measurePhase, calibration, loading, handleAddMeasurePoint, handleUndoLastPoint]);
+  }, [mode, measurePhase, calibration, loading, snapMode, handleAddMeasurePoint, handleUndoLastPoint]);
 
   const handleConfirmCalibration = useCallback(() => {
     if (calibPoints.length !== 2) return;
@@ -1782,6 +1972,30 @@ export default function Viewer3D({
                 )}
               </>
             )}
+            {meshSnapAvailable && (
+              <>
+                <div className="border-l border-white/[0.18] h-5" />
+                <div className="flex items-center gap-1">
+                  <span className="text-white/40 text-[10px]">Snap:</span>
+                  {(['splats', 'mesh'] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setSnapMode(m)}
+                      title={m === 'mesh' ? 'Snap to mesh vertices / edges (Poisson reconstruction)' : 'Snap to splat centers'}
+                      className={cn(
+                        'px-1.5 py-0.5 rounded border text-[10px] transition-colors',
+                        snapMode === m
+                          ? 'border-[#efe752]/75 bg-[#efe752]/15 text-[#efe752]'
+                          : 'border-white/[0.26] text-white/50 hover:border-white/[0.34]',
+                      )}
+                    >
+                      {m === 'splats' ? 'Splats' : 'Mesh'}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
             </div>
             <p className="text-[10px] text-white/45 leading-snug pl-0.5">{measurePickHint}</p>
           </div>
@@ -1808,7 +2022,7 @@ export default function Viewer3D({
             <div className="space-y-2">
               <HelpItem icon={<MousePointer className="w-3 h-3" />} title="Orbit Mode">Left-click drag to rotate. Right-click drag to pan. Scroll to zoom.</HelpItem>
               <HelpItem icon={<Footprints className="w-3 h-3" />} title="Walk-Through">Click to lock cursor. WASD to move. Mouse to look. Space/Shift for up/down.</HelpItem>
-              <HelpItem icon={<Ruler className="w-3 h-3" />} title="Measure">Yellow hover shows the splat center you are about to place; placed points appear blue in the scene. Step 1: two reference clicks + known distance. Step 2: measure any distance in meters. Esc or right-click undoes the last point.</HelpItem>
+              <HelpItem icon={<Ruler className="w-3 h-3" />} title="Measure">Yellow hover shows the point you are about to place; placed points appear blue in the scene. Step 1: two reference clicks + known distance. Step 2: measure any distance in meters. Esc or right-click undoes the last point. When a reconstructed mesh is available, the Snap toggle switches between splat centers and precise mesh vertices/edges (shown as a wireframe).</HelpItem>
               <HelpItem icon={<Camera className="w-3 h-3" />} title="Snapshot">Captures the current view as a PNG image.</HelpItem>
               <HelpItem icon={<SlidersHorizontal className="w-3 h-3" />} title="Display panel">
                 Min alpha culls faint splats live. SH 0/1/2 updates the render when the model has spherical harmonics. Download .splat exports the in-memory Babylon splat buffer.

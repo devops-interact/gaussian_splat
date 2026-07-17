@@ -56,6 +56,7 @@ class Job(BaseModel):
     model_url: Optional[str] = None
     model_url_compressed: Optional[str] = None  # Compressed version
     model_url_obj: Optional[str] = None  # OBJ format
+    model_url_glb: Optional[str] = None  # Poisson-reconstructed GLB mesh (viewer measure snapping)
     quality_preset: QualityPreset = QualityPreset.BALANCED
     validation: Optional[VideoValidation] = None
     estimated_minutes: Optional[int] = None

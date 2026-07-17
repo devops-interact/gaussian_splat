@@ -7,7 +7,12 @@ import { Loader2, CheckCircle, AlertOctagon } from 'lucide-react';
 
 interface JobStatusProps {
   jobId: string;
-  onComplete: (modelUrl: string, objUrl?: string, modelMetadata?: ModelMetadataResponse) => void;
+  onComplete: (
+    modelUrl: string,
+    objUrl?: string,
+    modelMetadata?: ModelMetadataResponse,
+    glbUrl?: string,
+  ) => void;
   /** Mirrors `quality_preset` from each successful status poll (null when job id changes, before first poll). */
   onQualityPresetChange?: (preset: string | null) => void;
   embedded?: boolean;
@@ -129,6 +134,7 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, em
                 response.model_url,
                 response.model_url_obj ?? undefined,
                 response.model_metadata,
+                response.model_url_glb ?? undefined,
               );
             }
             return;

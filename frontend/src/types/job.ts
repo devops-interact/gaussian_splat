@@ -37,6 +37,7 @@ export interface Job {
   model_url?: string;
   model_url_compressed?: string;
   model_url_obj?: string;
+  model_url_glb?: string;
   quality_preset?: string;
   estimated_minutes?: number;
   processing_time_seconds?: number;
@@ -54,6 +55,8 @@ export interface JobStatusResponse {
   model_url?: string;
   model_url_compressed?: string;
   model_url_obj?: string;
+  /** Poisson-reconstructed GLB mesh sidecar (viewer vertex/edge measure snapping). */
+  model_url_glb?: string;
   quality_preset?: string;
   estimated_minutes?: number;
   processing_time_seconds?: number;

@@ -24,6 +24,7 @@ export default function ScanView() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [modelUrl, setModelUrl] = useState<string | null>(null);
   const [objUrl, setObjUrl] = useState<string | null>(null);
+  const [glbUrl, setGlbUrl] = useState<string | null>(null);
   const [modelMetadata, setModelMetadata] = useState<ModelMetadata | null>(null);
   const [prefetchedJobModelMetadata, setPrefetchedJobModelMetadata] = useState<ModelMetadataResponse | null>(null);
   const [jobQualityPreset, setJobQualityPreset] = useState<string | null>(null);
@@ -61,11 +62,15 @@ export default function ScanView() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [downloadOpen]);
 
-  const handleProcessingComplete = useCallback((url: string, objUrlResp?: string, jobMeta?: ModelMetadataResponse) => {
-    setModelUrl(url);
-    setObjUrl(objUrlResp ?? null);
-    setPrefetchedJobModelMetadata(jobMeta ?? null);
-  }, []);
+  const handleProcessingComplete = useCallback(
+    (url: string, objUrlResp?: string, jobMeta?: ModelMetadataResponse, glbUrlResp?: string) => {
+      setModelUrl(url);
+      setObjUrl(objUrlResp ?? null);
+      setGlbUrl(glbUrlResp ?? null);
+      setPrefetchedJobModelMetadata(jobMeta ?? null);
+    },
+    [],
+  );
 
   const handleModelMetadata = useCallback((meta: ModelMetadata) => {
     setModelMetadata(meta);
@@ -109,6 +114,7 @@ export default function ScanView() {
     setJobId(newJobId);
     setModelUrl(null);
     setObjUrl(null);
+    setGlbUrl(null);
     setModelMetadata(null);
     setPrefetchedJobModelMetadata(null);
     setJobQualityPreset(null);
@@ -201,6 +207,7 @@ export default function ScanView() {
               <Viewer3D
                 modelUrl={modelUrl}
                 jobId={jobId}
+                meshUrl={glbUrl}
                 prefetchedJobModelMetadata={prefetchedJobModelMetadata}
                 onModelMetadata={handleModelMetadata}
               />

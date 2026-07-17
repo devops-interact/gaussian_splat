@@ -22,8 +22,12 @@ import {
   type SplatMeshWithCenters,
 } from './splatPick';
 
-/** Build a synthetic 32-byte-per-row splat buffer with positions and alpha bytes. */
-function makeSplatsData(positions: [number, number, number][], alphas: number[]): ArrayBuffer {
+/** Build a synthetic 32-byte-per-row splat buffer with positions, alpha bytes, and scales. */
+function makeSplatsData(
+  positions: [number, number, number][],
+  alphas: number[],
+  scales?: [number, number, number][],
+): ArrayBuffer {
   const buf = new ArrayBuffer(positions.length * 32);
   const f = new Float32Array(buf);
   const u = new Uint8Array(buf);
@@ -31,6 +35,11 @@ function makeSplatsData(positions: [number, number, number][], alphas: number[])
     f[i * 8] = p[0];
     f[i * 8 + 1] = p[1];
     f[i * 8 + 2] = p[2];
+    if (scales) {
+      f[i * 8 + 3] = scales[i][0];
+      f[i * 8 + 4] = scales[i][1];
+      f[i * 8 + 5] = scales[i][2];
+    }
     u[i * 32 + 27] = alphas[i];
   });
   return buf;
@@ -90,12 +99,14 @@ describe('worldRayFromCameraScreen', () => {
 });
 
 describe('pickNearestCenterConeAlongRay', () => {
-  it('chooses front-most splat (smallest t) among centers under the cursor', () => {
+  it('chooses the front depth cluster when centers are well separated along the ray', () => {
     const { scene, camera } = makeTestScene();
     const renderDims = new Vector2(800, 600);
     const mouse = new Vector2(400, 300);
     const ray = worldRayFromCameraScreen(scene, camera, mouse);
     const { ndcX, ndcY } = ndcFromMousePos(mouse, renderDims);
+    // Both under the cursor: z=3 is nearer to the camera (at z=5) than z=0.5;
+    // the far one is outside the front depth window, so it never wins.
     const centers = new Float32Array([
       0, 0, 0.5,
       0, 0, 3,
@@ -116,6 +127,57 @@ describe('pickNearestCenterConeAlongRay', () => {
     expect(hit!.position.y).toBeCloseTo(0);
     expect(hit!.position.z).toBeCloseTo(3);
     expect(hit!.splatIndex).toBe(1);
+  });
+
+  it('within the front depth cluster, the center closest to the cursor wins', () => {
+    const { scene, camera } = makeTestScene();
+    const renderDims = new Vector2(800, 600);
+    const mouse = new Vector2(400, 300);
+    const ray = worldRayFromCameraScreen(scene, camera, mouse);
+    const { ndcX, ndcY } = ndcFromMousePos(mouse, renderDims);
+    // Index 0 is slightly nearer (smaller t) but off-cursor; index 1 sits exactly
+    // under the cursor at nearly the same depth (inside the 0.5%·maxDist window).
+    const centers = new Float32Array([
+      0.05, 0, 3.02,
+      0, 0, 3.0,
+    ]);
+    const hit = pickNearestCenterConeAlongRay(
+      camera,
+      ray.origin,
+      ray.direction,
+      ndcX,
+      ndcY,
+      centers,
+      renderDims,
+      100,
+      null,
+    );
+    expect(hit).not.toBeNull();
+    expect(hit!.splatIndex).toBe(1);
+    expect(hit!.position.z).toBeCloseTo(3.0);
+  });
+
+  it('accepts large splats beyond the base pick radius when radii are provided', () => {
+    const { scene, camera } = makeTestScene();
+    const renderDims = new Vector2(800, 600);
+    const mouse = new Vector2(400, 300);
+    const ray = worldRayFromCameraScreen(scene, camera, mouse);
+    const { ndcX, ndcY } = ndcFromMousePos(mouse, renderDims);
+    // Center is ~0.2 world units off-axis at depth 2 — well outside the 28 px cone,
+    // but inside the splat's own projected footprint (world radius 0.5).
+    const centers = new Float32Array([0.2, 0, 3]);
+
+    const withoutRadii = pickNearestCenterConeAlongRay(
+      camera, ray.origin, ray.direction, ndcX, ndcY, centers, renderDims, 100, null,
+    );
+    expect(withoutRadii).toBeNull();
+
+    const withRadii = pickNearestCenterConeAlongRay(
+      camera, ray.origin, ray.direction, ndcX, ndcY, centers, renderDims, 100, null,
+      new Float32Array([0.5]),
+    );
+    expect(withRadii).not.toBeNull();
+    expect(withRadii!.splatIndex).toBe(0);
   });
 });
 
@@ -183,7 +245,7 @@ describe('filterSplatsByMinAlpha', () => {
 });
 
 describe('buildSplatCenterWorldCache', () => {
-  it('skips splats below the alpha floor and compacts the buffer', () => {
+  it('skips splats below the alpha floor and compacts the buffers', () => {
     const data = makeSplatsData(
       [
         [1, 0, 0],
@@ -192,19 +254,31 @@ describe('buildSplatCenterWorldCache', () => {
       ],
       [0, 255, PICK_CENTER_ALPHA_FLOOR],
     );
-    const centers = buildSplatCenterWorldCache(mockSplatMesh(data));
-    expect(centers).not.toBeNull();
-    expect(centers!.length).toBe(6);
-    expect(centers![0]).toBe(2);
-    expect(centers![3]).toBe(3);
+    const cache = buildSplatCenterWorldCache(mockSplatMesh(data));
+    expect(cache).not.toBeNull();
+    expect(cache!.positions.length).toBe(6);
+    expect(cache!.positions[0]).toBe(2);
+    expect(cache!.positions[3]).toBe(3);
+    expect(cache!.radii.length).toBe(2);
   });
 
   it('falls back to unfiltered centers when the floor would drop everything', () => {
     const data = makeSplatsData([[1, 0, 0]], [0]);
-    const centers = buildSplatCenterWorldCache(mockSplatMesh(data));
-    expect(centers).not.toBeNull();
-    expect(centers!.length).toBe(3);
-    expect(centers![0]).toBe(1);
+    const cache = buildSplatCenterWorldCache(mockSplatMesh(data));
+    expect(cache).not.toBeNull();
+    expect(cache!.positions.length).toBe(3);
+    expect(cache!.positions[0]).toBe(1);
+  });
+
+  it('stores the max-axis scale as the pick radius', () => {
+    const data = makeSplatsData(
+      [[0, 0, 0]],
+      [255],
+      [[0.1, 0.25, 0.05]],
+    );
+    const cache = buildSplatCenterWorldCache(mockSplatMesh(data));
+    expect(cache).not.toBeNull();
+    expect(cache!.radii[0]).toBeCloseTo(0.25);
   });
 });
 

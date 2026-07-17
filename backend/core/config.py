@@ -100,6 +100,10 @@ class Settings(BaseSettings):
     # Set EXPORT_OBJ=true to restore optional OBJ sidecar.
     EXPORT_OBJ: bool = False
 
+    # Open3D Poisson surface reconstruction → GLB sidecar (viewer vertex/edge measure
+    # snapping). Non-fatal on failure; set EXPORT_MESH_GLB=false to skip the CPU cost.
+    EXPORT_MESH_GLB: bool = True
+
     class Config:
         env_file = ".env"
         case_sensitive = True

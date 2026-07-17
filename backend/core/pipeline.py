@@ -172,6 +172,31 @@ async def process_job(job: Job) -> Job:
             logger.info("Skipping OBJ export (EXPORT_OBJ=false); set EXPORT_OBJ=true to enable.")
         _phase("export_obj")
 
+        # Step 5.5: Poisson surface reconstruction → GLB (viewer vertex/edge measure snapping).
+        # Runs on the centered PLY so the mesh shares the splat's coordinate frame 1:1.
+        job.progress = 0.97
+        await job_manager.update_job(job)
+
+        job.model_url_glb = None
+        if settings.EXPORT_MESH_GLB:
+            try:
+                from services.export.to_mesh import reconstruct_mesh
+
+                glb_path = longsplat_output_dir / f"{job.job_id}.glb"
+                ok = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: reconstruct_mesh(ply_path, glb_path)
+                )
+                if ok and glb_path.exists():
+                    job.model_url_glb = f"/static/models/{job.job_id}/{job.job_id}.glb"
+                    logger.info(f"Exported Poisson mesh GLB to {glb_path}")
+                else:
+                    logger.warning("Poisson mesh reconstruction produced no GLB (optional)")
+            except Exception as e:
+                logger.warning(f"Mesh GLB export failed (optional): {e}")
+        else:
+            logger.info("Skipping mesh GLB export (EXPORT_MESH_GLB=false).")
+        _phase("export_mesh_glb")
+
         # Extract PLY metadata
         job.progress = 0.98
         await job_manager.update_job(job)

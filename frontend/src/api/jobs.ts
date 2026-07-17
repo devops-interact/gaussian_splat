@@ -77,6 +77,8 @@ export const getPreviewUrl = async (jobId: string): Promise<{ preview_url: strin
 export interface InitialCameraResponse {
   position: [number, number, number];
   target: [number, number, number];
+  /** Camera-up in world coords (newer backends); used for floor-down mesh orientation. */
+  up?: [number, number, number];
 }
 
 const INITIAL_CAMERA_TIMEOUT_MS = 8000;
@@ -89,6 +91,24 @@ export const getInitialCamera = async (
   const response = await axios.get<InitialCameraResponse>(`${API_JOBS_URL}/${jobId}/initial_camera`, {
     headers: { ...getAuthHeaders() },
     timeout: INITIAL_CAMERA_TIMEOUT_MS,
+    signal: opts?.signal,
+  });
+  return response.data;
+};
+
+const CAMERAS_TIMEOUT_MS = 8000;
+
+/**
+ * Raw LongSplat cameras_all.json (list of {R, T, ...} poses). Used to estimate the
+ * world-up vector for floor-down splat orientation. 404 when the job has no cameras.
+ */
+export const getCameras = async (
+  jobId: string,
+  opts?: { signal?: AbortSignal },
+): Promise<unknown> => {
+  const response = await axios.get<unknown>(`${API_JOBS_URL}/${jobId}/cameras`, {
+    headers: { ...getAuthHeaders() },
+    timeout: CAMERAS_TIMEOUT_MS,
     signal: opts?.signal,
   });
   return response.data;
