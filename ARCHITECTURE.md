@@ -247,6 +247,25 @@ Use this order to separate **data** issues from **runtime** issues:
 
 If the browser reports preflight failures mentioning **`Authorization`** in front of a RunPod or other reverse proxy, inspect the **actual** `OPTIONS`/`GET` responses in DevTools Network. The backend sets permissive CORS headers; the proxy must forward or repeat `Access-Control-Allow-Headers` (including `Authorization`) on preflight. Fix the proxy rather than mixing that with viewer tuning until splats render correctly.
 
+### HTTP 524 vs CORS during job polling
+
+When the Vercel SPA calls RunPod **directly** via `VITE_API_BASE_URL` (cross-origin), a **stopped or unreachable pod** often surfaces as:
+
+1. **HTTP 524** in DevTools (RunPod/Cloudflare gateway timeout — origin did not respond in time)
+2. Browser console: **missing `Access-Control-Allow-Origin`** and axios **Network Error**
+
+That CORS message is usually **misleading**: the 524 HTML error page comes from Cloudflare, not FastAPI, so it has no CORS headers. FastAPI already returns `Access-Control-Allow-Origin: *` on every response when the pod is healthy ([`backend/main.py`](backend/main.py)).
+
+**Recommended fix:** use **same-origin** API calls — unset `VITE_API_BASE_URL` in Vercel Production and add `/api` + `/static` **rewrites** in [`frontend/vercel.json`](frontend/vercel.json) to the current RunPod HTTPS origin (see [`frontend/vercel.rewrites.example.json`](frontend/vercel.rewrites.example.json)). The browser then calls `your-app.vercel.app/api/...` and Vercel proxies to RunPod.
+
+**Ops checklist when polling fails:**
+
+- `curl -m 15 https://YOUR-POD-8000.proxy.runpod.net/health` → `{"status":"healthy"}`
+- Pod **running** for the full job (~35–70 min); volume mounted at **`/app/storage`**
+- After pod recreate, update **rewrites** (or `VITE_API_BASE_URL`) to the **new** proxy URL
+
+**Frontend behavior:** [`JobStatus.tsx`](frontend/src/components/JobStatus.tsx) keeps polling through transient network/524 failures (with backoff and an amber warning); only **HTTP 404** on status stops polling (job record missing). Status requests use a **15s** axios timeout ([`frontend/src/api/jobs.ts`](frontend/src/api/jobs.ts)) so failures fail fast instead of waiting for Cloudflare’s ~100s 524.
+
 ### Debugging reconstruction vs viewer
 
 If a scene looks noisy or full of sparkles after a deploy:

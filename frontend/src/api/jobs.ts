@@ -48,13 +48,29 @@ export const uploadVideo = async (
   return response.data;
 };
 
+const JOB_STATUS_TIMEOUT_MS = 15_000;
+const HEALTH_TIMEOUT_MS = 12_000;
+
 export const getJobStatus = async (
   jobId: string,
   opts?: { signal?: AbortSignal },
 ): Promise<JobStatusResponse> => {
   const response = await axios.get(`${API_JOBS_URL}/${jobId}/status`, {
     signal: opts?.signal,
+    timeout: JOB_STATUS_TIMEOUT_MS,
   });
+  return response.data;
+};
+
+/** Lightweight connectivity probe (same origin or VITE_API_BASE_URL). */
+export const getHealth = async (): Promise<{ status: string }> => {
+  const response = await axios.get<{ status: string }>(`${API_BASE_URL}/health`, {
+    timeout: HEALTH_TIMEOUT_MS,
+    validateStatus: () => true,
+  });
+  if (response.status !== 200) {
+    throw new Error(`Health check failed (HTTP ${response.status})`);
+  }
   return response.data;
 };
 

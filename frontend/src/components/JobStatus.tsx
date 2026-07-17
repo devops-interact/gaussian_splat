@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import axios from 'axios';
 import { JobStatus as JobStatusEnum, JobStatusResponse, type ModelMetadataResponse } from '../types/job';
 import { getJobStatus } from '../api/jobs';
+import { getApiBaseUrl } from '@/lib/apiBase';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Loader2, CheckCircle, AlertOctagon } from 'lucide-react';
+import { Loader2, CheckCircle, AlertOctagon, AlertTriangle, RefreshCw } from 'lucide-react';
 
 interface JobStatusProps {
   jobId: string;
@@ -36,7 +37,6 @@ const PRESET_LABELS: Record<string, string> = {
 
 const POLL_OK_MS = 2000;
 const POLL_BACKOFF_CAP_MS = 30_000;
-const MAX_CONSECUTIVE_POLL_FAILURES = 6;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -47,6 +47,29 @@ function sleep(ms: number): Promise<void> {
 function backoffMsAfterFailure(consecutiveFailures: number): number {
   if (consecutiveFailures <= 0) return POLL_OK_MS;
   return Math.min(POLL_BACKOFF_CAP_MS, POLL_OK_MS * 2 ** (consecutiveFailures - 1));
+}
+
+function isActivePipelineStatus(s: JobStatusEnum): boolean {
+  return s !== JobStatusEnum.COMPLETED && s !== JobStatusEnum.ERROR;
+}
+
+function jobNotFoundMessage(): string {
+  return (
+    'Job not found (HTTP 404). The API has no record for this job id — often after a pod restart without ' +
+    'persistent storage, a changed RunPod URL, or the worker never saw this id. Check RunPod volume mount ' +
+    'for /app/storage and that the same API base URL is used for the whole run.'
+  );
+}
+
+function networkPollWarning(failures: number): string {
+  const apiBase = getApiBaseUrl() || '(same-origin /api via Vercel rewrites)';
+  return (
+    `Cannot reach the job API (${failures} failed poll${failures === 1 ? '' : 's'}). ` +
+    'HTTP 524 or "Network Error" usually means the RunPod pod is stopped or unreachable — ' +
+    'the browser may also report a missing CORS header because Cloudflare\'s error page is not from FastAPI. ' +
+    `Verify the pod is running: curl ${apiBase === '(same-origin /api via Vercel rewrites)' ? 'https://YOUR-POD-8000.proxy.runpod.net' : apiBase}/health . ` +
+    'Polling continues in case training is still running on the GPU.'
+  );
 }
 
 export default function JobStatus({ jobId, onComplete, onQualityPresetChange, embedded }: JobStatusProps) {
@@ -60,19 +83,25 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, em
   const [status, setStatus] = useState<JobStatusEnum>(JobStatusEnum.UPLOADED);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  /** Fatal: job record missing (404) — polling stopped. */
   const [connectError, setConnectError] = useState<string | null>(null);
+  /** Non-fatal: transient network/proxy failure — polling continues. */
+  const [connectWarning, setConnectWarning] = useState<string | null>(null);
+  const [pollSession, setPollSession] = useState(0);
   const [qualityPreset, setQualityPreset] = useState<string | null>(null);
   const [estimatedMinutes, setEstimatedMinutes] = useState<number | null>(null);
   const [startTime] = useState<Date>(new Date());
   const [elapsedTime, setElapsedTime] = useState<string>('0:00');
 
+  const handleRetryConnection = useCallback(() => {
+    setConnectError(null);
+    setConnectWarning(null);
+    setPollSession((s) => s + 1);
+  }, []);
+
   // Update elapsed time every second
   useEffect(() => {
-    if (
-      status === JobStatusEnum.COMPLETED ||
-      status === JobStatusEnum.ERROR ||
-      connectError
-    ) {
+    if (status === JobStatusEnum.COMPLETED || status === JobStatusEnum.ERROR || connectError) {
       return;
     }
 
@@ -89,27 +118,15 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, em
   // New job id: clear local preset and parent Metadata row until the next poll.
   useEffect(() => {
     setQualityPreset(null);
+    setConnectError(null);
+    setConnectWarning(null);
     onQualityPresetChangeRef.current?.(null);
   }, [jobId]);
 
-  // Poll job status: fixed interval after success, exponential backoff after failures; stop on 404 or cap.
+  // Poll job status: keep retrying on network errors (35–70 min jobs); stop only on 404 or terminal status.
   useEffect(() => {
     const ac = new AbortController();
     let cancelled = false;
-
-    const failMessage = (code: number | undefined, failures: number): string => {
-      if (code === 404) {
-        return (
-          'Job not found (HTTP 404). The API has no record for this job id — often after a pod restart without ' +
-          'persistent storage, a changed RunPod URL, or the worker never saw this id. Check RunPod volume mount ' +
-          'for /app/storage and that the same API base URL is used for the whole run.'
-        );
-      }
-      return (
-        `Lost contact with the job API after ${failures} failed attempts (${code ?? 'network'}). ` +
-        'The worker may be stopped, unreachable, or returning errors. Check RunPod uptime and your API URL.'
-      );
-    };
 
     void (async () => {
       let consecutiveFailures = 0;
@@ -118,6 +135,7 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, em
           const response: JobStatusResponse = await getJobStatus(jobId, { signal: ac.signal });
           if (cancelled) return;
           consecutiveFailures = 0;
+          setConnectWarning(null);
           setConnectError(null);
           setStatus(response.status);
           setProgress(response.progress);
@@ -149,9 +167,15 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, em
           const code = axios.isAxiosError(err) ? err.response?.status : undefined;
           consecutiveFailures += 1;
           console.error('Error fetching job status:', err);
-          if (code === 404 || consecutiveFailures >= MAX_CONSECUTIVE_POLL_FAILURES) {
-            if (!cancelled) setConnectError(failMessage(code, consecutiveFailures));
+
+          if (code === 404) {
+            if (!cancelled) setConnectError(jobNotFoundMessage());
             return;
+          }
+
+          // Network / 524 / CORS-blocked gateway errors: warn but keep polling while job may still run.
+          if (!cancelled) {
+            setConnectWarning(networkPollWarning(consecutiveFailures));
           }
           await sleep(backoffMsAfterFailure(consecutiveFailures));
         }
@@ -162,7 +186,7 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, em
       cancelled = true;
       ac.abort();
     };
-  }, [jobId]);
+  }, [jobId, pollSession]);
 
   const isComplete = status === JobStatusEnum.COMPLETED;
   const isError = status === JobStatusEnum.ERROR;
@@ -176,12 +200,15 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, em
           <CardTitle className="flex items-center">
             {isComplete && <CheckCircle className="w-5 h-5 mr-2 text-[#efe752]" />}
             {(isError || isPollFatal) && <AlertOctagon className="w-5 h-5 mr-2 text-red-400" />}
+            {connectWarning && !isPollFatal && !isComplete && (
+              <AlertTriangle className="w-5 h-5 mr-2 text-amber-400" />
+            )}
             Processing Status
           </CardTitle>
-          {isActive && (
+          {(isActive || connectWarning) && !isPollFatal && (
             <span className="flex items-center gap-1.5 text-[10px] font-mono text-[#f5ec99] bg-[#f5ec99]/[0.08] px-2 py-0.5 rounded border border-[#f5ec99]/[0.19]">
               <Loader2 className="w-3 h-3 animate-spin" />
-              Processing
+              {connectWarning ? 'Reconnecting…' : 'Processing'}
             </span>
           )}
         </div>
@@ -192,7 +219,7 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, em
 
       <CardContent className="space-y-6">
         {/* Info Grid */}
-        {(qualityPreset || isActive) && (
+        {(qualityPreset || isActive || connectWarning) && (
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs">
             <div className="p-3 rounded-lg bg-black border border-white/[0.18]">
               <span className="text-gray-500 block text-xs mb-1">Status</span>
@@ -218,7 +245,7 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, em
         )}
 
         {/* Progress Bar */}
-        {isActive && (
+        {(isActive || connectWarning) && !isPollFatal && (
           <div className="space-y-2">
             <div className="flex justify-between text-xs text-gray-500">
               <span>Progress</span>
@@ -238,13 +265,47 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, em
           </div>
         )}
 
-        {/* Lost API / job record (polling stopped) */}
+        {/* Transient network / 524 — polling continues */}
+        {connectWarning && !connectError && (
+          <div className="p-4 rounded-lg bg-amber-500/[0.06] border border-amber-500/28 text-amber-200 text-sm">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-amber-400" />
+              <div className="flex-1 space-y-2">
+                <p className="font-semibold text-amber-100">Connection interrupted</p>
+                <p className="opacity-90 leading-relaxed text-amber-100/85">{connectWarning}</p>
+                {isActivePipelineStatus(status) && (
+                  <p className="text-xs text-amber-100/60">
+                    Last known step: {STATUS_LABELS[status]}. Training may still be running on RunPod.
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={handleRetryConnection}
+                  className="inline-flex items-center gap-1.5 mt-1 px-2.5 py-1 rounded border border-amber-500/40 text-amber-100 text-xs font-mono hover:bg-amber-500/10 transition-colors"
+                >
+                  <RefreshCw className="w-3 h-3" /> Retry connection
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Fatal: job record missing (404) */}
         {connectError && (
-          <div className="p-4 rounded-lg bg-red-500/[0.06] border border-red-500/28 text-red-400 text-sm flex items-start">
-            <AlertOctagon className="w-5 h-5 mr-3 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="font-semibold mb-1">Cannot reach job status</p>
-              <p className="opacity-90 leading-relaxed">{connectError}</p>
+          <div className="p-4 rounded-lg bg-red-500/[0.06] border border-red-500/28 text-red-400 text-sm">
+            <div className="flex items-start gap-3">
+              <AlertOctagon className="w-5 h-5 shrink-0 mt-0.5" />
+              <div className="flex-1 space-y-2">
+                <p className="font-semibold mb-1">Cannot reach job status</p>
+                <p className="opacity-90 leading-relaxed">{connectError}</p>
+                <button
+                  type="button"
+                  onClick={handleRetryConnection}
+                  className="inline-flex items-center gap-1.5 mt-1 px-2.5 py-1 rounded border border-red-500/40 text-red-300 text-xs font-mono hover:bg-red-500/10 transition-colors"
+                >
+                  <RefreshCw className="w-3 h-3" /> Retry connection
+                </button>
+              </div>
             </div>
           </div>
         )}

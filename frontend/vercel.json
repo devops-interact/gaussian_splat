@@ -1,5 +1,16 @@
 {
   "rewrites": [
-    { "source": "/((?!api/|static/|assets/).*)", "destination": "/index.html" }
+    {
+      "source": "/api/:path*",
+      "destination": "https://e1w732b9xlleqe-8000.proxy.runpod.net/api/:path*"
+    },
+    {
+      "source": "/static/:path*",
+      "destination": "https://e1w732b9xlleqe-8000.proxy.runpod.net/static/:path*"
+    },
+    {
+      "source": "/((?!api/|static/|assets/).*)",
+      "destination": "/index.html"
+    }
   ]
 }
