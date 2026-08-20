@@ -23,7 +23,7 @@ export function maxSplatPickDistance(bbox: {
 
 // Screen-space pick cone in physical pixels. 12 physical px ≈ 4 CSS px on Retina,
 // which is too tight. 28 physical px ≈ 9 CSS px at DPR=3 — comfortable for finger / mouse.
-export const PICK_RADIUS_PX = 28;
+export const PICK_RADIUS_PX = 22;
 
 /** Cap for size-aware acceptance: huge splats never grab picks farther than this. */
 export const PICK_RADIUS_MAX_PX = 64;
@@ -35,7 +35,7 @@ export const PICK_DEPTH_WINDOW_FRAC = 0.005;
 export const CENTER_GRID_MIN_SPLATS = 50_000;
 
 /** Splats with alpha below this (0-255) are excluded from the pick center cache. */
-export const PICK_CENTER_ALPHA_FLOOR = 40;
+export const PICK_CENTER_ALPHA_FLOOR = 55;
 
 const SPLAT_ROW_BYTES = 32;
 const SPLAT_FLOATS = 8;
@@ -465,16 +465,14 @@ export type NearestSplatCenterHit = { position: Vector3; splatIndex: number };
 /** Reusable accepted-candidate scratch (module-scoped, single-threaded). */
 const _candIdx: number[] = [];
 const _candT: number[] = [];
-const _candDistSq: number[] = [];
 
 /**
- * Splat-center pick within the screen cone, two-stage scoring:
+ * Splat pick within the screen cone:
  * 1. Accept candidates whose screen distance to the cursor is within
- *    `max(PICK_RADIUS_PX, projected splat radius px)` (capped at PICK_RADIUS_MAX_PX),
- *    so large splats are pickable across their footprint.
- * 2. Depth-cluster: among accepted candidates keep `t ≤ minT + window`
- *    (`window = max(PICK_DEPTH_WINDOW_FRAC · maxDist, 2 × front splat radius)`),
- *    then return the candidate closest to the cursor on screen (ties → nearer t).
+ *    `max(PICK_RADIUS_PX, projected splat radius px)` (capped at PICK_RADIUS_MAX_PX).
+ * 2. Return the **front-most** candidate (smallest ray parameter t), with the hit
+ *    pulled toward the camera by one splat radius when radii are available (surface
+ *    approximation instead of the ellipsoid center).
  */
 export function pickNearestCenterConeAlongRay(
   camera: Camera,
@@ -500,9 +498,6 @@ export function pickNearestCenterConeAlongRay(
 
   _candIdx.length = 0;
   _candT.length = 0;
-  _candDistSq.length = 0;
-  let minT = Infinity;
-  let minTRadius = 0;
 
   const visitIndex = (i: number) => {
     const px = centers[i * 3];
@@ -534,11 +529,6 @@ export function pickNearestCenterConeAlongRay(
 
     _candIdx.push(i);
     _candT.push(t);
-    _candDistSq.push(distSq);
-    if (t < minT) {
-      minT = t;
-      minTRadius = radii ? radii[i] : 0;
-    }
   };
 
   if (grid) {
@@ -552,18 +542,12 @@ export function pickNearestCenterConeAlongRay(
 
   if (_candIdx.length === 0) return null;
 
-  const depthWindow = Math.max(PICK_DEPTH_WINDOW_FRAC * maxDistAlongRay, 2 * minTRadius);
-  const tCutoff = minT + depthWindow;
-
+  // Front-most splat under the cursor (closest to the camera along the pick ray).
   let bestI = -1;
-  let bestDistSq = Infinity;
   let bestT = Infinity;
   for (let k = 0; k < _candIdx.length; k++) {
     const t = _candT[k];
-    if (t > tCutoff) continue;
-    const distSq = _candDistSq[k];
-    if (distSq < bestDistSq || (distSq === bestDistSq && t < bestT)) {
-      bestDistSq = distSq;
+    if (t < bestT) {
       bestT = t;
       bestI = _candIdx[k];
     }
@@ -571,8 +555,17 @@ export function pickNearestCenterConeAlongRay(
 
   if (bestI < 0) return null;
   const j = bestI * 3;
+  let px = centers[j];
+  let py = centers[j + 1];
+  let pz = centers[j + 2];
+  if (radii && radii[bestI] > 0) {
+    const shrink = Math.min(radii[bestI], bestT * 0.95);
+    px -= rayDirection.x * shrink;
+    py -= rayDirection.y * shrink;
+    pz -= rayDirection.z * shrink;
+  }
   return {
-    position: new Vector3(centers[j], centers[j + 1], centers[j + 2]),
+    position: new Vector3(px, py, pz),
     splatIndex: bestI,
   };
 }

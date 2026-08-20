@@ -8,10 +8,8 @@ import {
   Camera,
   Grid3X3,
   Target,
-  AlertTriangle,
   CheckCircle,
   Palette,
-  Eye,
   Loader2,
 } from 'lucide-react';
 
@@ -47,15 +45,13 @@ export default function TechnicalDetails({ metadata, jobInfo, embedded }: Techni
     const sizeY = (bbox.max[1] - bbox.min[1]).toFixed(2);
     const sizeZ = (bbox.max[2] - bbox.min[2]).toFixed(2);
     const resolution = `${sizeX} x ${sizeY} x ${sizeZ}`;
-    const featureCount = metadata.properties.length;
-
     return {
       fileSize: formatFileSize(metadata.fileSize),
-      pointCount: formatNumber(metadata.pointCount),
+      vertexCount: formatNumber(metadata.vertexCount || metadata.pointCount),
+      faceCount: formatNumber(metadata.faceCount || 0),
       resolution,
-      featureCount: `${featureCount}`,
       hasColors: metadata.hasColors,
-      hasOpacity: metadata.hasOpacity,
+      hasPbr: metadata.hasPbr,
       format: metadata.format,
     };
   }, [metadata]);
@@ -94,29 +90,18 @@ export default function TechnicalDetails({ metadata, jobInfo, embedded }: Techni
           <div className="divide-y divide-white/[0.05]">
             <DetailRow icon={<HardDrive className="w-3.5 h-3.5" />} label="File Size" value={details.fileSize} />
             <DetailRow icon={<Clock className="w-3.5 h-3.5" />} label="Processing Time" value={jobInfo?.elapsedTime || '--'} />
-            <DetailRow icon={<Layers className="w-3.5 h-3.5" />} label="Point Count" value={details.pointCount} />
+            <DetailRow icon={<Layers className="w-3.5 h-3.5" />} label="Vertices" value={details.vertexCount} />
+            <DetailRow icon={<Grid3X3 className="w-3.5 h-3.5" />} label="Faces" value={details.faceCount} />
             <DetailRow icon={<Camera className="w-3.5 h-3.5" />} label="Quality Preset" value={jobInfo?.qualityPreset || '--'} capitalize />
-            <DetailRow icon={<Grid3X3 className="w-3.5 h-3.5" />} label="Feature Count" value={details.featureCount} />
             <DetailRow icon={<Target className="w-3.5 h-3.5" />} label="Bounding Box" value={details.resolution} />
             <DetailRow
               icon={<Palette className="w-3.5 h-3.5" />}
-              label="Color Data"
+              label="PBR Materials"
               value={
-                details.hasColors ? (
-                  <span className="flex items-center gap-1"><CheckCircle className="w-3 h-3 text-[#efe752]" /> Available</span>
+                details.hasPbr ? (
+                  <span className="flex items-center gap-1"><CheckCircle className="w-3 h-3 text-[#efe752]" /> Yes</span>
                 ) : (
-                  <span className="flex items-center gap-1"><AlertTriangle className="w-3 h-3 text-yellow-400" /> Missing</span>
-                )
-              }
-            />
-            <DetailRow
-              icon={<Eye className="w-3.5 h-3.5" />}
-              label="Opacity Data"
-              value={
-                details.hasOpacity ? (
-                  <span className="flex items-center gap-1"><CheckCircle className="w-3 h-3 text-[#efe752]" /> Available</span>
-                ) : (
-                  <span className="flex items-center gap-1"><AlertTriangle className="w-3 h-3 text-yellow-400" /> Missing</span>
+                  <span className="text-gray-500">No</span>
                 )
               }
             />

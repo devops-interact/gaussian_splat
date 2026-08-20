@@ -1,79 +1,63 @@
-# Gaussian Splatting Room Reconstruction
+# AI Room Reconstruction
 
-A production web application that converts video footage of rooms into interactive 3D point cloud models and reconstructed meshes using **LongSplat** — NVIDIA's state-of-the-art unposed 3D Gaussian Splatting.
+Web app that converts room walkthrough videos into interactive **3D meshes (GLB)** via the **Meshy** image-to-3D API. Hosted on **Railway** (API + frontend services).
+
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`docs/RAILWAY-RUNBOOK.md`](docs/RAILWAY-RUNBOOK.md) for full details.
 
 ---
 
 ## Features
 
-- **Video upload** with quality preset selection (**Balanced** / **Quality**)
-- **LongSplat training** with MASt3R for automatic pose estimation (no COLMAP)
-- **3D Viewer** — orbit, walk-through, measurement (snaps to splat centers; **yellow** hover preview, **blue** placed markers in the scene), snapshot capture. Performance audit: [`docs/viewer-3d-performance-audit.md`](docs/viewer-3d-performance-audit.md).
-- **Gaussian splats + optional mesh** — primary view is the splat PLY; optional **OBJ** mesh download when the API exposes `model_url_obj` (`EXPORT_OBJ=true` on the pod)
-- **Metadata panel** — point count, bounding box, color data, processing status
-- **Downloads** — `.ply`, `.ply.gz`, optional `.obj` (mesh, when enabled)
+- **Video upload** with quality presets (**Fast** / **Balanced** / **Quality**)
+- **Meshy AI reconstruction** from auto-selected keyframes (~5–12 min)
+- **3D Viewer** — orbit, walk-through, measurement, WebXR, snapshot
+- **Downloads** — GLB, optional OBJ
 
 ---
 
-## Quick Start
+## Quick Start (Railway)
 
-### 1. Build & Push Docker Image
+### 1. Build locally (optional)
 
 ```bash
-docker system prune -af && docker builder prune -af
-./build-and-push.sh
+./build-and-push.sh          # API image
+./build-and-push.sh frontend # Web image
 ```
 
-The script runs **`npm run build`** and **`npm test`** in `frontend/`, checks **`frontend/.env.example`**, the **`initial_camera`** API wiring, viewer + **`src/lib/splatPick.ts`** sources (existence + `@babylonjs/core` in `package.json`), and required LongSplat/backend files before Docker buildx push. Vercel-facing **`VITE_*`** variables are listed in **§ 3** and in [`frontend/.env.example`](frontend/.env.example).
+### 2. Deploy API service
 
-### 2. Deploy Backend to RunPod
-
-| Setting | Value |
-|---|---|
-| Container Image | `interactdevops/gaussian-room-reconstruction:latest` |
-| **GPU Type** | **A40 (48 GB VRAM) — required** |
-| Container Disk | 20 GB |
-| Volume Disk | 150 GB |
-| Volume Mount Path | `/app/storage` |
-| Expose HTTP Ports | `8000` |
-
-> Build is compiled for NVIDIA A40 (`sm_86`). Other GPUs are not supported.
-
-**Long jobs — persistence and uptime:** Job state is persisted to `storage/logs/jobs.json` (and models under `storage/models/`). The volume mount at **`/app/storage`** must stay attached so a **restart or replacement pod** does not lose job rows (otherwise `GET /api/jobs/{id}/status` returns **404 Job not found** even though training finished on disk elsewhere). Configure RunPod so the instance stays **reachable for the whole preset duration** (aggressive idle stop or changing proxy URLs mid-job produces **404** or empty responses while the UI is still polling).
-
-### 3. Deploy Frontend to Vercel
-
-The SPA must reach your RunPod API over HTTPS. Pick **one** of these patterns:
-
-| Approach | What to do |
-|---|---|
-| **A. Explicit API URL (simplest)** | In Vercel → Settings → Environment Variables → **Production**, set `VITE_API_BASE_URL` to your RunPod HTTPS origin with **no trailing slash**, e.g. `https://your-pod-id-8000.proxy.runpod.net`. Rebuild the project after changing env vars (Vite bakes this in at build time). |
-| **B. Same-origin `/api` proxy** | Leave `VITE_API_BASE_URL` **unset** for Production. The app then calls relative URLs like `/api/projects`. Merge the **`rewrites`** block from [`frontend/vercel.rewrites.example.json`](frontend/vercel.rewrites.example.json) into [`frontend/vercel.json`](frontend/vercel.json), replacing `YOUR_RUNPOD_ORIGIN` with your HTTPS origin (no trailing slash). |
-
-If Production is built **without** `VITE_API_BASE_URL` and **without** rewrites, the browser will request `/api/...` on the Vercel domain only — those routes will 404 unless you add rewrites or a serverless proxy.
-
-Example env (approach A):
-
-```
-VITE_API_BASE_URL=https://your-pod-id-8000.proxy.runpod.net
+```bash
+railway up --service api
 ```
 
-See [`frontend/.env.example`](frontend/.env.example) for all documented `VITE_*` keys.
+Set env vars: `MESHY_API_KEY`, `STORAGE_PUBLIC_BASE_URL` (api public URL), `JWT_SECRET_KEY`.  
+Mount volume at `/app/backend/storage`.
 
-Vercel project settings:
+Config: [`railway.toml`](railway.toml) → [`Dockerfile.railway`](Dockerfile.railway)
 
-| Setting | Value |
-|---|---|
-| Root Directory | `frontend` |
-| Build Command | `npm run build` |
-| Output Directory | `dist` |
-| Install Command | `npm install` |
+### 3. Deploy frontend (web) service
+
+Set on **web** service:
+
+```
+BACKEND_URL=https://your-api.up.railway.app
+```
+
+```bash
+railway up --service web -c railway.frontend.toml
+```
+
+Config: [`railway.frontend.toml`](railway.frontend.toml) → [`Dockerfile.frontend.railway`](Dockerfile.frontend.railway)
+
+The SPA calls same-origin `/api/...`; nginx proxies to the API service.
 
 ### 4. Verify
 
 ```bash
-curl https://your-pod-8000.proxy.runpod.net/health
-# {"status": "healthy"}
+curl https://your-api.up.railway.app/health
+# {"status":"healthy"}
+
+open https://your-web.up.railway.app
 ```
 
 ---

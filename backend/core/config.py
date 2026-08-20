@@ -2,7 +2,7 @@
 Configuration settings for the application
 """
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pydantic_settings import BaseSettings
 from pydantic import BaseModel
 from functools import lru_cache
@@ -10,49 +10,57 @@ from enum import Enum
 
 
 class QualityPreset(str, Enum):
-    """Quality presets for 3D reconstruction"""
+    """Quality presets for Meshy image-to-3D reconstruction"""
+    FAST = "fast"
     BALANCED = "balanced"
     QUALITY = "quality"
 
 
-class PresetConfig(BaseModel):
-    """Configuration for a quality preset"""
+class MeshyPresetConfig(BaseModel):
+    """Meshy API parameters for a quality preset"""
     name: str
     description: str
     fps: float
-    iterations: int
-    resolution: int
-    init_frames_ratio: float  # Ratio of frames to use for initialization
     estimated_minutes: int
-    # LongSplat convert_3dgs.py: higher = keep more anchor-derived Gaussians (less aggressive prune).
-    convert_3dgs_prune_ratio: float = 0.62
-    # Max refinement iterations passed to convert_3dgs.py --iteration (after main train). Lower = faster post-train GPU phase.
-    convert_3dgs_refinement_cap: int = 10_000
+    ai_model: str = "meshy-7"
+    should_texture: bool = True
+    enable_pbr: bool = True
+    texture_resolution: str = "2k"
+    target_polycount: int = 50_000
+    should_remesh: bool = False
+    ultra_mode: bool = False
+    max_keyframes: int = 4
 
 
-# Quality preset definitions — main LongSplat --iterations (auxiliary budgets scale in train.py)
-QUALITY_PRESETS: Dict[QualityPreset, PresetConfig] = {
-    QualityPreset.BALANCED: PresetConfig(
-        name="Balanced",
-        description="Solid quality (~25–45 min typical; scales with video length). Main train 12k iters + convert_3dgs up to 6.5k.",
-        fps=1.5,
-        iterations=12000,
-        resolution=1,
-        init_frames_ratio=0.30,
-        estimated_minutes=35,
-        convert_3dgs_prune_ratio=0.58,
-        convert_3dgs_refinement_cap=6500,
+QUALITY_PRESETS: Dict[QualityPreset, MeshyPresetConfig] = {
+    QualityPreset.FAST: MeshyPresetConfig(
+        name="Fast",
+        description="Quick AI mesh (~3–5 min). Lower polycount, good for previews.",
+        fps=2.0,
+        estimated_minutes=5,
+        ai_model="meshy-6",
+        enable_pbr=False,
+        target_polycount=30_000,
     ),
-    QualityPreset.QUALITY: PresetConfig(
+    QualityPreset.BALANCED: MeshyPresetConfig(
+        name="Balanced",
+        description="Balanced quality and speed (~5–8 min). Recommended default.",
+        fps=1.5,
+        estimated_minutes=8,
+        ai_model="meshy-7",
+        enable_pbr=True,
+        target_polycount=50_000,
+    ),
+    QualityPreset.QUALITY: MeshyPresetConfig(
         name="Quality",
-        description="Highest fidelity (~60–90+ min typical; main train 24k + up to 10k convert_3dgs; 1.0 FPS extracts fewer frames than 2.0 for long clips.",
+        description="Highest fidelity (~8–12 min). 4K textures, ultra mode.",
         fps=1.0,
-        iterations=24000,
-        resolution=1,
-        init_frames_ratio=0.25,
-        estimated_minutes=70,
-        convert_3dgs_prune_ratio=0.65,
-        convert_3dgs_refinement_cap=10_000,
+        estimated_minutes=12,
+        ai_model="meshy-7",
+        enable_pbr=True,
+        texture_resolution="4k",
+        target_polycount=100_000,
+        ultra_mode=True,
     ),
 }
 
@@ -65,68 +73,53 @@ class Settings(BaseSettings):
     FRAMES_DIR: Path = STORAGE_DIR / "frames"
     MODELS_DIR: Path = STORAGE_DIR / "models"
     LOGS_DIR: Path = STORAGE_DIR / "logs"
-    
-    # Default processing settings (used if no preset specified)
+
     DEFAULT_PRESET: QualityPreset = QualityPreset.BALANCED
-    FRAME_EXTRACTION_FPS: float = 2.0
-    # Unused by pipeline (jobs use QUALITY_PRESETS[].iterations). Kept for env / legacy clarity only.
-    LONGSPLAT_ITERATIONS: int = 5000
-    LONGSPLAT_RESOLUTION: int = 1
-    
+    FRAME_EXTRACTION_FPS: float = 1.5
+
     # Video validation settings
-    MIN_VIDEO_DURATION: float = 3.0  # Minimum 3 seconds
-    MAX_VIDEO_DURATION: float = 300.0  # Maximum 5 minutes
-    MIN_VIDEO_RESOLUTION: int = 480  # Minimum height
-    MAX_VIDEO_RESOLUTION: int = 4096  # Maximum dimension
-    
+    MIN_VIDEO_DURATION: float = 3.0
+    MAX_VIDEO_DURATION: float = 300.0
+    MIN_VIDEO_RESOLUTION: int = 480
+    MAX_VIDEO_RESOLUTION: int = 4096
+
     # Database (SQLite in storage dir)
     DATABASE_URL: str = ""
-    
+
     # Auth (JWT)
     JWT_SECRET_KEY: str = "gaussian-splat-demo-secret-change-in-production"
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
-    
+    JWT_EXPIRE_MINUTES: int = 60 * 24 * 7
+
     # API settings
-    MAX_UPLOAD_SIZE: int = 500 * 1024 * 1024  # 500MB
+    MAX_UPLOAD_SIZE: int = 500 * 1024 * 1024
     ALLOWED_EXTENSIONS: List[str] = [".mp4", ".mov", ".avi", ".webm"]
-    
-    # Compression settings
-    COMPRESS_OUTPUT: bool = True
-    # 1–9; lower = faster gzip encode, same lossless PLY after decompress (default 3 vs old 6).
-    GZIP_COMPRESS_LEVEL: int = 3
 
-    # Trimesh OBJ export is very slow on dense Gaussian PLYs; PLY path is unchanged when false.
-    # Set EXPORT_OBJ=true to restore optional OBJ sidecar.
-    EXPORT_OBJ: bool = False
+    # Meshy API
+    MESHY_API_KEY: str = ""
+    MESHY_POLL_INTERVAL_S: float = 5.0
+    MESHY_TIMEOUT_S: float = 600.0
+    MESHY_WEBHOOK_SECRET: str = ""
 
-    # Open3D Poisson surface reconstruction → GLB sidecar (viewer vertex/edge measure
-    # snapping). Non-fatal on failure; set EXPORT_MESH_GLB=false to skip the CPU cost.
-    # Runs in a child process so an OOM there cannot kill the API server.
-    EXPORT_MESH_GLB: bool = True
-    # Point cap before normal estimation / Poisson — bounds worker RAM on dense splats.
-    MESH_GLB_MAX_POINTS: int = 1_500_000
-    # Kill the mesh worker if it exceeds this wall-clock budget (seconds).
-    MESH_GLB_TIMEOUT_S: int = 1800
+    # Public base URL for keyframe images (Railway domain). Empty = data URIs.
+    STORAGE_PUBLIC_BASE_URL: str = ""
+    RAILWAY_PUBLIC_DOMAIN: str = ""
 
     class Config:
         env_file = ".env"
         case_sensitive = True
 
 
-def get_preset_config(preset: QualityPreset) -> PresetConfig:
-    """Get configuration for a quality preset"""
+def get_preset_config(preset: QualityPreset) -> MeshyPresetConfig:
     return QUALITY_PRESETS[preset]
 
 
 @lru_cache()
 def get_settings() -> Settings:
     settings = Settings()
-    # Create directories
     for dir_path in [settings.UPLOADS_DIR, settings.FRAMES_DIR,
                      settings.MODELS_DIR, settings.LOGS_DIR]:
         dir_path.mkdir(parents=True, exist_ok=True)
-    # Set database URL if not provided (SQLite in storage)
     if not settings.DATABASE_URL:
         db_path = settings.STORAGE_DIR / "data.db"
         settings.DATABASE_URL = f"sqlite:///{db_path}"

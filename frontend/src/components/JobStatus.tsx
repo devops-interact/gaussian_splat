@@ -12,7 +12,6 @@ interface JobStatusProps {
     modelUrl: string,
     objUrl?: string,
     modelMetadata?: ModelMetadataResponse,
-    glbUrl?: string,
   ) => void;
   /** Mirrors `quality_preset` from each successful status poll (null when job id changes, before first poll). */
   onQualityPresetChange?: (preset: string | null) => void;
@@ -23,17 +22,18 @@ const STATUS_LABELS: Record<JobStatusEnum, string> = {
   [JobStatusEnum.UPLOADED]: 'Video uploaded',
   [JobStatusEnum.VALIDATING]: 'Validating video format',
   [JobStatusEnum.EXTRACTING_FRAMES]: 'Extracting frames from video',
-  [JobStatusEnum.TRAINING]: 'Training 3D Splats (this takes time)',
-  [JobStatusEnum.EXPORTING]: 'Exporting PLY model',
-  [JobStatusEnum.COMPRESSING]: 'Compressing output file',
-  [JobStatusEnum.MESHING]: 'Generating measurement mesh',
+  [JobStatusEnum.SELECTING_KEYFRAMES]: 'Selecting best keyframes',
+  [JobStatusEnum.SUBMITTING_RECONSTRUCTION]: 'Submitting to Meshy AI',
+  [JobStatusEnum.RECONSTRUCTING]: 'AI reconstructing 3D mesh',
+  [JobStatusEnum.DOWNLOADING_MODEL]: 'Downloading model',
   [JobStatusEnum.COMPLETED]: 'Completed',
   [JobStatusEnum.ERROR]: 'Processing Error',
 };
 
 const PRESET_LABELS: Record<string, string> = {
-  balanced: 'Balanced (~35 min est.; longer on long videos)',
-  quality: 'Quality (~70 min est.; often 1h+ on long clips)',
+  fast: 'Fast (~5 min est.)',
+  balanced: 'Balanced (~8 min est.)',
+  quality: 'Quality (~12 min est.)',
 };
 
 const POLL_OK_MS = 2000;
@@ -56,20 +56,18 @@ function isActivePipelineStatus(s: JobStatusEnum): boolean {
 
 function jobNotFoundMessage(): string {
   return (
-    'Job not found (HTTP 404). The API has no record for this job id — often after a pod restart without ' +
-    'persistent storage, a changed RunPod URL, or the worker never saw this id. Check RunPod volume mount ' +
-    'for /app/storage and that the same API base URL is used for the whole run.'
+    'Job not found (HTTP 404). The API has no record for this job id — often after a redeploy ' +
+    'without persistent storage. Ensure the API volume is mounted at /app/backend/storage.'
   );
 }
 
 function networkPollWarning(failures: number): string {
-  const apiBase = getApiBaseUrl() || '(same-origin /api via Vercel rewrites)';
+  const apiBase = getApiBaseUrl() || '(same-origin /api via Railway frontend)';
   return (
     `Cannot reach the job API (${failures} failed poll${failures === 1 ? '' : 's'}). ` +
-    'HTTP 524 or "Network Error" usually means the RunPod pod is stopped or unreachable — ' +
-    'the browser may also report a missing CORS header because Cloudflare\'s error page is not from FastAPI. ' +
-    `Verify the pod is running: curl ${apiBase === '(same-origin /api via Vercel rewrites)' ? 'https://YOUR-POD-8000.proxy.runpod.net' : apiBase}/health . ` +
-    'Polling continues in case training is still running on the GPU.'
+    'Verify the Railway API service is running and the frontend BACKEND_URL is correct. ' +
+    `Check: curl ${apiBase === '(same-origin /api via Railway frontend)' ? 'https://YOUR-API.up.railway.app' : apiBase}/health . ` +
+    'Polling continues in case reconstruction is still running.'
   );
 }
 
@@ -153,7 +151,6 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, em
                 response.model_url,
                 response.model_url_obj ?? undefined,
                 response.model_metadata,
-                response.model_url_glb ?? undefined,
               );
             }
             return;
@@ -276,7 +273,7 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, em
                 <p className="opacity-90 leading-relaxed text-amber-100/85">{connectWarning}</p>
                 {isActivePipelineStatus(status) && (
                   <p className="text-xs text-amber-100/60">
-                    Last known step: {STATUS_LABELS[status]}. Training may still be running on RunPod.
+                    Last known step: {STATUS_LABELS[status]}. Reconstruction may still be running on Railway.
                   </p>
                 )}
                 <button

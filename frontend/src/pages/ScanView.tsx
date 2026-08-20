@@ -9,7 +9,7 @@ import TechnicalDetails from '@/components/TechnicalDetails';
 import type { ModelMetadata } from '@/components/Viewer3D';
 import type { ModelMetadataResponse } from '@/types/job';
 import { Card, CardContent } from '@/components/ui/card';
-import { Box, Download, ChevronDown, FileBox, FileArchive, FileCode, ArrowLeft } from 'lucide-react';
+import { Box, Download, ChevronDown, FileBox, FileCode, ArrowLeft } from 'lucide-react';
 import { downloadModel } from '@/api/jobs';
 import { getScan } from '@/api/scans';
 import { getApiBaseUrl } from '@/lib/apiBase';
@@ -24,7 +24,6 @@ export default function ScanView() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [modelUrl, setModelUrl] = useState<string | null>(null);
   const [objUrl, setObjUrl] = useState<string | null>(null);
-  const [glbUrl, setGlbUrl] = useState<string | null>(null);
   const [modelMetadata, setModelMetadata] = useState<ModelMetadata | null>(null);
   const [prefetchedJobModelMetadata, setPrefetchedJobModelMetadata] = useState<ModelMetadataResponse | null>(null);
   const [jobQualityPreset, setJobQualityPreset] = useState<string | null>(null);
@@ -63,10 +62,9 @@ export default function ScanView() {
   }, [downloadOpen]);
 
   const handleProcessingComplete = useCallback(
-    (url: string, objUrlResp?: string, jobMeta?: ModelMetadataResponse, glbUrlResp?: string) => {
+    (url: string, objUrlResp?: string, jobMeta?: ModelMetadataResponse) => {
       setModelUrl(url);
       setObjUrl(objUrlResp ?? null);
-      setGlbUrl(glbUrlResp ?? null);
       setPrefetchedJobModelMetadata(jobMeta ?? null);
     },
     [],
@@ -85,7 +83,7 @@ export default function ScanView() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = compressed ? `model_${jobId}.ply.gz` : `model_${jobId}.ply`;
+      a.download = compressed ? `model_${jobId}.glb` : `model_${jobId}.glb`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -114,7 +112,6 @@ export default function ScanView() {
     setJobId(newJobId);
     setModelUrl(null);
     setObjUrl(null);
-    setGlbUrl(null);
     setModelMetadata(null);
     setPrefetchedJobModelMetadata(null);
     setJobQualityPreset(null);
@@ -139,7 +136,7 @@ export default function ScanView() {
               3D Reconstruction
             </h2>
             <p className="text-gray-600 text-sm max-w-2xl">
-              Upload video scans to generate high-fidelity 3D Gaussian Splats.
+              Upload video scans to generate AI-reconstructed 3D room meshes via Meshy.
             </p>
           </div>
         </div>
@@ -166,33 +163,20 @@ export default function ScanView() {
                   >
                     <FileBox className="w-4 h-4 text-[#efe752]/50 group-hover:text-[#efe752]" />
                     <div>
-                      <span className="block text-white/80 group-hover:text-white">.ply</span>
-                      <span className="block text-[10px] text-white/30">Full quality</span>
+                      <span className="block text-white/80 group-hover:text-white">.glb</span>
+                      <span className="block text-[10px] text-white/30">Textured mesh</span>
                     </div>
                   </button>
                   <button
-                    onClick={() => handleDownload(true)}
-                    disabled={downloading}
+                    onClick={handleObjDownload}
                     className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-mono text-white/70 hover:text-white hover:bg-white/[0.06] transition-colors group"
                   >
-                    <FileArchive className="w-4 h-4 text-[#f5ec99]/50 group-hover:text-[#f5ec99]" />
+                    <FileCode className="w-4 h-4 text-amber-400/50 group-hover:text-amber-400" />
                     <div>
-                      <span className="block text-white/80 group-hover:text-white">.ply.gz</span>
-                      <span className="block text-[10px] text-white/30">Compressed</span>
+                      <span className="block text-white/80 group-hover:text-white">.obj</span>
+                      <span className="block text-[10px] text-white/30">Wavefront OBJ</span>
                     </div>
                   </button>
-                  {objUrl && (
-                    <button
-                      onClick={handleObjDownload}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-mono text-white/70 hover:text-white hover:bg-white/[0.06] transition-colors group"
-                    >
-                      <FileCode className="w-4 h-4 text-amber-400/50 group-hover:text-amber-400" />
-                      <div>
-                        <span className="block text-white/80 group-hover:text-white">.obj</span>
-                        <span className="block text-[10px] text-white/30">Wavefront OBJ</span>
-                      </div>
-                    </button>
-                  )}
                 </div>
               </div>
             )}
@@ -207,7 +191,6 @@ export default function ScanView() {
               <Viewer3D
                 modelUrl={modelUrl}
                 jobId={jobId}
-                meshUrl={glbUrl}
                 prefetchedJobModelMetadata={prefetchedJobModelMetadata}
                 onModelMetadata={handleModelMetadata}
               />

@@ -15,6 +15,8 @@ COPY frontend/ ./
 # valid for simple-proxy or same-domain deployment
 ARG VITE_API_BASE_URL=/
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+# Babylon + inspector vite bundle needs >2GB heap inside Docker buildx
+ENV NODE_OPTIONS=--max-old-space-size=8192
 RUN npm run build
 
 # ==========================================

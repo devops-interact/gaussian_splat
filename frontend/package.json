@@ -11,7 +11,9 @@
   },
   "dependencies": {
     "@babylonjs/core": "^9.16.2",
+    "@babylonjs/inspector": "^9.17.0",
     "@babylonjs/loaders": "^9.16.2",
+    "@babylonjs/materials": "^9.17.0",
     "@radix-ui/react-slot": "^1.2.4",
     "axios": "^1.6.2",
     "class-variance-authority": "^0.7.1",

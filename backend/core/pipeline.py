@@ -1,235 +1,195 @@
 """
-High-level orchestration of the processing pipeline
+High-level orchestration: video → keyframes → Meshy multi-image-to-3D → GLB
 """
-import asyncio
 import logging
 import time
 from pathlib import Path
 from typing import Optional
+
 from core.config import get_settings, QUALITY_PRESETS, QualityPreset
 from core.models import Job, JobStatus, ModelMetadata
 from jobs.job_manager import get_job_manager
 from services.video.extract_frames import extract_frames
-from services.longsplat.train import train_longsplat
-from services.export.to_ply import export_to_ply
-from services.export.to_obj import export_to_obj
-from services.export.compress import compress_ply_gzip
+from services.meshy.client import MeshyClient, MeshyError
+from services.meshy.keyframe_selector import select_keyframes
+from services.meshy.storage_upload import publish_keyframes
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
-def _extract_ply_metadata(ply_path: Path) -> Optional[ModelMetadata]:
-    """Extract metadata from a PLY file for the API response."""
+def _extract_glb_metadata(glb_path: Path, thumbnail_url: Optional[str] = None) -> Optional[ModelMetadata]:
     try:
-        from plyfile import PlyData
-        import numpy as np
-        
-        file_size = ply_path.stat().st_size
-        plydata = PlyData.read(str(ply_path))
-        vertex = plydata['vertex']
-        num_points = len(vertex.data)
-        prop_names = [prop.name for prop in vertex.properties]
-        
-        has_colors = 'f_dc_0' in prop_names or 'red' in prop_names
-        has_opacity = 'opacity' in prop_names
-        
-        # Bounding box
-        x = vertex['x']
-        y = vertex['y']
-        z = vertex['z']
-        
-        bbox = {
-            "min": [float(np.min(x)), float(np.min(y)), float(np.min(z))],
-            "max": [float(np.max(x)), float(np.max(y)), float(np.max(z))],
-        }
-        
-        # Detect format
-        fmt = "binary_little_endian"
-        if hasattr(plydata, 'header'):
-            header_str = str(plydata.header)
-            if 'ascii' in header_str:
-                fmt = "ascii"
-            elif 'big_endian' in header_str:
-                fmt = "binary_big_endian"
-        
+        import trimesh
+
+        file_size = glb_path.stat().st_size
+        scene = trimesh.load(str(glb_path), force="scene")
+        if hasattr(scene, "geometry"):
+            meshes = list(scene.geometry.values())
+        else:
+            meshes = [scene]
+
+        total_verts = sum(len(m.vertices) for m in meshes if hasattr(m, "vertices"))
+        total_faces = sum(len(m.faces) for m in meshes if hasattr(m, "faces"))
+
+        bbox = None
+        if meshes:
+            bounds = scene.bounds if hasattr(scene, "bounds") else meshes[0].bounds
+            bbox = {
+                "min": bounds[0].tolist(),
+                "max": bounds[1].tolist(),
+            }
+
         return ModelMetadata(
             file_size=file_size,
-            point_count=num_points,
-            has_colors=has_colors,
-            has_opacity=has_opacity,
+            vertex_count=total_verts,
+            face_count=total_faces,
+            point_count=total_verts,
+            has_colors=True,
+            has_pbr=True,
             bounding_box=bbox,
-            properties=prop_names,
-            format=fmt,
+            format="glb",
+            thumbnail_url=thumbnail_url,
         )
     except Exception as e:
-        logger.warning(f"Failed to extract PLY metadata: {e}")
-        return None
+        logger.warning("Failed to extract GLB metadata: %s", e)
+        return ModelMetadata(
+            file_size=glb_path.stat().st_size if glb_path.exists() else None,
+            format="glb",
+            thumbnail_url=thumbnail_url,
+        )
 
 
 async def process_job(job: Job) -> Job:
-    """
-    Execute the full processing pipeline for a job
-    """
+    job_manager = get_job_manager()
+    start_time = time.time()
+
+    if not settings.MESHY_API_KEY:
+        job.status = JobStatus.ERROR
+        job.error_message = "MESHY_API_KEY is not configured"
+        await job_manager.update_job(job)
+        return job
+
     try:
-        job_manager = get_job_manager()
-        start_time = time.time()
-        
-        # Get preset configuration
         preset = job.quality_preset or QualityPreset.BALANCED
         preset_config = QUALITY_PRESETS[preset]
-        
-        logger.info(f"Processing job {job.job_id} with preset: {preset.value}")
-        logger.info(f"Preset config: FPS={preset_config.fps}, iterations={preset_config.iterations}, resolution={preset_config.resolution}")
-        phase_times: dict[str, float] = {}
-        phase_t0 = time.perf_counter()
+        logger.info("Processing job %s preset=%s", job.job_id, preset.value)
 
-        def _phase(name: str) -> None:
-            nonlocal phase_t0
-            now = time.perf_counter()
-            phase_times[name] = now - phase_t0
-            phase_t0 = now
-
-        # Update job status
+        # Extract frames
         job.status = JobStatus.EXTRACTING_FRAMES
-        job.progress = 0.1
+        job.progress = 0.15
         await job_manager.update_job(job)
-        
-        # Step 1: Extract frames using preset FPS
+
         video_path = settings.UPLOADS_DIR / job.video_filename
         frames_dir = settings.FRAMES_DIR / job.job_id
-        
-        logger.info(f"Extracting frames from {video_path} at {preset_config.fps} FPS")
-        phase_t0 = time.perf_counter()
-        frames_dir = await extract_frames(video_path, frames_dir, preset_config.fps)
-        _phase("extract_frames")
-        
-        job.status = JobStatus.TRAINING
-        job.progress = 0.3
+        await extract_frames(video_path, frames_dir, preset_config.fps)
+
+        # Select keyframes
+        job.status = JobStatus.SELECTING_KEYFRAMES
+        job.progress = 0.25
         await job_manager.update_job(job)
-        
-        # Step 2: Train LongSplat with preset settings
-        logger.info(f"Training LongSplat model for job {job.job_id}")
-        longsplat_output_dir = settings.MODELS_DIR / job.job_id
-        longsplat_output_dir.mkdir(parents=True, exist_ok=True)
-        
-        training_success = await train_longsplat(
-            frames_dir,
-            longsplat_output_dir,
-            iterations=preset_config.iterations,
-            resolution=preset_config.resolution,
-            init_ratio=preset_config.init_frames_ratio,
-            convert_prune_ratio=preset_config.convert_3dgs_prune_ratio,
-            convert_refinement_cap=preset_config.convert_3dgs_refinement_cap,
+
+        keyframes = select_keyframes(frames_dir, max_frames=preset_config.max_keyframes)
+        image_urls = publish_keyframes(job.job_id, keyframes)
+
+        # Submit to Meshy
+        job.status = JobStatus.SUBMITTING_RECONSTRUCTION
+        job.progress = 0.35
+        await job_manager.update_job(job)
+
+        client = MeshyClient(
+            api_key=settings.MESHY_API_KEY,
+            poll_interval_s=settings.MESHY_POLL_INTERVAL_S,
+            timeout_s=settings.MESHY_TIMEOUT_S,
         )
-        _phase("train_longsplat")
-        
-        if not training_success:
-            raise Exception("LongSplat training failed. Check logs for details.")
-        
-        job.status = JobStatus.EXPORTING
-        job.progress = 0.85
-        await job_manager.update_job(job)
-        
-        # Step 3: Export to PLY (LongSplat already generates PLY, just copy it)
-        logger.info(f"Exporting model to PLY for job {job.job_id}")
-        ply_path = await export_to_ply(longsplat_output_dir, job.job_id)
-        _phase("export_to_ply")
-        
-        if not ply_path:
-            raise Exception("Failed to export PLY file")
-        
-        # Step 4: Compress the output
-        job.status = JobStatus.COMPRESSING
-        job.progress = 0.92
-        await job_manager.update_job(job)
-        
-        if settings.COMPRESS_OUTPUT:
-            logger.info(f"Compressing model for job {job.job_id}")
-            try:
-                compressed_path = await asyncio.get_event_loop().run_in_executor(
-                    None, compress_ply_gzip, ply_path
-                )
-                job.model_url_compressed = f"/static/models/{job.job_id}.ply.gz"
-                logger.info(f"Compressed model saved to {compressed_path}")
-            except Exception as e:
-                logger.warning(f"Compression failed (optional): {e}")
-        _phase("compress_gzip")
-        
-        # Step 5: Optionally export to OBJ (experimental; slow on dense PLYs)
-        job.progress = 0.96
+
+        task_id = await client.create_multi_image_task(
+            image_urls=image_urls,
+            ai_model=preset_config.ai_model,
+            should_texture=preset_config.should_texture,
+            enable_pbr=preset_config.enable_pbr,
+            texture_resolution=preset_config.texture_resolution,
+            target_polycount=preset_config.target_polycount,
+            should_remesh=preset_config.should_remesh,
+            ultra_mode=preset_config.ultra_mode,
+            target_formats=["glb", "obj"],
+        )
+        job.meshy_task_id = task_id
+
+        job.status = JobStatus.RECONSTRUCTING
+        job.progress = 0.45
         await job_manager.update_job(job)
 
-        job.model_url_obj = None
-        if settings.EXPORT_OBJ:
+        async def on_poll(task: dict) -> None:
+            progress = task.get("progress", 0)
+            job.progress = 0.35 + (progress / 100.0) * 0.50
+            await job_manager.update_job(job)
+
+        result = await _poll_with_updates(client, task_id, on_poll)
+
+        # Download GLB
+        job.status = JobStatus.DOWNLOADING_MODEL
+        job.progress = 0.90
+        await job_manager.update_job(job)
+
+        model_urls = result.get("model_urls") or {}
+        glb_url = model_urls.get("glb") or model_urls.get("pre_remeshed_glb")
+        if not glb_url:
+            raise MeshyError("Meshy task succeeded but no GLB URL returned")
+
+        glb_path = settings.MODELS_DIR / f"{job.job_id}.glb"
+        await client.download_file(glb_url, str(glb_path))
+
+        obj_url = model_urls.get("obj")
+        if obj_url:
+            obj_path = settings.MODELS_DIR / job.job_id / f"{job.job_id}.obj"
             try:
-                obj_path = await export_to_obj(ply_path, longsplat_output_dir / f"{job.job_id}.obj")
+                await client.download_file(obj_url, str(obj_path))
                 job.model_url_obj = f"/static/models/{job.job_id}/{job.job_id}.obj"
-                logger.info(f"Exported OBJ to {obj_path}")
             except Exception as e:
-                logger.warning(f"OBJ export failed (optional): {e}")
-        else:
-            logger.info("Skipping OBJ export (EXPORT_OBJ=false); set EXPORT_OBJ=true to enable.")
-        _phase("export_obj")
+                logger.warning("Optional OBJ download failed: %s", e)
 
-        # Step 5.5: Poisson surface reconstruction → GLB (viewer vertex/edge measure snapping).
-        # Runs on the centered PLY so the mesh shares the splat's coordinate frame 1:1.
-        # Executed in a child process: Poisson/normal orientation can OOM on dense
-        # splats, and a kernel OOM kill would otherwise take down the API server.
-        job.status = JobStatus.MESHING
-        job.progress = 0.97
-        await job_manager.update_job(job)
-
-        job.model_url_glb = None
-        if settings.EXPORT_MESH_GLB:
-            try:
-                from services.export.to_mesh import reconstruct_mesh_subprocess
-
-                glb_path = longsplat_output_dir / f"{job.job_id}.glb"
-                ok = await reconstruct_mesh_subprocess(
-                    ply_path,
-                    glb_path,
-                    max_points=settings.MESH_GLB_MAX_POINTS,
-                    timeout_s=settings.MESH_GLB_TIMEOUT_S,
-                )
-                if ok and glb_path.exists():
-                    job.model_url_glb = f"/static/models/{job.job_id}/{job.job_id}.glb"
-                    logger.info(f"Exported Poisson mesh GLB to {glb_path}")
-                else:
-                    logger.warning("Poisson mesh reconstruction produced no GLB (optional)")
-            except Exception as e:
-                logger.warning(f"Mesh GLB export failed (optional): {e}")
-        else:
-            logger.info("Skipping mesh GLB export (EXPORT_MESH_GLB=false).")
-        _phase("export_mesh_glb")
-
-        # Extract PLY metadata
-        job.progress = 0.98
-        await job_manager.update_job(job)
-        
-        metadata = _extract_ply_metadata(ply_path)
-        _phase("ply_metadata")
+        thumbnail_url = result.get("thumbnail_url")
+        metadata = _extract_glb_metadata(glb_path, thumbnail_url=thumbnail_url)
         if metadata:
+            metadata.meshy_task_id = task_id
             job.model_metadata = metadata
-            logger.info(f"Model metadata: {metadata.point_count} points, {metadata.file_size} bytes, colors={metadata.has_colors}")
-        
-        # Finalize job
+
         job.status = JobStatus.COMPLETED
         job.progress = 1.0
-        job.model_filename = f"{job.job_id}.ply"
-        # Viewer fetch must hit /api/... so gzip is decompressed server-side
+        job.model_filename = f"{job.job_id}.glb"
         job.model_url = f"/api/jobs/{job.job_id}/model"
         job.processing_time_seconds = round(time.time() - start_time, 1)
         await job_manager.update_job(job)
 
-        parts = ", ".join(f"{k}={v:.1f}s" for k, v in sorted(phase_times.items(), key=lambda x: -x[1]))
-        logger.info(f"Job {job.job_id} phase timings: {parts} (total {job.processing_time_seconds}s)")
-        logger.info(f"Job {job.job_id} completed successfully in {job.processing_time_seconds}s")
+        logger.info(
+            "Job %s completed in %ss (Meshy task %s)",
+            job.job_id,
+            job.processing_time_seconds,
+            task_id,
+        )
         return job
-        
+
     except Exception as e:
-        logger.error(f"Error processing job {job.job_id}: {e}", exc_info=True)
+        logger.error("Error processing job %s: %s", job.job_id, e, exc_info=True)
         job.status = JobStatus.ERROR
         job.error_message = str(e)
         await job_manager.update_job(job)
         return job
+
+
+async def _poll_with_updates(client: MeshyClient, task_id: str, on_poll) -> dict:
+    import asyncio
+
+    deadline = asyncio.get_event_loop().time() + client.timeout_s
+    while asyncio.get_event_loop().time() < deadline:
+        task = await client.get_task(task_id)
+        await on_poll(task)
+        status = task.get("status", "").upper()
+        if status == "SUCCEEDED":
+            return task
+        if status == "FAILED":
+            err = task.get("task_error") or task.get("message") or task
+            raise MeshyError(f"Meshy task failed: {err}")
+        await asyncio.sleep(client.poll_interval_s)
+    raise MeshyError(f"Meshy task {task_id} timed out")

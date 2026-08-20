@@ -1,0 +1,44 @@
+server {
+    listen ${PORT};
+    server_name _;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    gzip on;
+    gzip_types text/plain text/css application/javascript application/json;
+
+    location /api/ {
+        proxy_pass ${BACKEND_URL}/api/;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_ssl_verify off;
+        proxy_set_header Host ${BACKEND_HOST};
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 600s;
+        client_max_body_size 500m;
+    }
+
+    location /static/ {
+        proxy_pass ${BACKEND_URL}/static/;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_ssl_verify off;
+        proxy_set_header Host ${BACKEND_HOST};
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /assets/ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+    }
+}

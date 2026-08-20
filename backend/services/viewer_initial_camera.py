@@ -109,7 +109,8 @@ def compute_initial_camera_from_paths(
 ) -> dict[str, list[float]] | None:
     """
     First pose in cameras_all.json only: eye at that camera center (PLY-centered frame),
-    look-at one scene-scaled step along its forward axis.
+    look-at the model origin (centroid). The viewer orbits around the reconstruction
+    instead of staring past it along the training forward axis.
 
     Returns {"position": [x,y,z], "target": [x,y,z], "up": [x,y,z]} or None if required
     inputs are missing. `up` is the first camera's physical up in world coords — the
@@ -153,14 +154,20 @@ def compute_initial_camera_from_paths(
         dist = 3.0
 
     frac = _initial_camera_distance_frac()
-    eye_dist = dist * frac
-
     position = c0_centered.astype(np.float64)
-    target = c0_centered + f0 * eye_dist
+    target = np.zeros(3, dtype=np.float64)
 
-    # Avoid degenerate position == target (e.g. tiny eye_dist)
-    if float(np.linalg.norm(target - position)) < 1e-4:
-        target = c0_centered + f0 * max(eye_dist, 1e-3)
+    # Eye at the first video frame; target at the PLY centroid (origin after centering).
+    dist_to_origin = float(np.linalg.norm(position))
+    min_orbit = dist * frac
+    if dist_to_origin < min_orbit * 0.25:
+        # First camera sits inside/near the bbox — push eye outward along its radial
+        # direction so orbit controls have a sensible starting radius.
+        if dist_to_origin > 1e-4:
+            outward = position / dist_to_origin
+        else:
+            outward = f0
+        position = outward * min_orbit
 
     if float(np.linalg.norm(target - position)) < 1e-4:
         logger.warning("Initial camera degenerate after first-pose fix — bailing out")

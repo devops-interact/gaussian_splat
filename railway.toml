@@ -1,0 +1,2 @@
+# Per-service build/deploy is configured in Railway (api vs web).
+# See railway.frontend.toml for the web service reference config.

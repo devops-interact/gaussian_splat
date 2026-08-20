@@ -1,7 +1,6 @@
 """
 API endpoints for job management
 """
-import gzip
 import json
 import logging
 from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Form, Depends, Request
@@ -14,8 +13,7 @@ from core.models import Job, JobStatus, VideoValidation
 from core.config import get_settings, QualityPreset, QUALITY_PRESETS
 from core.pipeline import process_job
 from jobs.job_manager import get_job_manager
-from services.video.validate import validate_video, get_video_info
-from services.viewer_initial_camera import compute_initial_camera_from_paths
+from services.video.validate import validate_video
 from database import get_db
 from models.db_models import Project, Scan
 from api.auth import get_current_user_optional
@@ -38,48 +36,39 @@ async def upload_video(
     current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ):
-    """
-    Upload a video file and start processing.
-    Optionally link to a project/scan: pass project_id and scan_id (or project_id only to create scan on the fly).
-    """
-    # Validate preset
     try:
         preset = QualityPreset(quality_preset)
     except ValueError:
         preset = QualityPreset.BALANCED
         logger.warning(f"Invalid preset '{quality_preset}', using balanced")
-    
+
     preset_config = QUALITY_PRESETS[preset]
-    
-    # Validate file extension
+
     file_ext = Path(file.filename).suffix.lower()
     if file_ext not in settings.ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid file type. Allowed: {settings.ALLOWED_EXTENSIONS}"
+            detail=f"Invalid file type. Allowed: {settings.ALLOWED_EXTENSIONS}",
         )
-    
-    # Create job with preset
+
     job_manager = get_job_manager()
     job = await job_manager.create_job(file.filename)
     job.quality_preset = preset
     job.estimated_minutes = preset_config.estimated_minutes
-    
-    # Save uploaded file
+
     video_filename = f"{job.job_id}{file_ext}"
     video_path = settings.UPLOADS_DIR / video_filename
-    
+
     try:
         async with aiofiles.open(video_path, 'wb') as f:
             content = await file.read()
             await f.write(content)
-        
-        # Validate video
+
         job.status = JobStatus.VALIDATING
         await job_manager.update_job(job)
-        
+
         validation_result = validate_video(video_path)
-        
+
         job.validation = VideoValidation(
             valid=validation_result.valid,
             duration=validation_result.video_info.duration if validation_result.video_info else None,
@@ -87,32 +76,27 @@ async def upload_video(
             height=validation_result.video_info.height if validation_result.video_info else None,
             fps=validation_result.video_info.fps if validation_result.video_info else None,
             errors=validation_result.errors,
-            warnings=validation_result.warnings
+            warnings=validation_result.warnings,
         )
-        
+
         if not validation_result.valid:
             job.status = JobStatus.ERROR
             job.error_message = "; ".join(validation_result.errors)
             await job_manager.update_job(job)
-            
-            # Delete invalid video
             video_path.unlink(missing_ok=True)
-            
             raise HTTPException(
                 status_code=400,
                 detail={
                     "message": "Video validation failed",
                     "errors": validation_result.errors,
-                    "warnings": validation_result.warnings
-                }
+                    "warnings": validation_result.warnings,
+                },
             )
-        
-        # Update job with saved filename
+
         job.video_filename = video_filename
         job.status = JobStatus.UPLOADED
         await job_manager.update_job(job)
-        
-        # Link job to scan if project/scan provided (requires auth)
+
         scan = None
         if project_id:
             if not current_user:
@@ -132,10 +116,9 @@ async def upload_video(
             if scan:
                 scan.job_id = job.job_id
                 db.commit()
-        
-        # Start background processing
+
         background_tasks.add_task(process_job, job)
-        
+
         response = {
             "job_id": job.job_id,
             "scan_id": scan.id if scan else None,
@@ -143,21 +126,21 @@ async def upload_video(
             "status": job.status,
             "quality_preset": preset.value,
             "estimated_minutes": preset_config.estimated_minutes,
-            "message": "Video uploaded and validated. Processing started."
+            "message": "Video uploaded and validated. AI reconstruction started.",
         }
-        
+
         if validation_result.warnings:
             response["warnings"] = validation_result.warnings
-        
+
         if validation_result.video_info:
             response["video_info"] = {
                 "duration": validation_result.video_info.duration,
                 "resolution": f"{validation_result.video_info.width}x{validation_result.video_info.height}",
-                "fps": validation_result.video_info.fps
+                "fps": validation_result.video_info.fps,
             }
-        
+
         return response
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -167,11 +150,9 @@ async def upload_video(
         await job_manager.update_job(job)
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
+
 @router.get("/{job_id}/status")
 async def get_job_status(job_id: str, request: Request):
-    """
-    Get the current status of a job
-    """
     job_manager = get_job_manager()
     job = await job_manager.get_job(job_id)
 
@@ -179,176 +160,107 @@ async def get_job_status(job_id: str, request: Request):
         client = request.client.host if request.client else None
         logger.warning(
             "job_status_miss job_id=%s client_host=%s path=%s jobs_file=%s",
-            job_id,
-            client,
-            request.url.path,
-            job_manager.jobs_file,
+            job_id, client, request.url.path, job_manager.jobs_file,
         )
         raise HTTPException(status_code=404, detail="Job not found")
-    
+
     response = {
         "job_id": job.job_id,
         "status": job.status,
         "progress": job.progress,
         "error_message": job.error_message,
         "model_url": job.model_url,
-        "model_url_compressed": job.model_url_compressed,
         "model_url_obj": job.model_url_obj,
-        "model_url_glb": job.model_url_glb,
         "quality_preset": job.quality_preset.value if job.quality_preset else "balanced",
         "estimated_minutes": job.estimated_minutes,
         "processing_time_seconds": job.processing_time_seconds,
+        "meshy_task_id": job.meshy_task_id,
         "created_at": job.created_at.isoformat(),
-        "updated_at": job.updated_at.isoformat()
+        "updated_at": job.updated_at.isoformat(),
     }
-    
+
     if job.validation:
         response["validation"] = {
             "duration": job.validation.duration,
             "resolution": f"{job.validation.width}x{job.validation.height}" if job.validation.width else None,
             "fps": job.validation.fps,
-            "warnings": job.validation.warnings
+            "warnings": job.validation.warnings,
         }
-    
+
     if job.model_metadata:
+        md = job.model_metadata
         response["model_metadata"] = {
-            "file_size": job.model_metadata.file_size,
-            "point_count": job.model_metadata.point_count,
-            "has_colors": job.model_metadata.has_colors,
-            "has_opacity": job.model_metadata.has_opacity,
-            "bounding_box": job.model_metadata.bounding_box,
-            "properties": job.model_metadata.properties,
-            "format": job.model_metadata.format,
+            "file_size": md.file_size,
+            "vertex_count": md.vertex_count,
+            "face_count": md.face_count,
+            "point_count": md.point_count or md.vertex_count,
+            "has_colors": md.has_colors,
+            "has_pbr": md.has_pbr,
+            "bounding_box": md.bounding_box,
+            "format": md.format,
+            "thumbnail_url": md.thumbnail_url,
+            "meshy_task_id": md.meshy_task_id,
         }
-    
+
     return response
 
 
 @router.get("/{job_id}/model")
-async def download_model(job_id: str, compressed: bool = False):
-    """
-    Download the generated model file
-    
-    Args:
-        job_id: Job ID
-        compressed: If true, download gzip-compressed version (smaller file)
-    """
+async def download_model(job_id: str):
     job_manager = get_job_manager()
     job = await job_manager.get_job(job_id)
-    
+
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    
+
     if job.status != JobStatus.COMPLETED:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Job not completed. Current status: {job.status}"
-        )
-    
+        raise HTTPException(status_code=400, detail=f"Job not completed. Current status: {job.status}")
+
     if not job.model_filename:
         raise HTTPException(status_code=404, detail="Model file not found")
-    
-    # Check for compressed version if requested
-    if compressed:
-        compressed_filename = job.model_filename + ".gz"
-        compressed_path = settings.MODELS_DIR / compressed_filename
-        if compressed_path.exists():
-            return FileResponse(
-                path=str(compressed_path),
-                filename=compressed_filename,
-                media_type="application/gzip"
-            )
-    
-    model_path = settings.MODELS_DIR / job.model_filename
-    gz_path = settings.MODELS_DIR / f"{job.model_filename}.gz"
 
-    if model_path.exists():
-        data = model_path.read_bytes()
-    elif gz_path.exists():
-        with gzip.open(gz_path, "rb") as gz:
-            data = gz.read()
-    else:
+    model_path = settings.MODELS_DIR / job.model_filename
+    if not model_path.exists():
         raise HTTPException(status_code=404, detail="Model file not found on disk")
 
-    return Response(
-        content=data,
-        media_type="application/octet-stream",
-        headers={
-            "Content-Disposition": f'attachment; filename="{job.model_filename}"',
-            "Cross-Origin-Resource-Policy": "cross-origin",
-        },
-    )
-
-
-@router.get("/{job_id}/cameras")
-async def get_job_cameras(job_id: str):
-    """Optional: trained camera poses (MASt3R / LongSplat) for custom viewpoints."""
-    job_manager = get_job_manager()
-    job = await job_manager.get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    cam_path = settings.MODELS_DIR / job_id / "cameras_all.json"
-    if not cam_path.exists():
-        raise HTTPException(status_code=404, detail="Camera file not found")
-    return Response(
-        content=cam_path.read_text(encoding="utf-8"),
-        media_type="application/json",
+    return FileResponse(
+        path=str(model_path),
+        filename=job.model_filename,
+        media_type="model/gltf-binary",
         headers={"Cross-Origin-Resource-Policy": "cross-origin"},
     )
 
 
-@router.get("/{job_id}/initial_camera")
-async def get_initial_camera(job_id: str):
-    """
-    Suggested viewer camera from the first LongSplat pose in cameras_all.json + ply center offset.
-    Eye at that camera center; look-at along its forward axis (distance scaled by PLY bbox diagonal).
-    Requires cameras_all.json and ply_center_offset.json under the job model directory.
-    """
+@router.get("/{job_id}/thumbnail")
+async def get_thumbnail(job_id: str):
     job_manager = get_job_manager()
     job = await job_manager.get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    model_dir = settings.MODELS_DIR / job_id
-    cameras_path = model_dir / "cameras_all.json"
-    offset_path = model_dir / "ply_center_offset.json"
-    ply_path = (settings.MODELS_DIR / job.model_filename) if job.model_filename else None
-
-    result = compute_initial_camera_from_paths(
-        cameras_path=cameras_path,
-        offset_path=offset_path,
-        ply_path=ply_path,
-    )
-    if result is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Initial camera not available (missing cameras_all.json, ply_center_offset.json, or invalid data)",
-        )
-    return Response(
-        content=json.dumps(result),
-        media_type="application/json",
-        headers={"Cross-Origin-Resource-Policy": "cross-origin"},
-    )
+    if not job or not job.model_metadata or not job.model_metadata.thumbnail_url:
+        raise HTTPException(status_code=404, detail="Thumbnail not available")
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url=job.model_metadata.thumbnail_url)
 
 
 @router.get("/{job_id}/preview")
 async def get_preview_url(job_id: str):
-    """
-    Get the preview URL for the model
-    """
     job_manager = get_job_manager()
     job = await job_manager.get_job(job_id)
-    
+
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    
+
     if job.status != JobStatus.COMPLETED or not job.model_url:
-        raise HTTPException(
-            status_code=400,
-            detail="Model not ready for preview"
-        )
-    
+        raise HTTPException(status_code=400, detail="Model not ready for preview")
+
     return {
         "preview_url": job.model_url,
-        "model_filename": job.model_filename
+        "model_filename": job.model_filename,
     }
+
+
+@router.post("/webhooks/meshy")
+async def meshy_webhook(request: Request):
+    """Optional webhook for Meshy task completion (future use)."""
+    body = await request.json()
+    logger.info("Meshy webhook received: %s", json.dumps(body)[:500])
+    return {"ok": True}

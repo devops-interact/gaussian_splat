@@ -51,7 +51,7 @@ export default function Login() {
           <p className="text-gray-500 text-sm mb-2">Sign in to access your projects</p>
           {import.meta.env.PROD && (
             <p className="text-gray-600 text-xs font-mono mb-6 break-all">
-              API: {getApiBaseUrl() || '(unset — requests go to this Vercel domain)'}
+              API: {getApiBaseUrl() || '(same-origin /api on Railway)'}
             </p>
           )}
           {!import.meta.env.PROD && <div className="mb-6" />}

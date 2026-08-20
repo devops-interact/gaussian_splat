@@ -8,17 +8,23 @@ import { cn } from '@/lib/utils';
 // Quality preset definitions
 const PRESETS = [
   {
+    id: 'fast',
+    name: 'Fast',
+    description: 'Quick AI mesh preview (~3–5 min). Lower polycount.',
+    time: '~5 min est.',
+  },
+  {
     id: 'balanced',
     name: 'Balanced',
-    description: 'Solid quality; typical ~25–45 min (scales with clip length). Main train 12k iters + convert_3dgs up to 6.5k.',
-    time: '~35 min est.'
+    description: 'Recommended balance of quality and speed (~5–8 min).',
+    time: '~8 min est.',
   },
   {
     id: 'quality',
     name: 'Quality',
-    description: 'Highest fidelity; often 1h+ on long clips (24k train + up to 10k convert iters, 1.0 FPS).',
-    time: '~70 min est.'
-  }
+    description: 'Highest fidelity mesh with 4K textures (~8–12 min).',
+    time: '~12 min est.',
+  },
 ];
 
 interface VideoUploadProps {

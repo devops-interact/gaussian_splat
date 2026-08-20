@@ -129,14 +129,14 @@ describe('pickNearestCenterConeAlongRay', () => {
     expect(hit!.splatIndex).toBe(1);
   });
 
-  it('within the front depth cluster, the center closest to the cursor wins', () => {
+  it('picks the front-most splat under the cursor (closest along the ray)', () => {
     const { scene, camera } = makeTestScene();
     const renderDims = new Vector2(800, 600);
     const mouse = new Vector2(400, 300);
     const ray = worldRayFromCameraScreen(scene, camera, mouse);
     const { ndcX, ndcY } = ndcFromMousePos(mouse, renderDims);
     // Index 0 is slightly nearer (smaller t) but off-cursor; index 1 sits exactly
-    // under the cursor at nearly the same depth (inside the 0.5%·maxDist window).
+    // under the cursor at nearly the same depth — front-most wins (index 0).
     const centers = new Float32Array([
       0.05, 0, 3.02,
       0, 0, 3.0,
@@ -153,8 +153,8 @@ describe('pickNearestCenterConeAlongRay', () => {
       null,
     );
     expect(hit).not.toBeNull();
-    expect(hit!.splatIndex).toBe(1);
-    expect(hit!.position.z).toBeCloseTo(3.0);
+    expect(hit!.splatIndex).toBe(0);
+    expect(hit!.position.z).toBeCloseTo(3.02);
   });
 
   it('accepts large splats beyond the base pick radius when radii are provided', () => {

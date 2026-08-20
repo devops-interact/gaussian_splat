@@ -1,5 +1,5 @@
 """
-FastAPI entrypoint for Gaussian Splatting Room Reconstruction MVP
+FastAPI entrypoint for AI Room Reconstruction (Meshy + Railway)
 """
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,12 +39,11 @@ CORS_ALLOW_HEADERS_VALUE = ", ".join(CORS_ALLOW_HEADERS)
 from database import init_db
 init_db()
 
-# Resolve jobs left in-flight by a previous crash/restart (finalize if the PLY
-# exists, otherwise mark as error) so the UI never shows zombie active jobs.
+# Resolve jobs left in-flight by a previous crash/restart.
 from jobs.job_manager import get_job_manager
 get_job_manager().recover_stale_jobs()
 
-app = FastAPI(title="Gaussian Splatting Room Reconstruction API")
+app = FastAPI(title="AI Room Reconstruction API")
 
 # CORS middleware - allow all origins for production
 app.add_middleware(
@@ -90,9 +89,12 @@ app.include_router(jobs_router, prefix="/api/jobs", tags=["jobs"])
 # Serve static files (generated 3D models)
 storage_path = Path(__file__).parent / "storage"
 models_path = storage_path / "models"
+frames_path = storage_path / "frames"
 models_path.mkdir(parents=True, exist_ok=True)
+frames_path.mkdir(parents=True, exist_ok=True)
 
 app.mount("/static/models", StaticFiles(directory=str(models_path)), name="models")
+app.mount("/static/frames", StaticFiles(directory=str(frames_path)), name="frames")
 
 
 
@@ -177,7 +179,7 @@ if frontend_dist.exists():
 else:
     @app.get("/")
     async def api_root():
-        return {"message": "Gaussian Splatting Room Reconstruction API (No Frontend)", "version": "0.2.0"}
+        return {"message": "AI Room Reconstruction API (No Frontend)", "version": "1.0.0"}
 
 
 if __name__ == "__main__":
