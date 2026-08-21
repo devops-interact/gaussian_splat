@@ -17,7 +17,11 @@ BACKEND_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(BACKEND_ROOT))
 
 from services.meshy.client import MeshyClient  # noqa: E402
-from services.meshy.keyframe_selector import select_keyframes  # noqa: E402
+from services.meshy.keyframe_selector import (  # noqa: E402
+    laplacian_sharpness,
+    list_frame_paths,
+    select_keyframes,
+)
 from services.video.extract_frames import extract_frames  # noqa: E402
 
 
@@ -28,7 +32,16 @@ async def run_meshy_spike(video_path: Path, output_dir: Path) -> None:
 
     frames_dir = output_dir / "frames"
     await extract_frames(video_path, frames_dir, fps=1.0)
-    selected = select_keyframes(frames_dir, max_frames=4)
+    frame_paths = list_frame_paths(frames_dir)
+    if not frame_paths:
+        raise SystemExit(f"No frames found in {frames_dir}")
+
+    sharpness_by_index = {i: laplacian_sharpness(p) for i, p in enumerate(frame_paths)}
+    selected = select_keyframes(
+        frame_paths,
+        max_count=4,
+        sharpness_by_index=sharpness_by_index,
+    )
     print(f"Selected {len(selected)} keyframes:")
     for p in selected:
         print(f"  - {p.name}")

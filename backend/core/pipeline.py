@@ -11,7 +11,11 @@ from core.models import Job, JobStatus, ModelMetadata
 from jobs.job_manager import get_job_manager
 from services.video.extract_frames import extract_frames
 from services.meshy.client import MeshyClient, MeshyError
-from services.meshy.keyframe_selector import select_keyframes
+from services.meshy.keyframe_selector import (
+    laplacian_sharpness,
+    list_frame_paths,
+    select_keyframes,
+)
 from services.meshy.storage_upload import publish_keyframes
 
 logger = logging.getLogger(__name__)
@@ -89,7 +93,16 @@ async def process_job(job: Job) -> Job:
         job.progress = 0.25
         await job_manager.update_job(job)
 
-        keyframes = select_keyframes(frames_dir, max_frames=preset_config.max_keyframes)
+        frame_paths = list_frame_paths(frames_dir)
+        if not frame_paths:
+            raise ValueError(f"No frames found in {frames_dir}")
+
+        sharpness_by_index = {i: laplacian_sharpness(p) for i, p in enumerate(frame_paths)}
+        keyframes = select_keyframes(
+            frame_paths,
+            max_count=preset_config.max_keyframes,
+            sharpness_by_index=sharpness_by_index,
+        )
         image_urls = publish_keyframes(job.job_id, keyframes)
 
         # Submit to Meshy
