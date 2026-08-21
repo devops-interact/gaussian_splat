@@ -2,6 +2,7 @@
 
 import { motion } from 'framer-motion';
 import { FolderOpen, Settings, User, LogOut } from 'lucide-react';
+import { BRAND_NAME, BRAND_VERSION } from '@/lib/brand';
 
 interface SidebarProps {
   activeItem?: string;
@@ -25,7 +26,7 @@ export function Sidebar({ activeItem = 'projects', onNavigate, userEmail = '', o
           transition={{ duration: 0.3 }}
         >
           <h2 className="text-2xl font-mono font-bold text-[#efe752] mb-8 tracking-tighter">
-            METROA
+            {BRAND_NAME}
           </h2>
         </motion.div>
 
@@ -82,7 +83,7 @@ export function Sidebar({ activeItem = 'projects', onNavigate, userEmail = '', o
             <LogOut className="w-4 h-4 mr-3" />
             Log out
           </button>
-          <p className="text-gray-600 text-xs font-mono mt-4">Gaussian Splat v0.1</p>
+          <p className="text-gray-600 text-xs font-mono mt-4">{BRAND_NAME} {BRAND_VERSION}</p>
         </motion.div>
       </div>
     </div>

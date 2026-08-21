@@ -7,6 +7,7 @@ import { motion } from 'framer-motion';
 import { ApiConfigBanner } from '@/components/ApiConfigBanner';
 import { formatLoginError } from '@/lib/authErrors';
 import { getApiBaseUrl } from '@/lib/apiBase';
+import { BRAND_NAME, BRAND_TAGLINE } from '@/lib/brand';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -46,9 +47,10 @@ export default function Login() {
         <ApiConfigBanner />
         <div className="rounded-2xl border border-white/[0.22] bg-black p-8 shadow-2xl">
           <h1 className="text-2xl font-mono font-bold text-[#efe752] mb-2 tracking-tighter">
-            METROA
+            {BRAND_NAME}
           </h1>
-          <p className="text-gray-500 text-sm mb-2">Sign in to access your projects</p>
+          <p className="text-gray-500 text-sm mb-2">{BRAND_TAGLINE}</p>
+          <p className="text-gray-600 text-xs mb-2">Sign in to access your projects</p>
           {import.meta.env.PROD && (
             <p className="text-gray-600 text-xs font-mono mb-6 break-all">
               API: {getApiBaseUrl() || '(same-origin /api on Railway)'}

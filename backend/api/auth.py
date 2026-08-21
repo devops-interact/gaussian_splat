@@ -97,7 +97,7 @@ async def login(
     form: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
-    """Login with email (username) and password. Use demo@gaussian-splat.demo / demo123 for demo."""
+    """Login with email (username) and password. Use demo@mesh-up.app / demo123 for demo."""
     user = get_user_by_email(db, form.username)
     if not user or not verify_password(form.password, user.password_hash):
         raise HTTPException(status_code=401, detail="Invalid email or password")

@@ -1,3 +1,5 @@
+> **Legacy — not used in MESH-UP production path.** MESH-UP uses Meshy on Railway (CPU). This document is retained for historical reference only.
+
 # LongSplat Integration
 
 ## Overview

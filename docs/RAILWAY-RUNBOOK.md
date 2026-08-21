@@ -1,6 +1,6 @@
-# Railway Operations Runbook
+# Railway Operations Runbook — MESH-UP
 
-## Architecture
+Railway project: **mesh-up** (two services: `api` + `web`).
 
 Two Railway services in one project:
 
@@ -52,13 +52,13 @@ Set environment on **web** service:
 | `BACKEND_URL` | `https://api-production-xxxx.up.railway.app` (no trailing slash) |
 | `PORT` | Set automatically by Railway |
 
-Deploy with frontend config:
+Deploy with per-service Dockerfile configured in Railway dashboard or:
 
 ```bash
-railway up --service web -c railway.frontend.toml
+railway up --service web
 ```
 
-Or link `railway.frontend.toml` in the Railway dashboard for the web service.
+Reference config: [`railway.frontend.toml`](../railway.frontend.toml) → `Dockerfile.frontend.railway`
 
 ### Verify frontend
 
@@ -81,6 +81,7 @@ Railway dashboard → service → Deployments → redeploy previous version.
 
 | Issue | Fix |
 |---|---|
+| Demo login fails after rebrand | Use `demo@mesh-up.app` / `demo123`; delete SQLite on api volume to re-seed if old demo user remains |
 | Login/API 404 on web domain | Set `BACKEND_URL` on web service to api public URL |
 | Meshy can't fetch keyframes | Set `STORAGE_PUBLIC_BASE_URL` on **api** to api public URL |
 | Jobs lost on redeploy | Attach volume on **api** at `/app/backend/storage` |

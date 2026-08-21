@@ -5,7 +5,7 @@ cd "${SCRIPT_DIR}"
 
 TARGET="${1:-api}"
 
-echo "=== AI Room Reconstruction — Railway build (${TARGET}) ==="
+echo "=== MESH-UP — Railway build (${TARGET}) ==="
 
 if ! docker info > /dev/null 2>&1; then
   echo "Docker is not running"
@@ -17,11 +17,11 @@ echo "Running frontend tests..."
 
 if [[ "$TARGET" == "frontend" || "$TARGET" == "web" || "$TARGET" == "--frontend" ]]; then
   echo "Building frontend image (nginx + SPA)..."
-  docker build -f Dockerfile.frontend.railway -t ai-room-web:latest .
+  docker build -f Dockerfile.frontend.railway -t mesh-up-web:latest .
   echo "Done. Deploy web service with BACKEND_URL set to your API URL."
 elif [[ "$TARGET" == "api" || "$TARGET" == "--api" || "$TARGET" == "" ]]; then
   echo "Building API image..."
-  docker build -f Dockerfile.railway -t ai-room-api:latest .
+  docker build -f Dockerfile.railway -t mesh-up-api:latest .
   echo "Done. Deploy api service with MESHY_API_KEY and volume mounted."
 else
   echo "Usage: ./build-and-push.sh [api|frontend]"

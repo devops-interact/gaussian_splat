@@ -1,7 +1,7 @@
 # Spike: Meshy vs Hi3D — Decision Gate
 
 **Date:** 2026-08-19  
-**Decision:** **Meshy** (primary provider)
+**Decision:** **Meshy** (primary provider for **MESH-UP**)
 
 ## Evaluation criteria
 
@@ -17,7 +17,7 @@
 
 ## Conclusion
 
-Both APIs produce **textured meshes from 1–4 views**, not full room Gaussian splats. For our pipeline (video → FFmpeg keyframes → multi-image API), **Meshy Multi-Image-to-3D** is the better fit because:
+Both APIs produce **textured meshes from 1–4 views**, not full room Gaussian splats. For the **MESH-UP** pipeline (video → FFmpeg keyframes → multi-image API), **Meshy Multi-Image-to-3D** is the better fit because:
 
 1. Keyframes from room walkthroughs do not map to Hi3D's canonical front/back/left/right views.
 2. Meshy offers finer browser-oriented polycount control.

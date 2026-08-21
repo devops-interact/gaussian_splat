@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { getApiBaseUrl } from '../lib/apiBase';
+import { DEMO_EMAIL } from '../lib/brand';
 
 const API_BASE_URL = getApiBaseUrl();
 const API_AUTH_URL = `${API_BASE_URL}/api/auth`;
@@ -33,6 +34,6 @@ export const getMe = async (token: string): Promise<User> => {
 };
 
 export const DEMO_CREDENTIALS = {
-  email: 'demo@gaussian-splat.demo',
+  email: DEMO_EMAIL,
   password: 'demo123',
 };

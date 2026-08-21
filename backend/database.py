@@ -46,13 +46,15 @@ def _seed_demo_user():
         from passlib.context import CryptContext
         from models.db_models import User
 
+        from core.brand import DEMO_EMAIL
+
         pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
         db = SessionLocal()
         try:
-            existing = db.query(User).filter(User.email == "demo@gaussian-splat.demo").first()
+            existing = db.query(User).filter(User.email == DEMO_EMAIL).first()
             if not existing:
                 demo_user = User(
-                    email="demo@gaussian-splat.demo",
+                    email=DEMO_EMAIL,
                     password_hash=pwd_context.hash("demo123"),
                     is_demo=True,
                 )

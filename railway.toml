@@ -1,2 +1,2 @@
-# Per-service build/deploy is configured in Railway (api vs web).
+# Per-service build/deploy is configured in Railway for MESH-UP (api vs web).
 # See railway.frontend.toml for the web service reference config.

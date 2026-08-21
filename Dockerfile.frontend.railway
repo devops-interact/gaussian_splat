@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.5
 
-# Frontend SPA (deploy as Railway "web" service; proxies /api and /static to backend)
+# MESH-UP web (deploy as Railway "web" service; proxies /api and /static to backend)
 FROM node:18-alpine AS frontend-build
 WORKDIR /app/frontend
 

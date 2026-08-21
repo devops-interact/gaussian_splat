@@ -1,5 +1,5 @@
 """
-FastAPI entrypoint for AI Room Reconstruction (Meshy + Railway)
+FastAPI entrypoint for MESH-UP (Meshy + Railway)
 """
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,7 +16,7 @@ from api.projects import router as projects_router
 from api.scans import router as scans_router
 from core.config import get_settings, QUALITY_PRESETS, QualityPreset
 from core.models import PresetInfo
-from core.logging_config import setup_logging
+from core.brand import BRAND_NAME, BRAND_VERSION
 
 # Setup logging
 setup_logging()
@@ -43,7 +43,7 @@ init_db()
 from jobs.job_manager import get_job_manager
 get_job_manager().recover_stale_jobs()
 
-app = FastAPI(title="AI Room Reconstruction API")
+app = FastAPI(title=f"{BRAND_NAME} API")
 
 # CORS middleware - allow all origins for production
 app.add_middleware(
@@ -179,7 +179,7 @@ if frontend_dist.exists():
 else:
     @app.get("/")
     async def api_root():
-        return {"message": "AI Room Reconstruction API (No Frontend)", "version": "1.0.0"}
+        return {"message": f"{BRAND_NAME} API (No Frontend)", "version": BRAND_VERSION.lstrip("v")}
 
 
 if __name__ == "__main__":

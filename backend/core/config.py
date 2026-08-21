@@ -87,7 +87,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = ""
 
     # Auth (JWT)
-    JWT_SECRET_KEY: str = "gaussian-splat-demo-secret-change-in-production"
+    JWT_SECRET_KEY: str = "mesh-up-demo-secret-change-in-production"
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60 * 24 * 7
 

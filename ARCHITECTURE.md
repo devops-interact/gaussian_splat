@@ -1,4 +1,4 @@
-# AI Room Reconstruction — Architecture
+# MESH-UP — Architecture
 
 ## Overview
 
@@ -59,7 +59,7 @@ See [`docs/RAILWAY-RUNBOOK.md`](docs/RAILWAY-RUNBOOK.md).
 railway up --service api
 
 # Frontend service (set BACKEND_URL to api public URL first)
-railway up --service web -c railway.frontend.toml
+railway up --service web
 ```
 
 ## Viewer features
