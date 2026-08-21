@@ -16,6 +16,7 @@ from api.projects import router as projects_router
 from api.scans import router as scans_router
 from core.config import get_settings, QUALITY_PRESETS, QualityPreset
 from core.models import PresetInfo
+from core.logging_config import setup_logging
 from core.brand import BRAND_NAME, BRAND_VERSION
 
 # Setup logging
