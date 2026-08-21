@@ -69,8 +69,8 @@ Reference config: [`railway.frontend.toml`](../railway.frontend.toml) → `Docke
 ## Local build
 
 ```bash
-./build-and-push.sh              # API image
-./build-and-push.sh --frontend   # Frontend image (optional)
+./build-local.sh              # API image
+./build-local.sh --frontend   # Frontend image (optional)
 ```
 
 ## Rollback

@@ -74,8 +74,7 @@ class Settings(BaseSettings):
     MODELS_DIR: Path = STORAGE_DIR / "models"
     LOGS_DIR: Path = STORAGE_DIR / "logs"
 
-    DEFAULT_PRESET: QualityPreset = QualityPreset.BALANCED
-    FRAME_EXTRACTION_FPS: float = 1.5
+    ENV: str = "development"
 
     # Video validation settings
     MIN_VIDEO_DURATION: float = 3.0
@@ -103,7 +102,6 @@ class Settings(BaseSettings):
 
     # Public base URL for keyframe images (Railway domain). Empty = data URIs.
     STORAGE_PUBLIC_BASE_URL: str = ""
-    RAILWAY_PUBLIC_DOMAIN: str = ""
 
     class Config:
         env_file = ".env"
@@ -123,4 +121,6 @@ def get_settings() -> Settings:
     if not settings.DATABASE_URL:
         db_path = settings.STORAGE_DIR / "data.db"
         settings.DATABASE_URL = f"sqlite:///{db_path}"
+    if settings.ENV == "production" and settings.JWT_SECRET_KEY == "mesh-up-demo-secret-change-in-production":
+        raise RuntimeError("JWT_SECRET_KEY must be set in production")
     return settings

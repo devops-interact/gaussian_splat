@@ -15,6 +15,7 @@ interface JobStatusProps {
   ) => void;
   /** Mirrors `quality_preset` from each successful status poll (null when job id changes, before first poll). */
   onQualityPresetChange?: (preset: string | null) => void;
+  onElapsedTimeChange?: (elapsed: string) => void;
   embedded?: boolean;
 }
 
@@ -71,11 +72,13 @@ function networkPollWarning(failures: number): string {
   );
 }
 
-export default function JobStatus({ jobId, onComplete, onQualityPresetChange, embedded }: JobStatusProps) {
+export default function JobStatus({ jobId, onComplete, onQualityPresetChange, onElapsedTimeChange, embedded }: JobStatusProps) {
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
   const onQualityPresetChangeRef = useRef(onQualityPresetChange);
   onQualityPresetChangeRef.current = onQualityPresetChange;
+  const onElapsedTimeChangeRef = useRef(onElapsedTimeChange);
+  onElapsedTimeChangeRef.current = onElapsedTimeChange;
   /** Avoid calling onComplete again when the poll effect restarts (e.g. parent re-render); resets when jobId changes. */
   const completionNotifiedForJobIdRef = useRef<string | null>(null);
 
@@ -109,6 +112,7 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, em
       const minutes = Math.floor(elapsed / 60);
       const seconds = elapsed % 60;
       setElapsedTime(`${minutes}:${seconds.toString().padStart(2, '0')}`);
+      onElapsedTimeChangeRef.current?.(`${minutes}:${seconds.toString().padStart(2, '0')}`);
     }, 1000);
 
     return () => clearInterval(timer);

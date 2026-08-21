@@ -1,11 +1,10 @@
 import type { AbstractMesh, ArcRotateCamera } from '@babylonjs/core';
 import { FramingBehavior } from '@babylonjs/core/Behaviors/Cameras/framingBehavior';
-import { Vector3, type Quaternion } from '@babylonjs/core';
-import { rotateTupleByQuaternion } from '@/lib/splatOrientation';
+import { Vector3 } from '@babylonjs/core';
 import { BBOX_CAM_DIST_MIN, BBOX_CAM_DIST_MULT } from '../constants';
 
 /**
- * Apply backend first-frame pose (already floor-down rotated), then native Babylon zoomOn.
+ * Apply backend first-frame pose, then native Babylon zoomOn.
  */
 export function applyInitialCameraPose(
   orbitCamera: ArcRotateCamera,
@@ -36,23 +35,12 @@ export function frameCameraOnMesh(orbitCamera: ArcRotateCamera, meshes: Abstract
 export function resetViewWithFraming(
   _orbitCamera: ArcRotateCamera,
   framingBehavior: FramingBehavior,
-  splatMesh: AbstractMesh | null,
+  rootMesh: AbstractMesh | null,
   animate = false,
 ): void {
-  if (!splatMesh) return;
+  if (!rootMesh) return;
   framingBehavior.framingTime = animate ? 500 : 0;
-  framingBehavior.zoomOnMeshHierarchy(splatMesh, true);
-}
-
-export function rotateCameraTuple(
-  position: [number, number, number],
-  lookAt: [number, number, number],
-  orientationQuat: Quaternion,
-): { position: [number, number, number]; lookAt: [number, number, number] } {
-  return {
-    position: rotateTupleByQuaternion(position, orientationQuat),
-    lookAt: rotateTupleByQuaternion(lookAt, orientationQuat),
-  };
+  framingBehavior.zoomOnMeshHierarchy(rootMesh, true);
 }
 
 export function bboxFromMesh(mesh: AbstractMesh): {

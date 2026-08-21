@@ -4,8 +4,6 @@ FastAPI entrypoint for MESH-UP (Meshy + Railway)
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse
-import os
 import logging
 from pathlib import Path
 from typing import List
@@ -61,7 +59,7 @@ app.add_middleware(
 async def ensure_cors_headers(request: Request, call_next):
     """
     Belt-and-suspenders CORS: guarantee Access-Control headers are present
-    on every response, including error responses and RunPod proxy edge cases.
+    on every response, including error responses.
     """
     # Handle preflight OPTIONS immediately
     if request.method == "OPTIONS":
@@ -136,51 +134,9 @@ async def get_preset(preset_id: str):
         raise HTTPException(status_code=404, detail=f"Preset '{preset_id}' not found")
 
 
-# Serve Frontend Static Files & SPA Fallback (Placed at end to avoid shadowing API routes)
-frontend_dist = Path("/app/frontend/dist")
-
-def _serve_index():
-    """Serve index.html with no-cache headers to prevent stale frontend."""
-    index_path = frontend_dist / "index.html"
-    html = index_path.read_text()
-    return HTMLResponse(
-        content=html,
-        headers={
-            "Cache-Control": "no-cache, no-store, must-revalidate",
-            "Pragma": "no-cache",
-            "Expires": "0",
-        },
-    )
-
-if frontend_dist.exists():
-    # Mount assets (these are content-hashed, safe to cache)
-    assets_path = frontend_dist / "assets"
-    if assets_path.exists():
-        app.mount("/assets", StaticFiles(directory=str(assets_path)), name="assets")
-
-    # Serve other static files (vite.svg, etc.)
-    @app.get("/vite.svg")
-    async def serve_vite_svg():
-        svg_path = frontend_dist / "vite.svg"
-        if svg_path.exists():
-            return FileResponse(svg_path)
-
-    @app.get("/")
-    async def serve_root():
-        return _serve_index()
-
-    @app.get("/{full_path:path}")
-    async def serve_spa_catchall(full_path: str):
-        # Check if file exists in dist (but not index.html via this path)
-        file_path = frontend_dist / full_path
-        if file_path.exists() and file_path.is_file() and full_path != "index.html":
-            return FileResponse(file_path)
-        # Fallback to index.html (no cache)
-        return _serve_index()
-else:
-    @app.get("/")
-    async def api_root():
-        return {"message": f"{BRAND_NAME} API (No Frontend)", "version": BRAND_VERSION.lstrip("v")}
+@app.get("/")
+async def api_root():
+    return {"message": f"{BRAND_NAME} API", "version": BRAND_VERSION.lstrip("v")}
 
 
 if __name__ == "__main__":

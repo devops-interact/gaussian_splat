@@ -94,7 +94,7 @@ def get_video_info(video_path: Path) -> Optional[VideoInfo]:
         return None
 
 
-def validate_video(video_path: Path) -> ValidationResult:
+def validate_video(video_path: Path, extraction_fps: float = 2.0) -> ValidationResult:
     """
     Validate a video file for 3D reconstruction
     
@@ -195,16 +195,16 @@ def validate_video(video_path: Path) -> ValidationResult:
         )
     
     # Estimate processing time and frames
-    estimated_frames = int(video_info.duration * 2)  # At 2 FPS
+    estimated_frames = int(video_info.duration * extraction_fps)
     if estimated_frames < 10:
         errors.append(
             f"Not enough frames for reconstruction. "
-            f"Video would produce only {estimated_frames} frames. Minimum: 10"
+            f"Video would produce only {estimated_frames} frames at {extraction_fps} FPS. Minimum: 10"
         )
-    
+
     if estimated_frames > 500:
         warnings.append(
-            f"Large video ({estimated_frames} frames at 2 FPS). "
+            f"Large video ({estimated_frames} frames at {extraction_fps} FPS). "
             f"Consider using a shorter clip for faster processing."
         )
     

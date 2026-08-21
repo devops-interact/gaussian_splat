@@ -13,17 +13,17 @@ export const ORBIT_BETA_MAX = Math.PI - 0.12;
 export const MEASURE_HOVER_MIN_MS = 100;
 export const MEASURE_PREVIEW_MOVE_EPS = 0.03;
 
-export const PLY_FETCH_TIMEOUT_MS = 120_000;
-export const ADD_SPLAT_SCENE_TIMEOUT_MS = 90_000;
+export const MODEL_FETCH_TIMEOUT_MS = 120_000;
+export const ADD_MESH_SCENE_TIMEOUT_MS = 90_000;
 
 export const VIEWER_SCENE_SCALE_MIN = 0.25;
 export const VIEWER_SCENE_SCALE_MAX = 10;
 
 export const AUTO_ROTATE_ALPHA_SPEED = 0.002;
 
-export function plyFetchAbortSignal(): AbortSignal | undefined {
+export function modelFetchAbortSignal(): AbortSignal | undefined {
   if (typeof AbortSignal !== 'undefined' && 'timeout' in AbortSignal && typeof AbortSignal.timeout === 'function') {
-    return AbortSignal.timeout(PLY_FETCH_TIMEOUT_MS);
+    return AbortSignal.timeout(MODEL_FETCH_TIMEOUT_MS);
   }
   return undefined;
 }
@@ -34,11 +34,4 @@ export function parseViewerSceneScale(): number {
   const n = Number(String(raw).trim());
   if (!Number.isFinite(n) || n <= 0) return 1;
   return Math.max(VIEWER_SCENE_SCALE_MIN, Math.min(VIEWER_SCENE_SCALE_MAX, n));
-}
-
-/** Map display slider (1–255) to GaussianSplattingMesh.minPixelSize (0 = off). */
-export function minAlphaToPixelSize(minAlpha: number): number {
-  const t = Math.max(0, Math.min(255, minAlpha));
-  if (t <= 1) return 0;
-  return ((t - 1) / 254) * 8;
 }

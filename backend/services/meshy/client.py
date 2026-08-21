@@ -94,10 +94,16 @@ class MeshyClient:
                 raise MeshyError(f"Get task failed ({resp.status_code}): {resp.text}")
             return resp.json()
 
-    async def poll_until_complete(self, task_id: str) -> Dict[str, Any]:
+    async def poll_until_complete(
+        self,
+        task_id: str,
+        on_poll=None,
+    ) -> Dict[str, Any]:
         deadline = asyncio.get_event_loop().time() + self.timeout_s
         while asyncio.get_event_loop().time() < deadline:
             task = await self.get_task(task_id)
+            if on_poll is not None:
+                await on_poll(task)
             status = task.get("status", "").upper()
             progress = task.get("progress", 0)
             logger.info("Meshy task %s status=%s progress=%s", task_id, status, progress)

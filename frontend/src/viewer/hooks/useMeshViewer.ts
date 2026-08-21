@@ -16,7 +16,7 @@ import {
   applyOrbitZoomLimitsFromDiagonal,
   setupCamerasFromPose,
 } from '../camera/setupCameras';
-import { parseViewerSceneScale, plyFetchAbortSignal } from '../constants';
+import { parseViewerSceneScale, modelFetchAbortSignal } from '../constants';
 import {
   createCollisionProxy,
   fetchModelBuffer,
@@ -132,7 +132,7 @@ export function useMeshViewer({
         setLoadLabel('Fetching 3D model…');
 
         const glbUrl = glbModelUrl(modelUrl, apiBase);
-        const fetchSignal = plyFetchAbortSignal();
+        const fetchSignal = modelFetchAbortSignal();
         const buffer = await fetchModelBuffer(glbUrl, fetchSignal, (pct) => {
           if (!disposed) setLoadProgress(pct);
         });
@@ -141,7 +141,7 @@ export function useMeshViewer({
 
         const prefetched = prefetchedJobModelMetadata;
         let modelMeta: ModelMetadata;
-        if (prefetched && (prefetched.vertex_count || prefetched.point_count)) {
+        if (prefetched && prefetched.vertex_count) {
           modelMeta = modelMetadataFromJobResponse(prefetched, buffer.byteLength);
         } else {
           modelMeta = {
@@ -152,8 +152,6 @@ export function useMeshViewer({
             boundingBox: { min: [-1, -1, -1], max: [1, 1, 1] },
             hasColors: true,
             hasPbr: true,
-            hasOpacity: false,
-            properties: [],
             format: 'glb',
           };
         }

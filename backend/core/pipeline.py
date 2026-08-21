@@ -48,7 +48,6 @@ def _extract_glb_metadata(glb_path: Path, thumbnail_url: Optional[str] = None) -
             file_size=file_size,
             vertex_count=total_verts,
             face_count=total_faces,
-            point_count=total_verts,
             has_colors=True,
             has_pbr=True,
             bounding_box=bbox,
@@ -138,7 +137,7 @@ async def process_job(job: Job) -> Job:
             job.progress = 0.35 + (progress / 100.0) * 0.50
             await job_manager.update_job(job)
 
-        result = await _poll_with_updates(client, task_id, on_poll)
+        result = await client.poll_until_complete(task_id, on_poll=on_poll)
 
         # Download GLB
         job.status = JobStatus.DOWNLOADING_MODEL
@@ -189,20 +188,3 @@ async def process_job(job: Job) -> Job:
         job.error_message = str(e)
         await job_manager.update_job(job)
         return job
-
-
-async def _poll_with_updates(client: MeshyClient, task_id: str, on_poll) -> dict:
-    import asyncio
-
-    deadline = asyncio.get_event_loop().time() + client.timeout_s
-    while asyncio.get_event_loop().time() < deadline:
-        task = await client.get_task(task_id)
-        await on_poll(task)
-        status = task.get("status", "").upper()
-        if status == "SUCCEEDED":
-            return task
-        if status == "FAILED":
-            err = task.get("task_error") or task.get("message") or task
-            raise MeshyError(f"Meshy task failed: {err}")
-        await asyncio.sleep(client.poll_interval_s)
-    raise MeshyError(f"Meshy task {task_id} timed out")

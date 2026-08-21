@@ -27,7 +27,7 @@ export default function ScanView() {
   const [modelMetadata, setModelMetadata] = useState<ModelMetadata | null>(null);
   const [prefetchedJobModelMetadata, setPrefetchedJobModelMetadata] = useState<ModelMetadataResponse | null>(null);
   const [jobQualityPreset, setJobQualityPreset] = useState<string | null>(null);
-  const [elapsedTime] = useState<string>('--');
+  const [elapsedTime, setElapsedTime] = useState<string>('--');
   const [downloading, setDownloading] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const downloadRef = useRef<HTMLDivElement>(null);
@@ -74,16 +74,16 @@ export default function ScanView() {
     setModelMetadata(meta);
   }, []);
 
-  const handleDownload = async (compressed: boolean = false) => {
+  const handleDownload = async () => {
     if (!jobId) return;
     setDownloading(true);
     setDownloadOpen(false);
     try {
-      const blob = await downloadModel(jobId, compressed);
+      const blob = await downloadModel(jobId);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = compressed ? `model_${jobId}.glb` : `model_${jobId}.glb`;
+      a.download = `model_${jobId}.glb`;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
@@ -160,7 +160,7 @@ export default function ScanView() {
               <div className="absolute right-0 top-full mt-2 w-56 rounded-xl bg-neutral-950 border border-white/[0.22] shadow-2xl shadow-black/50 backdrop-blur-xl z-50 overflow-hidden">
                 <div className="p-1.5">
                   <button
-                    onClick={() => handleDownload(false)}
+                    onClick={() => handleDownload()}
                     disabled={downloading}
                     className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm text-white/70 hover:text-white hover:bg-white/[0.06] transition-colors group"
                   >
@@ -227,6 +227,7 @@ export default function ScanView() {
                 jobId={jobId}
                 onComplete={handleProcessingComplete}
                 onQualityPresetChange={setJobQualityPreset}
+                onElapsedTimeChange={setElapsedTime}
                 embedded
               />
             ) : (

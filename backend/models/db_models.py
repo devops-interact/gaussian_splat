@@ -1,8 +1,9 @@
 """
-SQLAlchemy models for User, Project, Scan
+SQLAlchemy models for User, Project, Scan, Job
 """
+import json
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Float, Text
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -44,3 +45,36 @@ class Scan(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     project = relationship("Project", back_populates="scans")
+
+
+class JobRecord(Base):
+    __tablename__ = "jobs"
+
+    job_id = Column(String(36), primary_key=True)
+    status = Column(String(32), nullable=False)
+    video_filename = Column(String(512), nullable=False)
+    quality_preset = Column(String(16), default="balanced")
+    progress = Column(Float, default=0.0)
+    error_message = Column(Text, nullable=True)
+    model_filename = Column(String(512), nullable=True)
+    model_url = Column(String(512), nullable=True)
+    model_url_obj = Column(String(512), nullable=True)
+    estimated_minutes = Column(Integer, nullable=True)
+    processing_time_seconds = Column(Float, nullable=True)
+    meshy_task_id = Column(String(64), nullable=True)
+    validation_json = Column(Text, nullable=True)
+    model_metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def set_validation(self, data) -> None:
+        self.validation_json = json.dumps(data) if data else None
+
+    def get_validation(self):
+        return json.loads(self.validation_json) if self.validation_json else None
+
+    def set_model_metadata(self, data) -> None:
+        self.model_metadata_json = json.dumps(data) if data else None
+
+    def get_model_metadata(self):
+        return json.loads(self.model_metadata_json) if self.model_metadata_json else None

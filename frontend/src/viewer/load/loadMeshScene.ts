@@ -5,6 +5,7 @@ import '@babylonjs/loaders/glTF/glTFFileLoader';
 import '@babylonjs/loaders/glTF/2.0/glTFLoader';
 import axios from 'axios';
 import { isCancel } from 'axios';
+import { getAuthHeaders } from '@/lib/authHeaders';
 
 const MODEL_FETCH_TIMEOUT_MS = 120_000;
 
@@ -17,6 +18,7 @@ export async function fetchModelBuffer(
     responseType: 'arraybuffer',
     timeout: MODEL_FETCH_TIMEOUT_MS,
     signal,
+    headers: { ...getAuthHeaders() },
     onDownloadProgress: (e) => {
       if (onProgress && e.total) {
         onProgress(Math.round((e.loaded / e.total) * 100));
@@ -102,7 +104,7 @@ export function modelMetadataFromJobResponse(
   meta: import('@/types/job').ModelMetadataResponse,
   fileSize: number,
 ): import('../types').ModelMetadata {
-  const verts = meta.vertex_count ?? meta.point_count ?? 0;
+  const verts = meta.vertex_count ?? 0;
   const faces = meta.face_count ?? 0;
   return {
     vertexCount: verts,
@@ -112,8 +114,6 @@ export function modelMetadataFromJobResponse(
     boundingBox: meta.bounding_box ?? { min: [-1, -1, -1], max: [1, 1, 1] },
     hasColors: meta.has_colors ?? true,
     hasPbr: meta.has_pbr ?? false,
-    hasOpacity: false,
-    properties: meta.properties ?? [],
     format: meta.format ?? 'glb',
   };
 }

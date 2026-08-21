@@ -10,7 +10,7 @@ Web app that converts room walkthrough videos into interactive **textured 3D mes
 ┌─────────────────────────┐     proxy /api, /static      ┌──────────────────────────┐
 │  web (frontend)         │ ────────────────────────────▶│  api (backend)           │
 │  nginx + React SPA      │     BACKEND_URL env var      │  FastAPI + FFmpeg + Meshy│
-│  Dockerfile.frontend    │                              │  Dockerfile.railway      │
+│  Dockerfile.frontend.railway │                              │  Dockerfile.railway      │
 └─────────────────────────┘                              └──────────────────────────┘
          ▲                                                           │
          │ user browser                                              │ Meshy API

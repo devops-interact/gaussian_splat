@@ -21,10 +21,8 @@ export interface ModelMetadataResponse {
   file_size?: number;
   vertex_count?: number;
   face_count?: number;
-  point_count?: number;
   has_colors?: boolean;
   has_pbr?: boolean;
-  has_opacity?: boolean;
   bounding_box?: {
     min: [number, number, number];
     max: [number, number, number];
@@ -32,7 +30,6 @@ export interface ModelMetadataResponse {
   format?: string;
   thumbnail_url?: string;
   meshy_task_id?: string;
-  properties?: string[];
 }
 
 export interface Job {

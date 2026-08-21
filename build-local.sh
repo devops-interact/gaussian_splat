@@ -5,17 +5,16 @@ cd "${SCRIPT_DIR}"
 
 TARGET="${1:-api}"
 
-echo "=== MESH-UP — Railway build (${TARGET}) ==="
+echo "=== MESH-UP — local Docker build (${TARGET}) ==="
 
 if ! docker info > /dev/null 2>&1; then
   echo "Docker is not running"
   exit 1
 fi
 
-echo "Running frontend tests..."
-(cd frontend && npm test -- --run)
-
 if [[ "$TARGET" == "frontend" || "$TARGET" == "web" || "$TARGET" == "--frontend" ]]; then
+  echo "Running frontend tests..."
+  (cd frontend && npm test -- --run)
   echo "Building frontend image (nginx + SPA)..."
   docker build -f Dockerfile.frontend.railway -t mesh-up-web:latest .
   echo "Done. Deploy web service with BACKEND_URL set to your API URL."
@@ -24,6 +23,6 @@ elif [[ "$TARGET" == "api" || "$TARGET" == "--api" || "$TARGET" == "" ]]; then
   docker build -f Dockerfile.railway -t mesh-up-api:latest .
   echo "Done. Deploy api service with MESHY_API_KEY and volume mounted."
 else
-  echo "Usage: ./build-and-push.sh [api|frontend]"
+  echo "Usage: ./build-local.sh [api|frontend]"
   exit 1
 fi

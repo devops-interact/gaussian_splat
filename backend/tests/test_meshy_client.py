@@ -55,6 +55,33 @@ def test_poll_until_complete_succeeded():
     assert result["status"] == "SUCCEEDED"
 
 
+def test_poll_until_complete_calls_on_poll():
+    client = MeshyClient(api_key="test-key", poll_interval_s=0.01, timeout_s=5)
+    responses = [
+        {"status": "IN_PROGRESS", "progress": 30},
+        {"status": "SUCCEEDED", "progress": 100},
+    ]
+    call_count = 0
+    polled = []
+
+    async def fake_get(task_id):
+        nonlocal call_count
+        r = responses[min(call_count, len(responses) - 1)]
+        call_count += 1
+        return r
+
+    client.get_task = fake_get  # type: ignore
+
+    async def on_poll(task):
+        polled.append(task.get("progress"))
+
+    async def run():
+        return await client.poll_until_complete("task-123", on_poll=on_poll)
+
+    asyncio.run(run())
+    assert polled == [30, 100]
+
+
 def test_create_rejects_too_many_images():
     client = MeshyClient(api_key="test-key")
 

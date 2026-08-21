@@ -33,7 +33,7 @@ def get_db():
 
 def init_db():
     """Create all tables and run seed if needed"""
-    from models.db_models import User, Project, Scan
+    from models.db_models import User, Project, Scan, JobRecord
     Base.metadata.create_all(bind=engine)
     _seed_demo_user()
 

@@ -159,13 +159,12 @@ Extender carga mesh existente:
 
 1. Si job tiene `composition_mode=zone_mesh`, fetch manifest.
 2. Por cada zona: `ImportMeshAsync` con transform pre-aplicado.
-3. Parent node `room_root` para framing de cámara (`viewer_initial_camera.py` usa bounding box agregado).
+3. Parent node `room_root` para framing de cámara (bbox agregado de todos los meshes).
 
 **Archivos:**
 
 - `frontend/src/viewer/load/loadMeshScene.ts` — `importGlbBuffer` + `importComposedScene(manifest)`
 - `frontend/src/viewer/hooks/useMeshViewer.ts` — detectar manifest
-- `backend/services/viewer_initial_camera.py` — bbox de todos los roots
 
 **Walkthrough:** reutilizar `useWalkthroughMode.ts` con path = poses originales del video (ya existente en repo).
 

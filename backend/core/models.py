@@ -41,10 +41,6 @@ class ModelMetadata(BaseModel):
     format: Optional[str] = None
     thumbnail_url: Optional[str] = None
     meshy_task_id: Optional[str] = None
-    # Legacy fields kept for backward-compatible API responses
-    point_count: Optional[int] = None
-    has_opacity: bool = False
-    properties: List[str] = []
 
 
 class Job(BaseModel):
@@ -66,8 +62,6 @@ class Job(BaseModel):
     model_metadata: Optional[ModelMetadata] = None
     processing_time_seconds: Optional[float] = None
     meshy_task_id: Optional[str] = None
-    # Deprecated
-    model_url_compressed: Optional[str] = None
 
 
 class JobCreate(BaseModel):

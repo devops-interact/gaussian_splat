@@ -1,2 +1,9 @@
-# Per-service build/deploy is configured in Railway for MESH-UP (api vs web).
-# See railway.frontend.toml for the web service reference config.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile.railway"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 3

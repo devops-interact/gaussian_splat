@@ -1,12 +1,14 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { DashboardLayout } from './components/layout/dashboard-layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import ProjectDetail from './pages/ProjectDetail';
-import ScanView from './pages/ScanView';
 import Settings from './pages/Settings';
 import './index.css';
+
+const ScanView = lazy(() => import('./pages/ScanView'));
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -21,6 +23,14 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     return <Navigate to="/login" replace />;
   }
   return <>{children}</>;
+}
+
+function ScanViewFallback() {
+  return (
+    <div className="flex items-center justify-center min-h-[50vh] text-gray-500">
+      Loading viewer...
+    </div>
+  );
 }
 
 function AppRoutes() {
@@ -62,7 +72,9 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <DashboardLayout>
-              <ScanView />
+              <Suspense fallback={<ScanViewFallback />}>
+                <ScanView />
+              </Suspense>
             </DashboardLayout>
           </ProtectedRoute>
         }
@@ -72,7 +84,9 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <DashboardLayout>
-              <ScanView />
+              <Suspense fallback={<ScanViewFallback />}>
+                <ScanView />
+              </Suspense>
             </DashboardLayout>
           </ProtectedRoute>
         }

@@ -3,7 +3,7 @@ API endpoints for job management
 """
 import json
 import logging
-from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Form, Depends, Request
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Depends, Request
 from fastapi.responses import FileResponse, Response
 from pathlib import Path
 from typing import Optional
@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from core.models import Job, JobStatus, VideoValidation
 from core.config import get_settings, QualityPreset, QUALITY_PRESETS
-from core.pipeline import process_job
+from jobs.worker import enqueue_job
 from jobs.job_manager import get_job_manager
 from services.video.validate import validate_video
 from database import get_db
@@ -21,6 +21,8 @@ from models.db_models import User
 
 import aiofiles
 
+UPLOAD_CHUNK_SIZE = 1024 * 1024  # 1 MiB
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 settings = get_settings()
@@ -28,7 +30,6 @@ settings = get_settings()
 
 @router.post("/upload")
 async def upload_video(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     quality_preset: str = Form(default="balanced"),
     project_id: Optional[int] = Form(default=None),
@@ -60,14 +61,26 @@ async def upload_video(
     video_path = settings.UPLOADS_DIR / video_filename
 
     try:
+        total_bytes = 0
         async with aiofiles.open(video_path, 'wb') as f:
-            content = await file.read()
-            await f.write(content)
+            while True:
+                chunk = await file.read(UPLOAD_CHUNK_SIZE)
+                if not chunk:
+                    break
+                total_bytes += len(chunk)
+                if total_bytes > settings.MAX_UPLOAD_SIZE:
+                    await f.close()
+                    video_path.unlink(missing_ok=True)
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File too large. Maximum: {settings.MAX_UPLOAD_SIZE // (1024 * 1024)}MB",
+                    )
+                await f.write(chunk)
 
         job.status = JobStatus.VALIDATING
         await job_manager.update_job(job)
 
-        validation_result = validate_video(video_path)
+        validation_result = validate_video(video_path, extraction_fps=preset_config.fps)
 
         job.validation = VideoValidation(
             valid=validation_result.valid,
@@ -117,7 +130,7 @@ async def upload_video(
                 scan.job_id = job.job_id
                 db.commit()
 
-        background_tasks.add_task(process_job, job)
+        await enqueue_job(job)
 
         response = {
             "job_id": job.job_id,
@@ -159,8 +172,8 @@ async def get_job_status(job_id: str, request: Request):
     if not job:
         client = request.client.host if request.client else None
         logger.warning(
-            "job_status_miss job_id=%s client_host=%s path=%s jobs_file=%s",
-            job_id, client, request.url.path, job_manager.jobs_file,
+            "job_status_miss job_id=%s client_host=%s path=%s",
+            job_id, client, request.url.path,
         )
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -193,7 +206,6 @@ async def get_job_status(job_id: str, request: Request):
             "file_size": md.file_size,
             "vertex_count": md.vertex_count,
             "face_count": md.face_count,
-            "point_count": md.point_count or md.vertex_count,
             "has_colors": md.has_colors,
             "has_pbr": md.has_pbr,
             "bounding_box": md.bounding_box,
@@ -261,6 +273,10 @@ async def get_preview_url(job_id: str):
 @router.post("/webhooks/meshy")
 async def meshy_webhook(request: Request):
     """Optional webhook for Meshy task completion (future use)."""
+    if settings.MESHY_WEBHOOK_SECRET:
+        token = request.headers.get("X-Meshy-Webhook-Secret", "")
+        if token != settings.MESHY_WEBHOOK_SECRET:
+            raise HTTPException(status_code=401, detail="Invalid webhook secret")
     body = await request.json()
     logger.info("Meshy webhook received: %s", json.dumps(body)[:500])
     return {"ok": True}

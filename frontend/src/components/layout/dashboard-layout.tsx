@@ -13,7 +13,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   const location = useLocation();
   const { user, logout } = useAuth();
 
-  const activeItem = location.pathname.startsWith('/dashboard') ? 'projects' : 'projects';
+  const activeItem = location.pathname.startsWith('/dashboard/settings') ? 'settings' : 'projects';
 
   const handleNavigate = (id: string) => {
     if (id === 'projects') navigate('/dashboard');

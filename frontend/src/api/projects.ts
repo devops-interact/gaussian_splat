@@ -1,12 +1,8 @@
 import axios from 'axios';
 import { getApiBaseUrl } from '../lib/apiBase';
+import { getAuthHeaders } from '../lib/authHeaders';
 
 const API_BASE_URL = getApiBaseUrl();
-
-const getAuthHeaders = () => {
-  const token = localStorage.getItem('token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
-};
 
 export interface Project {
   id: number;

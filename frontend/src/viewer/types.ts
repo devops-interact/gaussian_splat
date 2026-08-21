@@ -18,10 +18,8 @@ export interface ModelMetadata {
   hasColors: boolean;
   hasPbr: boolean;
   format: string;
-  /** Legacy alias */
+  /** Alias for vertexCount (legacy UI) */
   pointCount: number;
-  hasOpacity: boolean;
-  properties: string[];
 }
 
 export type ViewerMode = 'orbit' | 'walkthrough' | 'measure';

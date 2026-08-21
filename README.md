@@ -22,8 +22,8 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`docs/RAILWAY-RUNBOOK.md`](docs/RA
 ### 1. Build locally (optional)
 
 ```bash
-./build-and-push.sh          # API image
-./build-and-push.sh frontend # Web image
+./build-local.sh          # API image
+./build-local.sh frontend # Web image
 ```
 
 ### 2. Deploy API service
@@ -222,8 +222,6 @@ mesh-up/
 - **[ARCHITECTURE.md](./ARCHITECTURE.md)** — system architecture, Railway services, viewer features
 - **[docs/RAILWAY-RUNBOOK.md](./docs/RAILWAY-RUNBOOK.md)** — deploy and ops
 - **[docs/spike/meshy-vs-hi3d-decision.md](./docs/spike/meshy-vs-hi3d-decision.md)** — provider decision for MESH-UP
-- **[LongSplat_README.md](./LongSplat_README.md)** — legacy GPU pipeline (not used in production)
-
 ---
 
 ## Resources
