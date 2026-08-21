@@ -230,6 +230,67 @@ class JobManager:
         finally:
             db.close()
 
+        try:
+            import asyncio
+            asyncio.run(self._recover_meshy_errored_jobs())
+        except Exception as e:
+            logger.warning("Meshy error-job recovery failed: %s", e)
+
+    async def _recover_meshy_errored_jobs(self) -> None:
+        """Finalize ERROR jobs whose Meshy task completed after our poll timed out."""
+        from core.pipeline import finalize_meshy_result, _meshy_timeout_for_preset
+        from services.meshy.client import MeshyClient
+
+        cfg = get_settings()
+        if not cfg.MESHY_API_KEY:
+            return
+
+        recovered = 0
+        db = database.SessionLocal()
+        try:
+            records = db.query(JobRecord).filter(JobRecord.status == JobStatus.ERROR.value).all()
+            for record in records:
+                job = _record_to_job(record)
+                if not job.meshy_task_id:
+                    continue
+                glb_path = cfg.MODELS_DIR / f"{job.job_id}.glb"
+                if glb_path.exists():
+                    continue
+
+                preset = job.quality_preset or QualityPreset.BALANCED
+                client = MeshyClient(
+                    api_key=cfg.MESHY_API_KEY,
+                    poll_interval_s=cfg.MESHY_POLL_INTERVAL_S,
+                    timeout_s=_meshy_timeout_for_preset(preset),
+                )
+                try:
+                    task = await client.get_task(job.meshy_task_id)
+                except Exception as e:
+                    logger.warning("Meshy recovery poll failed for %s: %s", job.job_id, e)
+                    continue
+
+                if task.get("status", "").upper() != "SUCCEEDED":
+                    continue
+
+                try:
+                    job = await finalize_meshy_result(job, client, task, job.meshy_task_id)
+                    job.updated_at = datetime.now()
+                    _job_to_record(job, record)
+                    recovered += 1
+                    logger.info(
+                        "Recovered job %s from Meshy task %s",
+                        job.job_id,
+                        job.meshy_task_id,
+                    )
+                except Exception as e:
+                    logger.warning("Meshy recovery download failed for %s: %s", job.job_id, e)
+
+            if recovered:
+                db.commit()
+                logger.info("Recovered %d job(s) from completed Meshy tasks", recovered)
+        finally:
+            db.close()
+
 
 _job_manager: Optional[JobManager] = None
 

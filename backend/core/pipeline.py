@@ -63,6 +63,53 @@ def _extract_glb_metadata(glb_path: Path, thumbnail_url: Optional[str] = None) -
         )
 
 
+async def finalize_meshy_result(
+    job: Job,
+    client: MeshyClient,
+    result: dict,
+    task_id: str,
+    *,
+    processing_time_seconds: Optional[float] = None,
+) -> Job:
+    """Download GLB/OBJ from a succeeded Meshy task and mark the job completed."""
+    model_urls = result.get("model_urls") or {}
+    glb_url = model_urls.get("glb") or model_urls.get("pre_remeshed_glb")
+    if not glb_url:
+        raise MeshyError("Meshy task succeeded but no GLB URL returned")
+
+    glb_path = settings.MODELS_DIR / f"{job.job_id}.glb"
+    await client.download_file(glb_url, str(glb_path))
+
+    obj_url = model_urls.get("obj")
+    if obj_url:
+        obj_path = settings.MODELS_DIR / job.job_id / f"{job.job_id}.obj"
+        try:
+            await client.download_file(obj_url, str(obj_path))
+            job.model_url_obj = f"/static/models/{job.job_id}/{job.job_id}.obj"
+        except Exception as e:
+            logger.warning("Optional OBJ download failed: %s", e)
+
+    thumbnail_url = result.get("thumbnail_url")
+    metadata = _extract_glb_metadata(glb_path, thumbnail_url=thumbnail_url)
+    if metadata:
+        metadata.meshy_task_id = task_id
+        job.model_metadata = metadata
+
+    job.status = JobStatus.COMPLETED
+    job.progress = 1.0
+    job.model_filename = f"{job.job_id}.glb"
+    job.model_url = f"/api/jobs/{job.job_id}/model"
+    job.error_message = None
+    if processing_time_seconds is not None:
+        job.processing_time_seconds = processing_time_seconds
+    return job
+
+
+def _meshy_timeout_for_preset(preset: QualityPreset) -> float:
+    preset_config = QUALITY_PRESETS[preset]
+    return preset_config.meshy_timeout_s or settings.MESHY_TIMEOUT_S
+
+
 async def process_job(job: Job) -> Job:
     job_manager = get_job_manager()
     start_time = time.time()
@@ -76,9 +123,14 @@ async def process_job(job: Job) -> Job:
     try:
         preset = job.quality_preset or QualityPreset.BALANCED
         preset_config = QUALITY_PRESETS[preset]
-        logger.info("Processing job %s preset=%s", job.job_id, preset.value)
+        meshy_timeout = _meshy_timeout_for_preset(preset)
+        logger.info(
+            "Processing job %s preset=%s meshy_timeout_s=%s",
+            job.job_id,
+            preset.value,
+            meshy_timeout,
+        )
 
-        # Extract frames
         job.status = JobStatus.EXTRACTING_FRAMES
         job.progress = 0.15
         await job_manager.update_job(job)
@@ -87,7 +139,6 @@ async def process_job(job: Job) -> Job:
         frames_dir = settings.FRAMES_DIR / job.job_id
         await extract_frames(video_path, frames_dir, preset_config.fps)
 
-        # Select keyframes
         job.status = JobStatus.SELECTING_KEYFRAMES
         job.progress = 0.25
         await job_manager.update_job(job)
@@ -104,7 +155,6 @@ async def process_job(job: Job) -> Job:
         )
         image_urls = publish_keyframes(job.job_id, keyframes)
 
-        # Submit to Meshy
         job.status = JobStatus.SUBMITTING_RECONSTRUCTION
         job.progress = 0.35
         await job_manager.update_job(job)
@@ -112,7 +162,7 @@ async def process_job(job: Job) -> Job:
         client = MeshyClient(
             api_key=settings.MESHY_API_KEY,
             poll_interval_s=settings.MESHY_POLL_INTERVAL_S,
-            timeout_s=settings.MESHY_TIMEOUT_S,
+            timeout_s=meshy_timeout,
         )
 
         task_id = await client.create_multi_image_task(
@@ -139,39 +189,17 @@ async def process_job(job: Job) -> Job:
 
         result = await client.poll_until_complete(task_id, on_poll=on_poll)
 
-        # Download GLB
         job.status = JobStatus.DOWNLOADING_MODEL
         job.progress = 0.90
         await job_manager.update_job(job)
 
-        model_urls = result.get("model_urls") or {}
-        glb_url = model_urls.get("glb") or model_urls.get("pre_remeshed_glb")
-        if not glb_url:
-            raise MeshyError("Meshy task succeeded but no GLB URL returned")
-
-        glb_path = settings.MODELS_DIR / f"{job.job_id}.glb"
-        await client.download_file(glb_url, str(glb_path))
-
-        obj_url = model_urls.get("obj")
-        if obj_url:
-            obj_path = settings.MODELS_DIR / job.job_id / f"{job.job_id}.obj"
-            try:
-                await client.download_file(obj_url, str(obj_path))
-                job.model_url_obj = f"/static/models/{job.job_id}/{job.job_id}.obj"
-            except Exception as e:
-                logger.warning("Optional OBJ download failed: %s", e)
-
-        thumbnail_url = result.get("thumbnail_url")
-        metadata = _extract_glb_metadata(glb_path, thumbnail_url=thumbnail_url)
-        if metadata:
-            metadata.meshy_task_id = task_id
-            job.model_metadata = metadata
-
-        job.status = JobStatus.COMPLETED
-        job.progress = 1.0
-        job.model_filename = f"{job.job_id}.glb"
-        job.model_url = f"/api/jobs/{job.job_id}/model"
-        job.processing_time_seconds = round(time.time() - start_time, 1)
+        job = await finalize_meshy_result(
+            job,
+            client,
+            result,
+            task_id,
+            processing_time_seconds=round(time.time() - start_time, 1),
+        )
         await job_manager.update_job(job)
 
         logger.info(
@@ -182,6 +210,19 @@ async def process_job(job: Job) -> Job:
         )
         return job
 
+    except MeshyError as e:
+        msg = str(e)
+        if job.meshy_task_id and "timed out" in msg.lower():
+            msg = (
+                f"{msg} Meshy task ID: {job.meshy_task_id}. "
+                "The task may still finish on Meshy's side — restart the API to attempt "
+                "recovery, or re-upload the video."
+            )
+        logger.error("Error processing job %s: %s", job.job_id, msg, exc_info=True)
+        job.status = JobStatus.ERROR
+        job.error_message = msg
+        await job_manager.update_job(job)
+        return job
     except Exception as e:
         logger.error("Error processing job %s: %s", job.job_id, e, exc_info=True)
         job.status = JobStatus.ERROR

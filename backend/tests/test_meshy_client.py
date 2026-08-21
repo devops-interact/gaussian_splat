@@ -90,3 +90,46 @@ def test_create_rejects_too_many_images():
 
     with pytest.raises(MeshyError):
         asyncio.run(run())
+
+
+def test_poll_extends_deadline_at_late_progress():
+    client = MeshyClient(api_key="test-key", poll_interval_s=0.01, timeout_s=0.05)
+    call_count = 0
+
+    async def fake_get(task_id):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return {"status": "IN_PROGRESS", "progress": 99}
+        if call_count == 2:
+            return {"status": "SUCCEEDED", "progress": 100}
+        return {"status": "IN_PROGRESS", "progress": 99}
+
+    client.get_task = fake_get  # type: ignore
+
+    async def run():
+        return await client.poll_until_complete("task-late")
+
+    result = asyncio.run(run())
+    assert result["status"] == "SUCCEEDED"
+    assert call_count >= 2
+
+
+def test_poll_final_check_before_timeout():
+    client = MeshyClient(api_key="test-key", poll_interval_s=0.01, timeout_s=0.02)
+    call_count = 0
+
+    async def fake_get(task_id):
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 2:
+            return {"status": "IN_PROGRESS", "progress": 50}
+        return {"status": "SUCCEEDED", "progress": 100}
+
+    client.get_task = fake_get  # type: ignore
+
+    async def run():
+        return await client.poll_until_complete("task-final")
+
+    result = asyncio.run(run())
+    assert result["status"] == "SUCCEEDED"

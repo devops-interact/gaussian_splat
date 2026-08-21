@@ -30,6 +30,7 @@ class MeshyPresetConfig(BaseModel):
     should_remesh: bool = False
     ultra_mode: bool = False
     max_keyframes: int = 4
+    meshy_timeout_s: float = 600.0
 
 
 QUALITY_PRESETS: Dict[QualityPreset, MeshyPresetConfig] = {
@@ -41,6 +42,7 @@ QUALITY_PRESETS: Dict[QualityPreset, MeshyPresetConfig] = {
         ai_model="meshy-6",
         enable_pbr=False,
         target_polycount=30_000,
+        meshy_timeout_s=600.0,
     ),
     QualityPreset.BALANCED: MeshyPresetConfig(
         name="Balanced",
@@ -50,17 +52,19 @@ QUALITY_PRESETS: Dict[QualityPreset, MeshyPresetConfig] = {
         ai_model="meshy-7",
         enable_pbr=True,
         target_polycount=50_000,
+        meshy_timeout_s=900.0,
     ),
     QualityPreset.QUALITY: MeshyPresetConfig(
         name="Quality",
-        description="Highest fidelity (~8–12 min). 4K textures, ultra mode.",
+        description="Highest fidelity (~15–25 min). 4K textures, ultra mode.",
         fps=1.0,
-        estimated_minutes=12,
+        estimated_minutes=22,
         ai_model="meshy-7",
         enable_pbr=True,
         texture_resolution="4k",
         target_polycount=100_000,
         ultra_mode=True,
+        meshy_timeout_s=1800.0,
     ),
 }
 

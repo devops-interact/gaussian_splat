@@ -14,6 +14,8 @@ logger = logging.getLogger(__name__)
 MESHY_BASE = "https://api.meshy.ai"
 DEFAULT_POLL_INTERVAL_S = 5.0
 DEFAULT_TIMEOUT_S = 600.0
+LATE_PROGRESS_THRESHOLD = 95
+LATE_PROGRESS_EXTENSION_S = 300.0
 
 
 class MeshyError(Exception):
@@ -100,21 +102,59 @@ class MeshyClient:
         on_poll=None,
     ) -> Dict[str, Any]:
         deadline = asyncio.get_event_loop().time() + self.timeout_s
-        while asyncio.get_event_loop().time() < deadline:
-            task = await self.get_task(task_id)
-            if on_poll is not None:
-                await on_poll(task)
-            status = task.get("status", "").upper()
-            progress = task.get("progress", 0)
-            logger.info("Meshy task %s status=%s progress=%s", task_id, status, progress)
+        extended_late = False
 
+        def _check_task(task: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+            status = task.get("status", "").upper()
             if status == "SUCCEEDED":
                 return task
             if status == "FAILED":
                 err = task.get("task_error") or task.get("message") or task
                 raise MeshyError(f"Meshy task failed: {err}")
+            return None
+
+        while asyncio.get_event_loop().time() < deadline:
+            task = await self.get_task(task_id)
+            if on_poll is not None:
+                await on_poll(task)
+            status = task.get("status", "").upper()
+            progress = task.get("progress", 0) or 0
+            logger.info("Meshy task %s status=%s progress=%s", task_id, status, progress)
+
+            done = _check_task(task)
+            if done is not None:
+                return done
+
+            if (
+                not extended_late
+                and status == "IN_PROGRESS"
+                and progress >= LATE_PROGRESS_THRESHOLD
+            ):
+                deadline += LATE_PROGRESS_EXTENSION_S
+                extended_late = True
+                logger.info(
+                    "Meshy task %s at %s%% — extended polling deadline by %ss",
+                    task_id,
+                    progress,
+                    LATE_PROGRESS_EXTENSION_S,
+                )
 
             await asyncio.sleep(self.poll_interval_s)
+
+        task = await self.get_task(task_id)
+        if on_poll is not None:
+            await on_poll(task)
+        status = task.get("status", "").upper()
+        progress = task.get("progress", 0)
+        logger.info(
+            "Meshy task %s final poll status=%s progress=%s",
+            task_id,
+            status,
+            progress,
+        )
+        done = _check_task(task)
+        if done is not None:
+            return done
 
         raise MeshyError(f"Meshy task {task_id} timed out after {self.timeout_s}s")
 
