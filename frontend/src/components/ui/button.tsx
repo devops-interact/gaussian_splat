@@ -5,16 +5,16 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-    "inline-flex items-center justify-center whitespace-nowrap rounded-lg text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#efe752]/40 focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:pointer-events-none disabled:opacity-50",
+    "inline-flex items-center justify-center whitespace-nowrap rounded-lg text-sm font-medium transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/25 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-950 disabled:pointer-events-none disabled:opacity-50",
     {
         variants: {
             variant: {
-                default: "bg-[#efe752]/15 text-[#efe752] border border-[#efe752]/40 hover:bg-[#efe752]/25 hover:border-[#efe752]/55 active:bg-[#efe752]/30 shadow-md hover:shadow-lg shadow-[#efe752]/5",
+                default: "bg-white/10 text-white border border-white/20 hover:bg-white/15 hover:border-white/30 active:bg-white/20 shadow-md hover:shadow-lg shadow-white/5",
                 destructive: "bg-red-500/12 text-red-400 border border-red-500/19 hover:bg-red-500/20 hover:border-red-500/25 active:bg-red-500/25 shadow-md hover:shadow-lg",
-                outline: "border border-white/[0.22] bg-transparent text-gray-300 hover:bg-white/[0.06] hover:text-white hover:border-white/[0.34]",
-                secondary: "bg-black text-gray-300 border border-white/[0.18] hover:bg-white/[0.08] hover:text-white",
-                ghost: "text-gray-400 hover:bg-white/[0.06] hover:text-white",
-                link: "text-[#efe752] underline-offset-4 hover:underline hover:text-[#efe752]/80",
+                outline: "border border-white/15 bg-transparent text-neutral-300 hover:bg-white/5 hover:text-white hover:border-white/25",
+                secondary: "bg-neutral-900 text-neutral-300 border border-white/10 hover:bg-white/8 hover:text-white",
+                ghost: "text-neutral-400 hover:bg-white/5 hover:text-white",
+                link: "text-white underline-offset-4 hover:underline hover:text-neutral-300",
             },
             size: {
                 default: "h-11 px-6 py-3",

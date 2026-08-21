@@ -62,23 +62,23 @@ export default function TechnicalDetails({ metadata, jobInfo, embedded }: Techni
     <>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-base font-mono flex items-center gap-2">
-            <Grid3X3 className="w-4 h-4 text-[#efe752]" />
+          <CardTitle className="text-base flex items-center gap-2">
+            <Grid3X3 className="w-4 h-4 text-white" />
             Metadata
           </CardTitle>
           {/* Status indicator */}
           {metadata ? (
-            <span className="flex items-center gap-1.5 text-[10px] font-mono text-[#efe752] bg-[#efe752]/[0.08] px-2 py-0.5 rounded border border-[#efe752]/[0.38]">
+            <span className="flex items-center gap-1.5 text-[10px] text-white bg-white/[0.08] px-2 py-0.5 rounded border border-white/[0.38]">
               <CheckCircle className="w-3 h-3" />
               Ready
             </span>
           ) : isProcessing ? (
-            <span className="flex items-center gap-1.5 text-[10px] font-mono text-[#f5ec99] bg-[#f5ec99]/[0.08] px-2 py-0.5 rounded border border-[#f5ec99]/[0.19]">
+            <span className="flex items-center gap-1.5 text-[10px] text-neutral-300 bg-neutral-300/[0.08] px-2 py-0.5 rounded border border-neutral-300/[0.19]">
               <Loader2 className="w-3 h-3 animate-spin" />
               Processing
             </span>
           ) : (
-            <span className="flex items-center gap-1.5 text-[10px] font-mono text-gray-500 bg-white/[0.03] px-2 py-0.5 rounded border border-white/[0.18]">
+            <span className="flex items-center gap-1.5 text-[10px] text-gray-500 bg-white/[0.03] px-2 py-0.5 rounded border border-white/[0.18]">
               Idle
             </span>
           )}
@@ -99,7 +99,7 @@ export default function TechnicalDetails({ metadata, jobInfo, embedded }: Techni
               label="PBR Materials"
               value={
                 details.hasPbr ? (
-                  <span className="flex items-center gap-1"><CheckCircle className="w-3 h-3 text-[#efe752]" /> Yes</span>
+                  <span className="flex items-center gap-1"><CheckCircle className="w-3 h-3 text-white" /> Yes</span>
                 ) : (
                   <span className="text-gray-500">No</span>
                 )
@@ -108,7 +108,7 @@ export default function TechnicalDetails({ metadata, jobInfo, embedded }: Techni
             <DetailRow icon={<HardDrive className="w-3.5 h-3.5" />} label="Format" value={details.format} />
           </div>
         ) : (
-          <div className="text-center text-gray-600 text-sm py-6 font-mono">
+          <div className="text-center text-gray-600 text-sm py-6">
             Load a model to see metadata
           </div>
         )}
@@ -136,11 +136,11 @@ function DetailRow({
 }) {
   return (
     <div className="flex items-center justify-between py-2.5 px-1">
-      <span className="text-gray-500 text-xs font-mono flex items-center gap-2">
+      <span className="text-gray-500 text-xs flex items-center gap-2">
         {icon}
         {label}
       </span>
-      <span className={`text-white text-xs font-mono font-medium ${capitalize ? 'capitalize' : ''}`}>
+      <span className={`text-white text-xs font-medium ${capitalize ? 'capitalize' : ''}`}>
         {value}
       </span>
     </div>

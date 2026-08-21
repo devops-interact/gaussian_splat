@@ -1,6 +1,8 @@
 import { ImportMeshAsync } from '@babylonjs/core/Loading/sceneLoader';
 import type { AbstractMesh, Scene } from '@babylonjs/core';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
+import '@babylonjs/loaders/glTF/glTFFileLoader';
+import '@babylonjs/loaders/glTF/2.0/glTFLoader';
 import axios from 'axios';
 import { isCancel } from 'axios';
 
@@ -29,6 +31,17 @@ export async function importGlbBuffer(
   buffer: ArrayBuffer,
   name: string = 'room_mesh',
 ): Promise<{ rootMesh: AbstractMesh; allMeshes: AbstractMesh[] }> {
+  const magic = new Uint8Array(buffer, 0, Math.min(4, buffer.byteLength));
+  const isGlb =
+    magic.length === 4 &&
+    magic[0] === 0x67 &&
+    magic[1] === 0x6c &&
+    magic[2] === 0x54 &&
+    magic[3] === 0x46;
+  if (!isGlb) {
+    throw new Error('Model response is not a valid GLB file (check API proxy or auth)');
+  }
+
   const blob = new Blob([buffer], { type: 'model/gltf-binary' });
   const file = URL.createObjectURL(blob);
 

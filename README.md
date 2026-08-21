@@ -168,11 +168,13 @@ The scan viewer loads **GLB meshes** with orbit, walkthrough, mesh raycast measu
 
 | Hex | Role |
 |---|---|
-| `#000000` | Base background |
-| `#08080f` | Elevated surfaces |
-| `#121008` | Cards, inputs |
-| `#efe752` | Primary accent (chartreuse) |
-| `#f5ec99` | Secondary accent (soft yellow) |
+| `#0a0a0a` | Base background (`neutral-950`) |
+| `#111111` | Cards, inputs (`neutral-900`) |
+| `#fafafa` | Primary text (`neutral-50`) |
+| `#a3a3a3` | Secondary text (`neutral-400`) |
+| `#ffffff` | Accent / primary actions |
+
+Typography: **Space Grotesk** (all UI).
 
 ---
 

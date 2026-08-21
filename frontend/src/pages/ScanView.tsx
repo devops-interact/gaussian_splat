@@ -132,11 +132,14 @@ export default function ScanView() {
             <ArrowLeft className="w-4 h-4" />
           </button>
           <div>
-            <h2 className="text-xl font-bold tracking-tight text-white mb-1 font-mono">
+            <h2 className="text-xl font-bold tracking-tight text-white mb-1">
               3D Reconstruction
             </h2>
             <p className="text-gray-600 text-sm max-w-2xl">
-              Upload video scans to generate AI-reconstructed 3D room meshes via Meshy.
+              Upload video scans to generate AI-reconstructed 3D meshes via Meshy.
+            </p>
+            <p className="text-gray-700 text-xs max-w-2xl mt-1">
+              Current output: single-object mesh from 1–4 keyframes. Full room scanning coming soon.
             </p>
           </div>
         </div>
@@ -146,7 +149,7 @@ export default function ScanView() {
             <button
               onClick={() => setDownloadOpen(!downloadOpen)}
               disabled={downloading}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-[#efe752]/[0.1] text-[#efe752] border border-[#efe752]/40 hover:bg-[#efe752]/[0.18] hover:border-[#efe752]/55 transition-all duration-200 text-sm font-mono font-medium disabled:opacity-50"
+              className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-white/[0.1] text-white border border-white/40 hover:bg-white/[0.18] hover:border-white/55 transition-all duration-200 text-sm font-medium disabled:opacity-50"
             >
               <Download className="w-4 h-4" />
               <span className="hidden sm:inline">Export</span>
@@ -154,14 +157,14 @@ export default function ScanView() {
             </button>
 
             {downloadOpen && (
-              <div className="absolute right-0 top-full mt-2 w-56 rounded-xl bg-black border border-white/[0.22] shadow-2xl shadow-black/50 backdrop-blur-xl z-50 overflow-hidden">
+              <div className="absolute right-0 top-full mt-2 w-56 rounded-xl bg-neutral-950 border border-white/[0.22] shadow-2xl shadow-black/50 backdrop-blur-xl z-50 overflow-hidden">
                 <div className="p-1.5">
                   <button
                     onClick={() => handleDownload(false)}
                     disabled={downloading}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-mono text-white/70 hover:text-white hover:bg-white/[0.06] transition-colors group"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm text-white/70 hover:text-white hover:bg-white/[0.06] transition-colors group"
                   >
-                    <FileBox className="w-4 h-4 text-[#efe752]/50 group-hover:text-[#efe752]" />
+                    <FileBox className="w-4 h-4 text-white/50 group-hover:text-white" />
                     <div>
                       <span className="block text-white/80 group-hover:text-white">.glb</span>
                       <span className="block text-[10px] text-white/30">Textured mesh</span>
@@ -169,7 +172,7 @@ export default function ScanView() {
                   </button>
                   <button
                     onClick={handleObjDownload}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm font-mono text-white/70 hover:text-white hover:bg-white/[0.06] transition-colors group"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm text-white/70 hover:text-white hover:bg-white/[0.06] transition-colors group"
                   >
                     <FileCode className="w-4 h-4 text-amber-400/50 group-hover:text-amber-400" />
                     <div>
@@ -187,7 +190,7 @@ export default function ScanView() {
       <div className="flex flex-col lg:flex-row gap-4 lg:items-start">
         <div className="w-full lg:w-2/3 flex-shrink-0">
           {modelUrl ? (
-            <div className="rounded-xl overflow-hidden border border-[#efe752]/[0.26] bg-black h-[400px] sm:h-[520px] lg:h-[calc(100vh-160px)] shadow-2xl shadow-[#efe752]/[0.03]">
+            <div className="rounded-xl overflow-hidden border border-white/[0.26] bg-neutral-950 h-[400px] sm:h-[520px] lg:h-[calc(100vh-160px)] shadow-2xl shadow-white/[0.03]">
               <Viewer3D
                 modelUrl={modelUrl}
                 jobId={jobId}
@@ -196,12 +199,12 @@ export default function ScanView() {
               />
             </div>
           ) : (
-            <Card className="h-[300px] sm:h-[400px] lg:h-[calc(100vh-160px)] flex items-center justify-center border-dashed border-2 border-white/[0.22] bg-black">
+            <Card className="h-[300px] sm:h-[400px] lg:h-[calc(100vh-160px)] flex items-center justify-center border-dashed border-2 border-white/[0.22] bg-neutral-950">
               <CardContent className="text-center text-gray-600">
-                <div className="w-16 h-16 rounded-2xl bg-black/50 flex items-center justify-center mx-auto mb-4 border border-white/[0.18]">
+                <div className="w-16 h-16 rounded-2xl bg-neutral-950/50 flex items-center justify-center mx-auto mb-4 border border-white/[0.18]">
                   <Box className="w-8 h-8 text-gray-700" />
                 </div>
-                <h3 className="text-base font-medium text-gray-500 mb-1 font-mono">3D Viewer</h3>
+                <h3 className="text-base font-medium text-gray-500 mb-1">3D Viewer</h3>
                 <p className="text-sm text-gray-600 max-w-xs mx-auto">
                   Upload a video to start reconstruction. Your 3D model will appear here.
                 </p>
@@ -228,7 +231,7 @@ export default function ScanView() {
               />
             ) : (
               <div className="p-6 text-center text-gray-600">
-                <p className="text-sm font-mono">No active job</p>
+                <p className="text-sm">No active job</p>
                 <p className="text-xs text-gray-700 mt-1">Upload a video to start processing</p>
               </div>
             )}

@@ -26,7 +26,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   };
 
   return (
-    <div className="h-screen w-full bg-black flex overflow-hidden">
+    <div className="h-screen w-full bg-neutral-950 flex overflow-hidden">
       <Sidebar
         activeItem={activeItem}
         onNavigate={handleNavigate}
@@ -34,17 +34,17 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
         onLogout={handleLogout}
       />
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="sticky top-0 z-30 w-full border-b border-white/[0.18] bg-black/80 backdrop-blur-md">
+        <header className="sticky top-0 z-30 w-full border-b border-white/[0.18] bg-neutral-950/80 backdrop-blur-md">
           <div className="max-w-[1600px] mx-auto px-6 h-14 flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <h1 className="text-lg font-mono font-bold text-[#efe752] tracking-tighter">
+              <h1 className="text-lg font-bold text-white tracking-tighter">
                 {BRAND_NAME}
               </h1>
-              <span className="text-[10px] font-mono text-gray-600 border border-[#efe752]/[0.32] rounded px-1.5 py-0.5 text-[#efe752]/50">
+              <span className="text-[10px] text-gray-600 border border-white/[0.32] rounded px-1.5 py-0.5 text-white/50">
                 {BRAND_VERSION}
               </span>
             </div>
-            <span className="text-xs font-mono text-gray-500">{BRAND_TAGLINE}</span>
+            <span className="text-xs text-gray-500">{BRAND_TAGLINE}</span>
           </div>
         </header>
 

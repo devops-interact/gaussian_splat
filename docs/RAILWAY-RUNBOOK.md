@@ -9,7 +9,7 @@ Two Railway services in one project:
 | **api** | `Dockerfile.railway` | e.g. `https://api-production-xxxx.up.railway.app` |
 | **web** | `Dockerfile.frontend.railway` | e.g. `https://web-production-xxxx.up.railway.app` |
 
-Users hit **web**; nginx proxies `/api` and `/static` to **api**.
+Users hit **web**; nginx proxies `/health`, `/api`, and `/static` to **api**.
 
 ## 1. Deploy API service
 

@@ -9,64 +9,47 @@ const config: Config = {
     theme: {
         extend: {
             colors: {
-                // Brand color scheme (dark + chartreuse primary)
-                // #000000  — base black
-                // Surfaces unified to #000000 (flat black UI)
-                // #efe752  — primary accent
-                // #f5ec99  — secondary soft yellow
                 brand: {
-                    green: '#efe752', // key kept for existing `brand-green` usage
-                    lavender: '#f5ec99',
+                    green: '#ffffff',
+                    lavender: '#d4d4d4',
                 },
                 primary: {
-                    DEFAULT: '#000000',
-                    400: '#efe752',
-                    500: '#e5dd4a',
-                    600: '#d4cc48',
+                    DEFAULT: '#0a0a0a',
+                    400: '#fafafa',
+                    500: '#f5f5f5',
+                    600: '#e5e5e5',
                 },
                 surface: {
-                    primary: '#000000',
-                    secondary: '#000000',
-                    tertiary: '#000000',
-                    elevated: '#000000',
+                    primary: '#0a0a0a',
+                    secondary: '#111111',
+                    tertiary: '#171717',
+                    elevated: '#1a1a1a',
                 },
                 border: {
-                    primary: 'rgba(255, 255, 255, 0.075)',
-                    secondary: 'rgba(255, 255, 255, 0.05)',
-                    accent: '#efe752',
-                },
-                secondary: {
-                    50: '#f8fafc',
-                    100: '#f1f5f9',
-                    200: '#e2e8f0',
-                    300: '#cbd5e1',
-                    400: '#94a3b8',
-                    500: '#64748b',
-                    600: '#475569',
-                    700: '#334155',
-                    800: '#1e293b',
-                    900: '#0f172a',
+                    primary: 'rgba(255, 255, 255, 0.12)',
+                    secondary: 'rgba(255, 255, 255, 0.08)',
+                    accent: 'rgba(255, 255, 255, 0.25)',
                 },
             },
             fontFamily: {
-                sans: ['JetBrains Mono', 'monospace'],
-                mono: ['JetBrains Mono', 'monospace'],
+                sans: ['"Space Grotesk"', 'system-ui', 'sans-serif'],
+                mono: ['"Space Grotesk"', 'system-ui', 'sans-serif'],
             },
             spacing: {
                 '18': '4.5rem',
                 '88': '22rem',
             },
             backgroundColor: {
-                'app-primary': '#000000',
-                'app-secondary': '#000000',
-                'app-tertiary': '#000000',
-                'app-elevated': '#000000',
-                'app-card': '#000000',
+                'app-primary': '#0a0a0a',
+                'app-secondary': '#111111',
+                'app-tertiary': '#171717',
+                'app-elevated': '#1a1a1a',
+                'app-card': '#111111',
             },
             borderColor: {
-                'app-primary': 'rgba(255, 255, 255, 0.075)',
-                'app-secondary': 'rgba(255, 255, 255, 0.05)',
-                'app-accent': '#efe752',
+                'app-primary': 'rgba(255, 255, 255, 0.12)',
+                'app-secondary': 'rgba(255, 255, 255, 0.08)',
+                'app-accent': 'rgba(255, 255, 255, 0.25)',
             },
             animation: {
                 'fade-in': 'fadeIn 0.5s ease-in-out',

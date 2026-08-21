@@ -22,9 +22,9 @@ export function ApiConfigBanner() {
       <div className="flex gap-3">
         <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-400" />
         <div className="space-y-1 text-sm">
-          <p className="font-mono font-semibold text-amber-200">API not configured</p>
+          <p className="font-semibold text-amber-200">API not configured</p>
           <p className="text-amber-100/80 leading-snug">{result.detail}</p>
-          <p className="text-amber-100/60 text-xs font-mono pt-1">
+          <p className="text-amber-100/60 text-xs pt-1">
             Demo login only works after the backend is reachable.
           </p>
         </div>

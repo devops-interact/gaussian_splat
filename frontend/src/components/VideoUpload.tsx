@@ -117,8 +117,8 @@ export default function VideoUpload({ onUploadSuccess, jobStarted = false, proje
 
   const videoSummary =
     videoInfo && (
-      <div className="flex items-center p-3 rounded-lg bg-[#efe752]/[0.06] border border-[#efe752]/48 text-[#f5ec99] text-sm font-mono">
-        <FileVideo className="w-4 h-4 mr-2 shrink-0 text-[#efe752]/80" />
+      <div className="flex items-center p-3 rounded-lg bg-white/[0.06] border border-white/48 text-neutral-300 text-sm">
+        <FileVideo className="w-4 h-4 mr-2 shrink-0 text-white/80" />
         <span>
           Video: {videoInfo.duration.toFixed(1)}s • {videoInfo.resolution} • {videoInfo.fps.toFixed(1)} fps
         </span>
@@ -179,14 +179,14 @@ export default function VideoUpload({ onUploadSuccess, jobStarted = false, proje
                 className={cn(
                   'flex flex-col items-start p-3 rounded-lg border text-left transition-all duration-200',
                   selectedPreset === preset.id
-                    ? 'border-[#efe752]/48 bg-[#efe752]/[0.06] text-[#efe752]'
-                    : 'border-white/[0.22] bg-black/50 text-gray-400 hover:border-[#efe752]/[0.32] hover:bg-white/[0.06]',
+                    ? 'border-white/48 bg-white/[0.06] text-white'
+                    : 'border-white/[0.22] bg-neutral-950/50 text-gray-400 hover:border-white/[0.32] hover:bg-white/[0.06]',
                   uploading && 'opacity-50 cursor-not-allowed'
                 )}
               >
                 <div className="flex items-center justify-between w-full mb-1">
                   <span className="font-semibold text-sm">{preset.name}</span>
-                  {selectedPreset === preset.id && <CheckCircle className="w-3 h-3 text-[#efe752]" />}
+                  {selectedPreset === preset.id && <CheckCircle className="w-3 h-3 text-white" />}
                 </div>
                 <span className="text-xs opacity-70 mb-2 flex items-center">
                   <Clock className="w-3 h-3 mr-1" /> {preset.time}
@@ -201,11 +201,11 @@ export default function VideoUpload({ onUploadSuccess, jobStarted = false, proje
         <div
           className={cn(
             'border-2 border-dashed rounded-xl p-5 flex flex-col items-center justify-center text-center transition-all',
-            'border-white/[0.22] bg-black/40 hover:bg-white/[0.08] hover:border-[#efe752]/[0.38]',
+            'border-white/[0.22] bg-neutral-950/40 hover:bg-white/[0.08] hover:border-white/[0.38]',
             uploading && 'opacity-50 pointer-events-none'
           )}
         >
-          <div className="w-10 h-10 rounded-full bg-black flex items-center justify-center mb-3 border border-white/[0.18]">
+          <div className="w-10 h-10 rounded-full bg-neutral-950 flex items-center justify-center mb-3 border border-white/[0.18]">
             <Upload className="w-5 h-5 text-gray-400" />
           </div>
 

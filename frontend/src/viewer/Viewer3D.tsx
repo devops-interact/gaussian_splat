@@ -226,17 +226,17 @@ export default function Viewer3D({
   if (!modelUrl) return null;
 
   return (
-    <div className="w-full h-full relative group bg-black rounded-xl overflow-hidden">
+    <div className="w-full h-full relative group bg-neutral-950 rounded-xl overflow-hidden">
       <canvas ref={canvasRef} className="w-full h-full block touch-none" />
 
       {isLoading && !error && (
-        <div className="absolute inset-0 flex items-center justify-center z-20 bg-black/80">
+        <div className="absolute inset-0 flex items-center justify-center z-20 bg-neutral-950/80">
           <div className="flex flex-col items-center gap-3 w-48">
-            <div className="w-8 h-8 border-2 border-[#efe752]/35 border-t-[#efe752] rounded-full animate-spin" />
-            <span className="text-[#f5ec99]/70 font-mono text-xs text-center">{loadLabel}</span>
+            <div className="w-8 h-8 border-2 border-white/35 border-t-white rounded-full animate-spin" />
+            <span className="text-neutral-300/70 text-xs text-center">{loadLabel}</span>
             {loadPhase === 'fetching' && (
               <div className="w-full h-1 bg-white/10 rounded overflow-hidden">
-                <div className="h-full bg-[#efe752]/70 transition-all" style={{ width: `${loadProgress}%` }} />
+                <div className="h-full bg-white/70 transition-all" style={{ width: `${loadProgress}%` }} />
               </div>
             )}
           </div>
@@ -244,7 +244,7 @@ export default function Viewer3D({
       )}
 
       {error && (
-        <div className="absolute top-12 left-3 right-3 z-30 bg-red-900/80 backdrop-blur-md text-white text-xs p-3 rounded-lg border border-red-500/38 font-mono break-all">
+        <div className="absolute top-12 left-3 right-3 z-30 bg-red-900/80 backdrop-blur-md text-white text-xs p-3 rounded-lg border border-red-500/38 break-all">
           <span className="text-red-300 font-bold">Viewer Error: </span>{error}
         </div>
       )}
@@ -256,14 +256,14 @@ export default function Viewer3D({
               type="button"
               disabled={downloadBusy}
               onClick={() => void handleDownloadGlb()}
-              className="p-2 rounded-lg border font-mono text-xs flex items-center gap-2 shadow-lg bg-black/75 border-white/[0.18] text-white/60 hover:text-white"
+              className="p-2 rounded-lg border text-xs flex items-center gap-2 shadow-lg bg-neutral-950/75 border-white/[0.18] text-white/60 hover:text-white"
             >
               <Download className="w-4 h-4" /> {downloadBusy ? '…' : 'GLB'}
             </button>
           </div>
 
           <div className="absolute top-3 left-3 z-10">
-            <div className="bg-black/70 backdrop-blur-md text-white/80 text-xs px-3 py-1.5 rounded-lg border border-white/[0.18] font-mono flex items-center gap-2">
+            <div className="bg-neutral-950/70 backdrop-blur-md text-white/80 text-xs px-3 py-1.5 rounded-lg border border-white/[0.18] flex items-center gap-2">
               {mode === 'orbit' && <><MousePointer className="w-3 h-3" /> Orbit</>}
               {mode === 'walkthrough' && <><Footprints className="w-3 h-3" /> Walk-Through</>}
               {mode === 'measure' && <><Ruler className="w-3 h-3" /> Measure</>}
@@ -311,7 +311,7 @@ export default function Viewer3D({
           )}
 
           <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-10">
-            <div className="bg-black/70 backdrop-blur-md text-white/50 text-[10px] px-3 py-1.5 rounded-lg border border-white/[0.18] font-mono">
+            <div className="bg-neutral-950/70 backdrop-blur-md text-white/50 text-[10px] px-3 py-1.5 rounded-lg border border-white/[0.18]">
               {mode === 'orbit' && 'Left: Orbit  |  Shift+Drag / Right: Pan  |  Scroll: Zoom'}
               {mode === 'walkthrough' && 'WASD: Move  |  Mouse: Look  |  Space/Shift: Up/Down'}
               {mode === 'measure' && 'Click mesh surface · Esc/right-click undo'}
@@ -320,7 +320,7 @@ export default function Viewer3D({
 
           {showHelp && (
             <div className="absolute top-14 right-3 z-20 w-64">
-              <div className="bg-black/95 backdrop-blur-md border border-white/[0.18] rounded-xl p-4 text-xs text-white/70 space-y-3">
+              <div className="bg-neutral-950/95 backdrop-blur-md border border-white/[0.18] rounded-xl p-4 text-xs text-white/70 space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold text-white text-sm">Viewer Controls</span>
                   <button type="button" onClick={() => setShowHelp(false)} className="text-white/40 hover:text-white"><X className="w-3 h-3" /></button>
@@ -359,9 +359,9 @@ function MeasurePanel(props: {
 
   return (
     <div className="absolute top-3 left-1/2 -translate-x-1/2 z-10 max-w-[min(100vw-1.5rem,42rem)]">
-      <div className="bg-black/80 backdrop-blur-md border border-white/[0.18] rounded-xl px-4 py-2.5 flex flex-col gap-1.5 font-mono text-xs">
+      <div className="bg-neutral-950/80 backdrop-blur-md border border-white/[0.18] rounded-xl px-4 py-2.5 flex flex-col gap-1.5 text-xs">
         <div className="flex flex-wrap items-center gap-3">
-          <span className={`text-[10px] px-1.5 py-0.5 rounded ${measurePhase === 'calibrate' ? 'bg-[#f5ec99]/15 text-[#f5ec99]' : 'bg-[#efe752]/15 text-[#efe752]'}`}>
+          <span className={`text-[10px] px-1.5 py-0.5 rounded ${measurePhase === 'calibrate' ? 'bg-neutral-300/15 text-neutral-300' : 'bg-white/15 text-white'}`}>
             {measurePhase === 'calibrate' ? 'STEP 1: Calibrate' : 'STEP 2: Measure'}
           </span>
           <div className="border-l border-white/[0.18] h-5" />
@@ -385,9 +385,9 @@ function MeasurePanel(props: {
               {calibPoints.length === 2 && (
                 <>
                   <div className="border-l border-white/[0.18] h-5" />
-                  <input type="number" step="0.01" min="0.01" value={meterInput} onChange={(e) => setMeterInput(e.target.value)} className="w-16 bg-black border border-white/[0.22] rounded px-1.5 py-0.5 text-white text-xs text-center" />
+                  <input type="number" step="0.01" min="0.01" value={meterInput} onChange={(e) => setMeterInput(e.target.value)} className="w-16 bg-neutral-950 border border-white/[0.22] rounded px-1.5 py-0.5 text-white text-xs text-center" />
                   <span className="text-white/40">m</span>
-                  <button type="button" onClick={onConfirmCalibration} className="px-2 py-0.5 rounded bg-[#efe752]/15 text-[#efe752] border border-[#efe752]/40">Confirm</button>
+                  <button type="button" onClick={onConfirmCalibration} className="px-2 py-0.5 rounded bg-white/15 text-white border border-white/40">Confirm</button>
                 </>
               )}
             </>
@@ -405,7 +405,7 @@ function MeasurePanel(props: {
               {measuredDistance !== null && (
                 <>
                   <div className="border-l border-white/[0.18] h-5" />
-                  <span className="text-[#efe752] text-sm font-semibold">{measuredDistance.toFixed(3)} m</span>
+                  <span className="text-white text-sm font-semibold">{measuredDistance.toFixed(3)} m</span>
                 </>
               )}
               {measurePoints.length > 0 && (
@@ -415,7 +415,7 @@ function MeasurePanel(props: {
                   <button type="button" onClick={onClearMeasure} className="text-white/40 hover:text-white"><Trash2 className="w-3 h-3" /></button>
                 </>
               )}
-              <button type="button" onClick={onResetCalibration} className="text-[#f5ec99]/60 text-[10px]">Recalibrate</button>
+              <button type="button" onClick={onResetCalibration} className="text-neutral-300/60 text-[10px]">Recalibrate</button>
               {calibration && <span className="text-white/20 text-[9px]">(1u = {calibration.scaleFactor.toFixed(3)}m)</span>}
             </>
           )}
@@ -430,10 +430,10 @@ function ToolbarButton({ icon, label, active, onClick }: {
   icon: React.ReactNode; label: string; active?: boolean; onClick: () => void;
 }) {
   const color = active
-    ? 'bg-[#efe752]/15 text-[#efe752] border-[#efe752]/40'
-    : 'bg-black/70 text-white/50 border-white/[0.22] hover:text-white hover:bg-white/[0.06]';
+    ? 'bg-white/15 text-white border-white/40'
+    : 'bg-neutral-950/70 text-white/50 border-white/[0.22] hover:text-white hover:bg-white/[0.06]';
   return (
-    <button type="button" onClick={onClick} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-mono transition-all duration-150 border ${color} backdrop-blur-md`} title={label}>
+    <button type="button" onClick={onClick} className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] transition-all duration-150 border ${color} backdrop-blur-md`} title={label}>
       {icon}<span>{label}</span>
     </button>
   );

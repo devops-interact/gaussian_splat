@@ -3,19 +3,19 @@
 @tailwind utilities;
 
 :root {
-  --font-primary: 'JetBrains Mono', monospace;
-  --foreground-rgb: 255, 255, 255;
-  --background-start-rgb: 0, 0, 0;
-  --background-end-rgb: 0, 0, 0;
-  --brand-green: #efe752; /* key name kept for compatibility */
-  --brand-lavender: #f5ec99;
+  --font-primary: 'Space Grotesk', system-ui, sans-serif;
+  --foreground-rgb: 250, 250, 250;
+  --background-start-rgb: 10, 10, 10;
+  --background-end-rgb: 10, 10, 10;
+  --brand-accent: #ffffff;
+  --brand-muted: #a3a3a3;
 }
 
 @layer base {
   *,
   *::before,
   *::after {
-    border-color: rgba(255, 255, 255, 0.075);
+    border-color: rgba(255, 255, 255, 0.1);
   }
 
   html {
@@ -23,14 +23,13 @@
   }
 
   body {
-    background-color: #000000;
-    color: #e5e5e5;
+    background-color: #0a0a0a;
+    color: #fafafa;
     font-family: var(--font-primary);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Dark scrollbars — brand accent tint */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -39,62 +38,58 @@
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: rgba(239, 231, 82, 0.12);
+    background: rgba(255, 255, 255, 0.12);
     border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: rgba(239, 231, 82, 0.25);
+    background: rgba(255, 255, 255, 0.22);
   }
   ::-webkit-scrollbar-corner {
     background: transparent;
   }
 
-  /* Firefox scrollbar */
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgba(239, 231, 82, 0.12) transparent;
+    scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
   }
 
-  /* Form controls */
   input,
   textarea,
   select {
-    background-color: #000000;
-    color: #e5e5e5;
-    border-color: rgba(255, 255, 255, 0.10);
+    background-color: #111111;
+    color: #fafafa;
+    border-color: rgba(255, 255, 255, 0.12);
   }
   input::placeholder,
   textarea::placeholder {
-    color: rgba(255, 255, 255, 0.25);
+    color: rgba(255, 255, 255, 0.35);
   }
   input:focus,
   textarea:focus,
   select:focus {
     outline: none;
-    border-color: rgba(239, 231, 82, 0.5);
-    box-shadow: 0 0 0 2px rgba(239, 231, 82, 0.1);
+    border-color: rgba(255, 255, 255, 0.35);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
   }
 
-  /* Selection */
   ::selection {
-    background: rgba(239, 231, 82, 0.28);
-    color: #000000;
+    background: rgba(255, 255, 255, 0.18);
+    color: #ffffff;
   }
 }
 
-/* Custom Utilities */
 @layer utilities {
   .glass-panel {
-    @apply bg-black/40 backdrop-blur-md border border-white/[0.18];
+    @apply bg-neutral-950/60 backdrop-blur-md border border-white/10;
   }
 
   .glass-button {
-    @apply bg-white/5 hover:bg-white/8 border border-white/[0.18] transition-all duration-200;
+    @apply bg-white/5 hover:bg-white/10 border border-white/10 transition-all duration-200;
   }
 
   .scrollbar-thin {
     scrollbar-width: thin;
-    scrollbar-color: rgba(239, 231, 82, 0.08) transparent;
+    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
   }
   .scrollbar-thin::-webkit-scrollbar {
     width: 4px;
@@ -103,15 +98,14 @@
     background: transparent;
   }
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    background: rgba(239, 231, 82, 0.08);
+    background: rgba(255, 255, 255, 0.1);
     border-radius: 2px;
   }
   .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    background: rgba(239, 231, 82, 0.18);
+    background: rgba(255, 255, 255, 0.18);
   }
 }
 
-/* Canvas context menu suppression */
 canvas {
   -webkit-touch-callout: none;
 }

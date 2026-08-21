@@ -59,7 +59,7 @@ export default function ProjectDetail() {
 
   const statusColor = (s: string | null) => {
     if (!s) return 'text-gray-500';
-    if (s === 'completed') return 'text-[#efe752]';
+    if (s === 'completed') return 'text-white';
     if (s === 'error') return 'text-red-400';
     return 'text-amber-400';
   };
@@ -82,7 +82,7 @@ export default function ProjectDetail() {
           <ArrowLeft className="w-4 h-4" />
         </button>
         <div>
-          <h2 className="text-xl font-bold tracking-tight text-white font-mono">{project.name}</h2>
+          <h2 className="text-xl font-bold tracking-tight text-white">{project.name}</h2>
           <p className="text-gray-600 text-sm">
             {project.scan_count} scan{project.scan_count !== 1 ? 's' : ''}
           </p>
@@ -93,7 +93,7 @@ export default function ProjectDetail() {
         <p className="text-gray-500 text-sm">Scans in this project</p>
         <button
           onClick={handleNewScan}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-[#efe752] text-black font-mono font-semibold hover:bg-[#e5dd4a] transition-colors"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white text-black font-semibold hover:bg-neutral-200 transition-colors"
         >
           <Plus className="w-4 h-4" />
           New Scan
@@ -101,13 +101,13 @@ export default function ProjectDetail() {
       </div>
 
       {scans.length === 0 ? (
-        <div className="rounded-xl border-2 border-dashed border-white/[0.22] bg-black/50 p-12 text-center">
+        <div className="rounded-xl border-2 border-dashed border-white/[0.22] bg-neutral-950/50 p-12 text-center">
           <ScanIcon className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-          <p className="text-gray-500 font-mono mb-2">No scans yet</p>
+          <p className="text-gray-500 mb-2">No scans yet</p>
           <p className="text-gray-600 text-sm mb-4">Create a scan to upload a video and start 3D reconstruction</p>
           <button
             onClick={handleNewScan}
-            className="px-4 py-2 rounded-lg bg-[#efe752] text-black font-mono font-medium"
+            className="px-4 py-2 rounded-lg bg-white text-black font-medium"
           >
             New Scan
           </button>
@@ -117,11 +117,11 @@ export default function ProjectDetail() {
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="rounded-xl border-2 border-dashed border-[#efe752]/42 bg-[#efe752]/[0.03] p-6 flex flex-col items-center justify-center min-h-[140px] hover:border-[#efe752]/55 hover:bg-[#efe752]/[0.06] transition-colors cursor-pointer"
+            className="rounded-xl border-2 border-dashed border-white/42 bg-white/[0.03] p-6 flex flex-col items-center justify-center min-h-[140px] hover:border-white/55 hover:bg-white/[0.06] transition-colors cursor-pointer"
             onClick={handleNewScan}
           >
-            <Plus className="w-8 h-8 text-[#efe752] mb-2" />
-            <span className="font-mono text-sm text-[#efe752]">New Scan</span>
+            <Plus className="w-8 h-8 text-white mb-2" />
+            <span className="text-sm text-white">New Scan</span>
           </motion.div>
           <AnimatePresence>
             {scans.map((s, i) => (
@@ -131,14 +131,14 @@ export default function ProjectDetail() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0 }}
                 transition={{ delay: i * 0.05 }}
-                className="relative rounded-xl border border-white/[0.22] bg-black p-4 hover:border-[#efe752]/[0.38] transition-colors group"
+                className="relative rounded-xl border border-white/[0.22] bg-neutral-950 p-4 hover:border-white/[0.38] transition-colors group"
               >
                 <button
                   onClick={() => navigate(`/projects/${projectId}/scans/${s.id}`)}
                   className="block w-full text-left"
                 >
                   <div className="flex items-start justify-between mb-2">
-                    <ScanIcon className="w-8 h-8 text-[#efe752]/50" />
+                    <ScanIcon className="w-8 h-8 text-white/50" />
                     <button
                       onClick={(e) => { e.stopPropagation(); setMenuOpen(menuOpen === s.id ? null : s.id); }}
                       className="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-white/[0.06] text-gray-400"
@@ -146,19 +146,19 @@ export default function ProjectDetail() {
                       <MoreVertical className="w-4 h-4" />
                     </button>
                   </div>
-                  <h3 className="font-mono font-semibold text-white mb-1">
+                  <h3 className="font-semibold text-white mb-1">
                     {s.name || `Scan ${s.id}`}
                   </h3>
-                  <p className={`text-xs font-mono ${statusColor(s.status)}`}>
+                  <p className={`text-xs ${statusColor(s.status)}`}>
                     {s.status || 'No video yet'}
                   </p>
                   <p className="text-gray-600 text-xs mt-1">{formatDate(s.created_at)}</p>
                 </button>
                 {menuOpen === s.id && (
-                  <div className="absolute right-2 top-12 z-10 rounded-lg bg-black border border-white/[0.22] shadow-xl py-1 min-w-[120px]">
+                  <div className="absolute right-2 top-12 z-10 rounded-lg bg-neutral-950 border border-white/[0.22] shadow-xl py-1 min-w-[120px]">
                     <button
                       onClick={() => handleDeleteScan(s.id)}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-red-400 hover:bg-red-500/10 text-sm font-mono"
+                      className="w-full flex items-center gap-2 px-3 py-2 text-red-400 hover:bg-red-500/10 text-sm"
                     >
                       <Trash2 className="w-3 h-3" />
                       Delete
