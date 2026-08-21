@@ -13,6 +13,17 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules/@babylonjs')) {
+            return 'babylon';
+          }
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

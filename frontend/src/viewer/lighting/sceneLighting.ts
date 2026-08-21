@@ -15,9 +15,4 @@ export function setupSceneLighting(scene: Scene): void {
   dir.position = new Vector3(6, 10, 6);
 
   scene.environmentIntensity = 1;
-  scene.createDefaultEnvironment({
-    createGround: false,
-    groundSize: 0,
-    skyboxSize: 0,
-  });
 }

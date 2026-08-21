@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Color4, Engine, Scene, Vector3 } from '@babylonjs/core';
+import '@/viewer/babylonSetup';
 import { UtilityLayerRenderer } from '@babylonjs/core/Rendering/utilityLayerRenderer';
 import { isAxiosError, isCancel } from 'axios';
 import { getApiBaseUrl } from '@/lib/apiBase';

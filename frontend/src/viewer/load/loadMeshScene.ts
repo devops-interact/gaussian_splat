@@ -1,11 +1,6 @@
 import { ImportMeshAsync } from '@babylonjs/core/Loading/sceneLoader';
 import type { AbstractMesh, Scene } from '@babylonjs/core';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
-import '@babylonjs/loaders/glTF/glTFFileLoader';
-import '@babylonjs/loaders/glTF/2.0/glTFLoader';
-import '@babylonjs/loaders/glTF/2.0/Extensions/EXT_meshopt_compression';
-import '@babylonjs/loaders/glTF/2.0/Extensions/EXT_texture_webp';
-import '@babylonjs/loaders/glTF/2.0/Extensions/KHR_draco_mesh_compression';
 import axios from 'axios';
 import { isCancel } from 'axios';
 import { getAuthHeaders } from '@/lib/authHeaders';
