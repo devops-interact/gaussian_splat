@@ -48,21 +48,30 @@ def _seed_demo_user():
 
         from core.brand import DEMO_EMAIL
 
+        LEGACY_DEMO_EMAIL = "demo@gaussian-splat.demo"
         pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
         db = SessionLocal()
         try:
             existing = db.query(User).filter(User.email == DEMO_EMAIL).first()
-            if not existing:
-                demo_user = User(
-                    email=DEMO_EMAIL,
-                    password_hash=pwd_context.hash("demo123"),
-                    is_demo=True,
-                )
-                db.add(demo_user)
-                db.commit()
-                logger.info("Demo user seeded successfully")
-            else:
+            if existing:
                 logger.info("Demo user already exists")
+                return
+
+            legacy = db.query(User).filter(User.email == LEGACY_DEMO_EMAIL).first()
+            if legacy:
+                legacy.email = DEMO_EMAIL
+                db.commit()
+                logger.info("Migrated legacy demo user to %s", DEMO_EMAIL)
+                return
+
+            demo_user = User(
+                email=DEMO_EMAIL,
+                password_hash=pwd_context.hash("demo123"),
+                is_demo=True,
+            )
+            db.add(demo_user)
+            db.commit()
+            logger.info("Demo user seeded successfully")
         finally:
             db.close()
     except Exception as e:
