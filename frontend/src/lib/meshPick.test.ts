@@ -1,10 +1,55 @@
 import { describe, expect, it } from 'vitest';
-import { maxMeshPickDistance } from './meshPick';
+import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
+import { NullEngine } from '@babylonjs/core/Engines/nullEngine';
+import { Scene } from '@babylonjs/core/scene';
+import { Vector3 } from '@babylonjs/core/Maths/math.vector';
+import { maxMeshPickDistance, snapToTriangleCorner } from './meshPick';
 
 describe('maxMeshPickDistance', () => {
   it('returns half diagonal with minimum floor', () => {
     const d = maxMeshPickDistance({ min: [0, 0, 0], max: [10, 0, 0] });
     expect(d).toBeGreaterThanOrEqual(0.05);
     expect(d).toBe(5);
+  });
+});
+
+describe('snapToTriangleCorner', () => {
+  it('returns nearest triangle corner in world space', () => {
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+    const mesh = MeshBuilder.CreateBox('test', { size: 1 }, scene);
+
+    const faceId = 0;
+    const nearCorner = new Vector3(0.5, 0.5, 0.5);
+    const snapped = snapToTriangleCorner(mesh, faceId, nearCorner);
+
+    expect(snapped).not.toBeNull();
+    const corners = [
+      new Vector3(-0.5, -0.5, -0.5),
+      new Vector3(0.5, -0.5, -0.5),
+      new Vector3(0.5, 0.5, -0.5),
+      new Vector3(-0.5, 0.5, -0.5),
+      new Vector3(-0.5, -0.5, 0.5),
+      new Vector3(0.5, -0.5, 0.5),
+      new Vector3(0.5, 0.5, 0.5),
+      new Vector3(-0.5, 0.5, 0.5),
+    ];
+    const minDist = Math.min(...corners.map((c) => Vector3.Distance(c, snapped!)));
+    expect(minDist).toBeLessThan(0.01);
+
+    scene.dispose();
+    engine.dispose();
+  });
+
+  it('returns null for invalid face id', () => {
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+    const mesh = MeshBuilder.CreateBox('test', { size: 1 }, scene);
+
+    expect(snapToTriangleCorner(mesh, -1, Vector3.Zero())).toBeNull();
+    expect(snapToTriangleCorner(mesh, 9999, Vector3.Zero())).toBeNull();
+
+    scene.dispose();
+    engine.dispose();
   });
 });

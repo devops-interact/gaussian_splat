@@ -1,4 +1,5 @@
-import type { AbstractMesh, Scene, Vector3 } from '@babylonjs/core';
+import { Vector3, VertexBuffer } from '@babylonjs/core';
+import type { AbstractMesh, Scene } from '@babylonjs/core';
 
 export interface PickResult {
   position: Vector3;
@@ -12,6 +13,49 @@ export interface MeshPickResult {
   mesh: AbstractMesh | null;
 }
 
+const OVERLAY_MESH_NAMES = new Set(['viewerGrid', 'collision_proxy']);
+
+function isMeasurableMesh(mesh: AbstractMesh): boolean {
+  return mesh.isPickable && !OVERLAY_MESH_NAMES.has(mesh.name);
+}
+
+/**
+ * Snap a world-space hit to the nearest corner of the picked triangle.
+ */
+export function snapToTriangleCorner(
+  mesh: AbstractMesh,
+  faceId: number,
+  worldPoint: Vector3,
+): Vector3 | null {
+  const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
+  const indices = mesh.getIndices();
+  if (!positions || !indices || faceId < 0) return null;
+
+  const base = faceId * 3;
+  if (base + 2 >= indices.length) return null;
+
+  const wm = mesh.getWorldMatrix();
+  const corners: Vector3[] = [];
+  for (let i = 0; i < 3; i++) {
+    const vi = indices[base + i];
+    const px = positions[vi * 3];
+    const py = positions[vi * 3 + 1];
+    const pz = positions[vi * 3 + 2];
+    corners.push(Vector3.TransformCoordinates(new Vector3(px, py, pz), wm));
+  }
+
+  let best = corners[0];
+  let bestDist = Vector3.DistanceSquared(worldPoint, best);
+  for (let i = 1; i < corners.length; i++) {
+    const d = Vector3.DistanceSquared(worldPoint, corners[i]);
+    if (d < bestDist) {
+      bestDist = d;
+      best = corners[i];
+    }
+  }
+  return best.clone();
+}
+
 /**
  * Raycast against loaded mesh geometry for measurement picking.
  */
@@ -19,25 +63,15 @@ export function pickMeshSurface(
   scene: Scene,
   x: number,
   y: number,
-  rootMesh: AbstractMesh | null,
 ): MeshPickResult {
-  if (!rootMesh) {
-    return { hit: false, point: null, mesh: null };
-  }
-
   const ray = scene.createPickingRay(x, y, null, scene.activeCamera);
   if (!ray) {
     return { hit: false, point: null, mesh: null };
   }
 
-  const hit = scene.pickWithRay(ray, (mesh) => mesh.isPickable && mesh !== rootMesh.parent);
-  if (hit?.hit && hit.pickedPoint) {
+  const hit = scene.pickWithRay(ray, (mesh) => isMeasurableMesh(mesh));
+  if (hit?.hit && hit.pickedPoint && hit.pickedMesh) {
     return { hit: true, point: hit.pickedPoint.clone(), mesh: hit.pickedMesh };
-  }
-
-  const anyHit = scene.pickWithRay(ray);
-  if (anyHit?.hit && anyHit.pickedPoint) {
-    return { hit: true, point: anyHit.pickedPoint.clone(), mesh: anyHit.pickedMesh };
   }
 
   return { hit: false, point: null, mesh: null };
@@ -47,14 +81,31 @@ export function pickMeshMeasure(
   scene: Scene,
   x: number,
   y: number,
-  rootMesh: AbstractMesh | null,
 ): PickResult | null {
-  const result = pickMeshSurface(scene, x, y, rootMesh);
-  if (!result.hit || !result.point) return null;
+  const ray = scene.createPickingRay(x, y, null, scene.activeCamera);
+  if (!ray) return null;
+
+  const hit = scene.pickWithRay(ray, (mesh) => isMeasurableMesh(mesh));
+  if (!hit?.hit || !hit.pickedPoint || !hit.pickedMesh) return null;
+
+  const faceId = hit.faceId;
+  const snapped =
+    faceId >= 0
+      ? snapToTriangleCorner(hit.pickedMesh, faceId, hit.pickedPoint)
+      : null;
+
+  if (!snapped) {
+    return {
+      position: hit.pickedPoint.clone(),
+      isSnapped: false,
+      mesh: hit.pickedMesh,
+    };
+  }
+
   return {
-    position: result.point,
+    position: snapped,
     isSnapped: true,
-    mesh: result.mesh,
+    mesh: hit.pickedMesh,
   };
 }
 

@@ -3,6 +3,9 @@ import type { AbstractMesh, Scene } from '@babylonjs/core';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import '@babylonjs/loaders/glTF/glTFFileLoader';
 import '@babylonjs/loaders/glTF/2.0/glTFLoader';
+import '@babylonjs/loaders/glTF/2.0/Extensions/EXT_meshopt_compression';
+import '@babylonjs/loaders/glTF/2.0/Extensions/EXT_texture_webp';
+import '@babylonjs/loaders/glTF/2.0/Extensions/KHR_draco_mesh_compression';
 import axios from 'axios';
 import { isCancel } from 'axios';
 import { getAuthHeaders } from '@/lib/authHeaders';
@@ -32,7 +35,7 @@ export async function importGlbBuffer(
   scene: Scene,
   buffer: ArrayBuffer,
   name: string = 'room_mesh',
-): Promise<{ rootMesh: AbstractMesh; allMeshes: AbstractMesh[] }> {
+): Promise<{ rootMesh: AbstractMesh; allMeshes: AbstractMesh[]; geometryMeshes: AbstractMesh[] }> {
   const magic = new Uint8Array(buffer, 0, Math.min(4, buffer.byteLength));
   const isGlb =
     magic.length === 4 &&
@@ -54,7 +57,8 @@ export async function importGlbBuffer(
     });
 
     const meshes = result.meshes.filter((m) => m.isVisible);
-    const root = result.meshes[0];
+    const geometryMeshes = meshes.filter((m) => m.getTotalVertices() > 0);
+    const root = geometryMeshes[0] ?? meshes[0];
     if (!root) {
       throw new Error('GLB import produced no meshes');
     }
@@ -63,7 +67,7 @@ export async function importGlbBuffer(
       mesh.isPickable = true;
     }
 
-    return { rootMesh: root, allMeshes: meshes };
+    return { rootMesh: root, allMeshes: meshes, geometryMeshes };
   } finally {
     URL.revokeObjectURL(file);
   }

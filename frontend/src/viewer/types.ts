@@ -54,6 +54,7 @@ export interface BabylonViewerCtx {
   orbitCamera: ArcRotateCamera;
   walkCamera: UniversalCamera;
   rootMesh: AbstractMesh | null;
+  geometryMeshes: AbstractMesh[];
   collisionMesh: AbstractMesh | null;
   utilityLayer: UtilityLayerRenderer;
   framingBehavior: FramingBehavior;

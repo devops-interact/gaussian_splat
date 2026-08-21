@@ -10,8 +10,9 @@ import type { ModelMetadata } from '@/components/Viewer3D';
 import type { ModelMetadataResponse } from '@/types/job';
 import { Card, CardContent } from '@/components/ui/card';
 import { Box, Download, ChevronDown, FileBox, FileCode, ArrowLeft } from 'lucide-react';
-import { downloadModel } from '@/api/jobs';
+import { downloadModel, getJobStatus } from '@/api/jobs';
 import { getScan } from '@/api/scans';
+import { JobStatus as JobStatusEnum } from '@/types/job';
 import { getApiBaseUrl } from '@/lib/apiBase';
 
 export default function ScanView() {
@@ -49,6 +50,26 @@ export default function ScanView() {
       })
       .catch(() => setScan(null));
   }, [projectIdNum, scanId, isNewScan]);
+
+  // Hydrate viewer for completed jobs on page reload
+  useEffect(() => {
+    if (!jobId || modelUrl) return;
+    let cancelled = false;
+    getJobStatus(jobId)
+      .then((response) => {
+        if (cancelled) return;
+        if (response.status === JobStatusEnum.COMPLETED && response.model_url) {
+          setModelUrl(response.model_url);
+          setObjUrl(response.model_url_obj ?? null);
+          setPrefetchedJobModelMetadata(response.model_metadata ?? null);
+          if (response.quality_preset) setJobQualityPreset(response.quality_preset);
+        }
+      })
+      .catch(() => { /* JobStatus component will retry */ });
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId, modelUrl]);
 
   useEffect(() => {
     if (!downloadOpen) return;

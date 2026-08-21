@@ -87,9 +87,9 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
     const canvas = canvasRef.current;
     if (loadPhase !== 'ready' || !ctx || !canvas) return;
 
-    const { scene, utilityLayer, rootMesh } = ctx;
+    const { scene, utilityLayer } = ctx;
     const camera = scene.activeCamera;
-    if (!camera || !rootMesh) return;
+    if (!camera) return;
 
     const pickWorldFromEvent = (e: MouseEvent): PickResult | null => {
       const pickW = canvas.width;
@@ -109,7 +109,7 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
       mouseX = Math.max(0, Math.min(pickW, mouseX));
       mouseY = Math.max(0, Math.min(pickH, mouseY));
 
-      return pickMeshMeasure(scene, mouseX, mouseY, rootMesh);
+      return pickMeshMeasure(scene, mouseX, mouseY);
     };
 
     const gizmo = new MeasurePreviewGizmo(utilityLayer, worldUnitRef.current ?? 0.024);

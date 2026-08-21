@@ -25,6 +25,7 @@ import {
   modelMetadataFromJobResponse,
 } from '../load/loadMeshScene';
 import { addSceneOverlays } from '../overlays/sceneOverlays';
+import { setupSceneLighting } from '../lighting/sceneLighting';
 import { showInspectorIfRequested, resetInspectorFlag } from '../dev/inspector';
 import type { BabylonViewerCtx, LoadPhase, ModelMetadata, StoredCameraPose } from '../types';
 
@@ -91,6 +92,7 @@ export function useMeshViewer({
     const scene = new Scene(engine);
     scene.clearColor = new Color4(0, 0, 0, 1);
     scene.collisionsEnabled = true;
+    setupSceneLighting(scene);
 
     const sceneScale = parseViewerSceneScale();
     sceneScaleRef.current = sceneScale;
@@ -121,6 +123,7 @@ export function useMeshViewer({
       orbitCamera,
       walkCamera,
       rootMesh: null,
+      geometryMeshes: [],
       collisionMesh: null,
       utilityLayer,
       framingBehavior,
@@ -170,11 +173,15 @@ export function useMeshViewer({
         setLoadPhase('parsing');
         setLoadLabel('Loading mesh…');
 
-        const { rootMesh } = await importGlbBuffer(scene, buffer);
+        const { rootMesh, geometryMeshes } = await importGlbBuffer(scene, buffer);
         if (disposed) return;
 
         if (sceneScale !== 1) rootMesh.scaling.setAll(sceneScale);
         rootMesh.computeWorldMatrix(true);
+        for (const gm of geometryMeshes) {
+          if (sceneScale !== 1) gm.scaling.setAll(sceneScale);
+          gm.computeWorldMatrix(true);
+        }
 
         const collisionMesh = createCollisionProxy(scene, rootMesh);
         collisionMesh.scaling.copyFrom(rootMesh.scaling);
@@ -194,7 +201,8 @@ export function useMeshViewer({
         metadataRef.current = modelMeta;
         onMetadataRef.current?.(modelMeta);
 
-        frameCameraOnMesh(orbitCamera, [rootMesh]);
+        const frameTargets = geometryMeshes.length > 0 ? geometryMeshes : [rootMesh];
+        frameCameraOnMesh(orbitCamera, frameTargets);
         initialPoseRef.current = storeCameraPose(orbitCamera);
 
         viewerRef.current = {
@@ -203,6 +211,7 @@ export function useMeshViewer({
           orbitCamera,
           walkCamera,
           rootMesh,
+          geometryMeshes,
           collisionMesh,
           utilityLayer,
           framingBehavior,
