@@ -11,6 +11,11 @@ import {
   makeOverlayMaterial,
 } from './colors';
 
+const SCRATCH_TO_CAMERA = new Vector3();
+const SCRATCH_RIGHT = new Vector3();
+const SCRATCH_LOCAL_UP = new Vector3();
+const WORLD_UP = Vector3.Up();
+
 /**
  * Persistent hover-preview gizmo on the utility layer — no depth-write hacks.
  */
@@ -58,16 +63,17 @@ export class MeasurePreviewGizmo {
   update(pick: PickResult, cameraPosition: Vector3, previousWorld: Vector3 | null): void {
     if (this.disposed) return;
     const { position, isSnapped } = pick;
-    const hasCenterId = isSnapped;
     const mat = isSnapped ? this.snappedMat : this.unsnappedMat;
     const lineColor = isSnapped ? MEASURE_PREVIEW_YELLOW_LINES : MEASURE_PREVIEW_RED;
     const camDist = Vector3.Distance(cameraPosition, position);
     const scaleBase = Math.max(0.01, camDist * 0.012);
-    const scale = hasCenterId && isSnapped ? scaleBase * 1.2 : scaleBase;
+    const scale = isSnapped ? scaleBase * 1.2 : scaleBase;
 
     this.ring.position.copyFrom(position);
     this.ring.scaling.setAll(scale);
-    this.ring.lookAt(cameraPosition);
+    if (Vector3.DistanceSquared(cameraPosition, position) > 1e-8) {
+      this.ring.lookAt(cameraPosition);
+    }
     this.ring.material = mat;
     this.ring.visibility = isSnapped ? 0.75 : 0.4;
     this.ring.setEnabled(true);
@@ -79,18 +85,33 @@ export class MeasurePreviewGizmo {
     this.dot.setEnabled(true);
 
     const halfLen = scale * 1.2;
-    const toCamera = cameraPosition.subtract(position).normalize();
-    const right = Vector3.Cross(toCamera, Vector3.Up()).normalize();
-    const localUp = Vector3.Cross(right, toCamera).normalize();
+    SCRATCH_TO_CAMERA.copyFrom(cameraPosition).subtractInPlace(position);
+    if (SCRATCH_TO_CAMERA.lengthSquared() < 1e-10) {
+      this.hide();
+      return;
+    }
+    SCRATCH_TO_CAMERA.normalize();
 
-    this.linePts[0].copyFrom(position).addInPlace(right.scale(-halfLen));
-    this.linePts[1].copyFrom(position).addInPlace(right.scale(halfLen));
+    const upRef = Math.abs(Vector3.Dot(SCRATCH_TO_CAMERA, WORLD_UP)) > 0.99
+      ? Vector3.Right()
+      : WORLD_UP;
+    Vector3.CrossToRef(SCRATCH_TO_CAMERA, upRef, SCRATCH_RIGHT);
+    if (SCRATCH_RIGHT.lengthSquared() < 1e-10) {
+      this.hide();
+      return;
+    }
+    SCRATCH_RIGHT.normalize();
+    Vector3.CrossToRef(SCRATCH_RIGHT, SCRATCH_TO_CAMERA, SCRATCH_LOCAL_UP);
+    SCRATCH_LOCAL_UP.normalize();
+
+    this.linePts[0].copyFrom(position).addInPlace(SCRATCH_RIGHT.scale(-halfLen));
+    this.linePts[1].copyFrom(position).addInPlace(SCRATCH_RIGHT.scale(halfLen));
     MeshBuilder.CreateLines('measureH', { points: this.linePts, instance: this.hLine });
     this.hLine.color = lineColor;
     this.hLine.setEnabled(true);
 
-    this.linePts[0].copyFrom(position).addInPlace(localUp.scale(-halfLen));
-    this.linePts[1].copyFrom(position).addInPlace(localUp.scale(halfLen));
+    this.linePts[0].copyFrom(position).addInPlace(SCRATCH_LOCAL_UP.scale(-halfLen));
+    this.linePts[1].copyFrom(position).addInPlace(SCRATCH_LOCAL_UP.scale(halfLen));
     MeshBuilder.CreateLines('measureV', { points: this.linePts, instance: this.vLine });
     this.vLine.color = lineColor;
     this.vLine.alpha = isSnapped ? 0.6 : 0.3;

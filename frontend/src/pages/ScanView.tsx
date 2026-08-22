@@ -73,21 +73,24 @@ export default function ScanView() {
 
   // Hydrate viewer for completed jobs on page reload
   useEffect(() => {
-    if (!jobId || modelUrl) return;
+    if (!jobId || modelUrl || sceneManifest?.zones?.length) return;
     let cancelled = false;
     getJobStatus(jobId)
       .then(async (response) => {
         if (cancelled) return;
         if (response.status === JobStatusEnum.COMPLETED && (response.model_url || response.scene_manifest?.zones?.length)) {
-          if (response.model_url) setModelUrl(response.model_url);
-          setObjUrl(response.model_url_obj ?? null);
-          setPrefetchedJobModelMetadata(response.model_metadata ?? null);
-          setKeyframes(response.keyframes ?? []);
           const manifest = await resolveSceneManifest(
             response.scene_manifest,
             response.total_zones,
           );
-          if (!cancelled) setSceneManifest(manifest);
+          if (cancelled) return;
+          const isRoomScene = (manifest?.zones?.length ?? 0) > 0;
+          if (!isRoomScene && response.model_url) setModelUrl(response.model_url);
+          else setModelUrl('');
+          setObjUrl(response.model_url_obj ?? null);
+          setPrefetchedJobModelMetadata(response.model_metadata ?? null);
+          setKeyframes(response.keyframes ?? []);
+          setSceneManifest(manifest);
           if (response.quality_preset) setJobQualityPreset(response.quality_preset);
           if (response.processing_time_seconds) setProcessingTimeSeconds(response.processing_time_seconds);
           if (response.meshy_task_id) setMeshyTaskId(response.meshy_task_id);
@@ -97,7 +100,7 @@ export default function ScanView() {
     return () => {
       cancelled = true;
     };
-  }, [jobId, modelUrl, resolveSceneManifest]);
+  }, [jobId, modelUrl, sceneManifest?.zones?.length, resolveSceneManifest]);
 
   useEffect(() => {
     if (!downloadOpen) return;
@@ -119,14 +122,19 @@ export default function ScanView() {
       quality_preset?: string;
       total_zones?: number;
     }) => {
-      setModelUrl(url);
-      setObjUrl(objUrlResp ?? null);
-      setPrefetchedJobModelMetadata(jobMeta ?? null);
-      if (statusExtras?.keyframes) setKeyframes(statusExtras.keyframes);
       const manifest = await resolveSceneManifest(
         statusExtras?.scene_manifest,
         statusExtras?.total_zones,
       );
+      const isRoomScene = (manifest?.zones?.length ?? 0) > 0;
+      if (isRoomScene) {
+        setModelUrl('');
+      } else {
+        setModelUrl(url);
+      }
+      setObjUrl(objUrlResp ?? null);
+      setPrefetchedJobModelMetadata(jobMeta ?? null);
+      if (statusExtras?.keyframes) setKeyframes(statusExtras.keyframes);
       setSceneManifest(manifest);
       if (statusExtras?.processing_time_seconds) setProcessingTimeSeconds(statusExtras.processing_time_seconds);
       if (statusExtras?.meshy_task_id) setMeshyTaskId(statusExtras.meshy_task_id);

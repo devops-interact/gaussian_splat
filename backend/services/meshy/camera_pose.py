@@ -9,7 +9,9 @@ from typing import Mapping, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
-COVERAGE_MIN_SPAN_DEG = 200.0
+COVERAGE_MIN_SPAN_DEG = 240.0
+COVERAGE_MIN_ZONES = 3
+DOMINANT_ZONE_MAX_FRACTION = 0.75
 COVERAGE_ACTIONABLE_MSG = (
     "Record at least 30 seconds while slowly panning 360° from the center of the room."
 )
@@ -196,18 +198,37 @@ def measure_yaw_coverage(
     }
 
 
+def dominant_zone_fraction(
+    yaw_by_index: Mapping[int, float],
+    n_zones: int,
+) -> tuple[int, float]:
+    """Return (dominant_zone_id, fraction_of_frames_in_that_zone)."""
+    if not yaw_by_index or n_zones <= 0:
+        return 0, 1.0
+    bucket = 360.0 / n_zones
+    counts: dict[int, int] = {i: 0 for i in range(n_zones)}
+    for yaw in yaw_by_index.values():
+        zid = int(float(yaw) % 360.0 // bucket) % n_zones
+        counts[zid] = counts.get(zid, 0) + 1
+    total = len(yaw_by_index)
+    dominant = max(counts, key=counts.get)
+    return dominant, counts[dominant] / total
+
+
 def validate_room_coverage(
     yaw_by_index: Mapping[int, float],
     n_zones: int,
     *,
     used_uniform_fallback: bool,
     min_span_deg: float = COVERAGE_MIN_SPAN_DEG,
-    min_zones: int = 3,
+    min_zones: int = COVERAGE_MIN_ZONES,
 ) -> None:
     """Fail fast before Meshy when walkthrough coverage is insufficient."""
     coverage = measure_yaw_coverage(yaw_by_index, n_zones)
     span_deg = float(coverage["span_deg"])
+    total_rotation = float(coverage.get("total_rotation_deg", span_deg))
     zones_populated = int(coverage["zones_populated"])
+    _, dominant_frac = dominant_zone_fraction(yaw_by_index, n_zones)
 
     if used_uniform_fallback:
         raise ValueError(
@@ -215,12 +236,24 @@ def validate_room_coverage(
             + COVERAGE_ACTIONABLE_MSG
         )
 
-    if span_deg >= min_span_deg or zones_populated >= min_zones:
+    if dominant_frac > DOMINANT_ZONE_MAX_FRACTION:
+        raise ValueError(
+            "Video looks like a single-object shot, not a room walkthrough. "
+            "Use the Object preset for equipment scans, or pan slowly 360° "
+            "from the center of the room with walls visible."
+        )
+
+    if total_rotation >= min_span_deg and zones_populated >= min_zones:
         return
 
+    if total_rotation < min_span_deg:
+        raise ValueError(
+            f"Insufficient 360° pan ({total_rotation:.0f}° of ~360° detected). "
+            + COVERAGE_ACTIONABLE_MSG
+        )
+
     raise ValueError(
-        f"Insufficient 360° coverage ({span_deg:.0f}° rotation, "
-        f"{zones_populated}/{n_zones} zones detected). "
+        f"Not enough angular zones ({zones_populated}/{n_zones} detected). "
         + COVERAGE_ACTIONABLE_MSG
     )
 

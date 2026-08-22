@@ -212,6 +212,7 @@ export async function importComposedScene(
       for (const gm of shellMeshes) {
         gm.parent = shellNode;
         gm.isPickable = false;
+        gm.visibility = 0.35;
         if (gm.getTotalVertices() > 0) gm.name = 'room_shell';
       }
     } catch (e) {

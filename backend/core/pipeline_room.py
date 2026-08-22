@@ -32,8 +32,8 @@ from services.meshy.scene_compose import compose_zone_transforms_for_ids
 from services.meshy.storage_upload import publish_keyframes
 from services.meshy.zone_normalize import (
     aggregate_bbox,
+    dedupe_similar_zones,
     normalize_zone_glbs,
-    placement_radius_from_bbox,
 )
 from services.video.extract_frames import extract_frames
 
@@ -226,21 +226,53 @@ async def process_room_job(job: Job) -> Job:
             await client.download_file(glb_url, str(glb_path))
 
         scale_factors, zone_bboxes = normalize_zone_glbs(job_dir, list(zone_results.keys()))
+
+        zone_quality: Dict[int, float] = {}
+        for zid, paths in zones.items():
+            if zid not in zone_results:
+                continue
+            scores = [
+                sharpness_by_index.get(path_to_index[p], 0.0)
+                for p in paths
+                if p in path_to_index
+            ]
+            zone_quality[zid] = sum(scores) / len(scores) if scores else 0.0
+
+        kept_zone_ids, dedupe_errors = dedupe_similar_zones(
+            job_dir, list(zone_results.keys()), zone_quality,
+        )
+        zone_errors.update(dedupe_errors)
+
+        if len(kept_zone_ids) < 2:
+            detail = "; ".join(f"Zone {z}: {msg}" for z, msg in sorted(zone_errors.items()))
+            raise ValueError(
+                f"Room reconstruction produced duplicate zone meshes — only {len(kept_zone_ids)} unique. "
+                f"Try Object preset for single items. {detail}"
+            )
+
+        zone_results = {zid: zone_results[zid] for zid in kept_zone_ids if zid in zone_results}
+        zone_bboxes = {zid: b for zid, b in zone_bboxes.items() if zid in kept_zone_ids}
+
         agg_bbox = aggregate_bbox(list(zone_bboxes.values()))
         ref_height = None
         if zone_bboxes:
-            heights = [b["max"][1] - b["min"][1] for b in zone_bboxes.values()]
+            heights = [
+                b["max"][1] - b["min"][1]
+                for b in zone_bboxes.values()
+                if b.get("min") and b.get("max")
+            ]
             ref_height = sorted(heights)[len(heights) // 2] if heights else None
 
-        radius = placement_radius_from_bbox(agg_bbox)
+        compose_n_zones = len(kept_zone_ids)
         transforms = compose_zone_transforms_for_ids(
-            list(zone_results.keys()),
-            n_zones=n_zones,
-            radius=radius,
+            kept_zone_ids,
+            n_zones=compose_n_zones,
+            radius=0.0,
         )
 
         manifest_zones: List[ZoneMeshInfo] = []
-        for zone_id, (task_id, _) in sorted(zone_results.items()):
+        for zone_id in sorted(kept_zone_ids):
+            task_id, _ = zone_results[zone_id]
             glb_path = job_dir / f"zone_{zone_id}.glb"
             if not glb_path.exists():
                 continue
@@ -258,7 +290,7 @@ async def process_room_job(job: Job) -> Job:
             )
 
         shell_url = None
-        if preset_config.room_shell_enabled:
+        if preset_config.room_shell_enabled and len(manifest_zones) >= 3:
             job.status = JobStatus.COMPOSING_SCENE
             job.progress = 0.85
             await job_manager.update_job(job)

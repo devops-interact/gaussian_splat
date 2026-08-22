@@ -227,6 +227,16 @@ export default function VideoUpload({
             </p>
           )}
           {presetGrid}
+          {selectedPreset === 'room' && (
+            <div className="text-xs text-gray-400 border border-white/10 rounded-lg p-2.5 space-y-1">
+              <p className="text-gray-300 font-medium">Room walkthrough checklist</p>
+              <ul className="list-disc list-inside space-y-0.5 text-gray-500">
+                <li>30+ seconds, slow 360° pan from room center</li>
+                <li>Walls and floor visible throughout</li>
+                <li>Not for single objects or outdoor equipment — use Object preset</li>
+              </ul>
+            </div>
+          )}
           {isSingleObject && selectedPreset === 'quality' && (
             <p className="text-xs text-amber-400/70 border border-amber-500/20 rounded-lg p-2.5">
               Quality reconstructs <strong>one object</strong> only. For walls and floor, select <strong>Room — full space</strong>.

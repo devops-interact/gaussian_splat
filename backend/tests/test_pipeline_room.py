@@ -52,9 +52,13 @@ def test_partial_zone_recovery_completes_with_two_zones(tmp_path) -> None:
         patch("core.pipeline_room.publish_keyframes", side_effect=lambda jid, paths, zone_id=0: [f"url-{zone_id}-{i}" for i in range(len(paths))]),
         patch("core.pipeline_room.MeshyClient") as MockClient,
         patch("core.pipeline_room._run_zone_meshy", side_effect=fake_meshy),
-        patch("core.pipeline_room.normalize_zone_glbs", return_value=({}, {})),
+        patch("core.pipeline_room.normalize_zone_glbs", return_value=({}, {
+            0: {"min": [0, 0, 0], "max": [1, 2, 1]},
+            1: {"min": [0, 0, 0], "max": [1, 2, 1]},
+            3: {"min": [0, 0, 0], "max": [1, 2, 1]},
+        })),
+        patch("core.pipeline_room.dedupe_similar_zones", return_value=([0, 1, 3], {"2": "Duplicate of zone 0"})),
         patch("core.pipeline_room.aggregate_bbox", return_value=None),
-        patch("core.pipeline_room.placement_radius_from_bbox", return_value=2.0),
         patch("core.pipeline_room.create_room_shell", return_value=None),
         patch("core.pipeline_room._extract_glb_metadata", return_value=None),
     ):

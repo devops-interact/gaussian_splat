@@ -82,6 +82,19 @@ async def upload_video(
 
         validation_result = validate_video(video_path, extraction_fps=preset_config.fps)
 
+        upload_warnings = list(validation_result.warnings)
+        if preset == QualityPreset.ROOM and validation_result.video_info:
+            duration = validation_result.video_info.duration or 0
+            if duration < 25:
+                upload_warnings.append(
+                    "Room preset works best with 30+ seconds of video. "
+                    "Pan slowly 360° from the center of the room with walls visible."
+                )
+            upload_warnings.append(
+                "Room reconstruction requires a full interior walkthrough — "
+                "not single-object or outdoor equipment scans (use Object preset instead)."
+            )
+
         job.validation = VideoValidation(
             valid=validation_result.valid,
             duration=validation_result.video_info.duration if validation_result.video_info else None,
@@ -89,7 +102,7 @@ async def upload_video(
             height=validation_result.video_info.height if validation_result.video_info else None,
             fps=validation_result.video_info.fps if validation_result.video_info else None,
             errors=validation_result.errors,
-            warnings=validation_result.warnings,
+            warnings=upload_warnings,
         )
 
         if not validation_result.valid:
@@ -142,8 +155,8 @@ async def upload_video(
             "message": "Video uploaded and validated. AI reconstruction started.",
         }
 
-        if validation_result.warnings:
-            response["warnings"] = validation_result.warnings
+        if upload_warnings:
+            response["warnings"] = upload_warnings
 
         if validation_result.video_info:
             response["video_info"] = {

@@ -19,6 +19,43 @@ function isMeasurableMesh(mesh: AbstractMesh): boolean {
   return mesh.isPickable && !OVERLAY_MESH_NAMES.has(mesh.name);
 }
 
+const NEAREST_VERTEX_MAX_DIST_RATIO = 0.05;
+
+/**
+ * Find nearest vertex in world space (fallback when face indices are unavailable).
+ */
+export function snapToNearestVertex(
+  mesh: AbstractMesh,
+  worldPoint: Vector3,
+  maxDistance?: number,
+): Vector3 | null {
+  const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
+  if (!positions || positions.length < 3) return null;
+
+  const wm = mesh.getWorldMatrix();
+  const bbox = mesh.getBoundingInfo().boundingBox;
+  const extent = bbox.maximumWorld.subtract(bbox.minimumWorld).length();
+  const maxDist = maxDistance ?? Math.max(extent * NEAREST_VERTEX_MAX_DIST_RATIO, 0.02);
+  const maxDistSq = maxDist * maxDist;
+
+  let best: Vector3 | null = null;
+  let bestDistSq = maxDistSq;
+
+  for (let i = 0; i < positions.length; i += 3) {
+    const world = Vector3.TransformCoordinates(
+      new Vector3(positions[i], positions[i + 1], positions[i + 2]),
+      wm,
+    );
+    const d = Vector3.DistanceSquared(worldPoint, world);
+    if (d < bestDistSq) {
+      bestDistSq = d;
+      best = world;
+    }
+  }
+
+  return best?.clone() ?? null;
+}
+
 /**
  * Snap a world-space hit to the nearest corner of the picked triangle.
  */
@@ -89,10 +126,13 @@ export function pickMeshMeasure(
   if (!hit?.hit || !hit.pickedPoint || !hit.pickedMesh) return null;
 
   const faceId = hit.faceId;
-  const snapped =
-    faceId >= 0
-      ? snapToTriangleCorner(hit.pickedMesh, faceId, hit.pickedPoint)
-      : null;
+  let snapped: Vector3 | null = null;
+  if (faceId >= 0) {
+    snapped = snapToTriangleCorner(hit.pickedMesh, faceId, hit.pickedPoint);
+  }
+  if (!snapped) {
+    snapped = snapToNearestVertex(hit.pickedMesh, hit.pickedPoint);
+  }
 
   if (!snapped) {
     return {

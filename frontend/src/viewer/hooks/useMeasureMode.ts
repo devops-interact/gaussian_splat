@@ -11,7 +11,7 @@ import type {
   ModelMetadata,
   ViewerMode,
 } from '../types';
-import { MEASURE_HOVER_MIN_MS, MEASURE_PREVIEW_MOVE_EPS } from '../constants';
+import { MEASURE_PREVIEW_MOVE_EPS } from '../constants';
 import { MeasurePreviewGizmo } from '../measure/MeasurePreviewGizmo';
 import { MeasureOverlay } from '../measure/MeasureOverlay';
 import { buildMeasurePickHint } from '../measure/measureHint';
@@ -61,6 +61,7 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
 
   const overlayRef = useRef<MeasureOverlay | null>(null);
 
+  // Overlay: create once when scene is ready; update on point changes; dispose on unmount only.
   useEffect(() => {
     const ctx = viewerRef.current;
     if (!ctx || loadPhase !== 'ready') return;
@@ -68,14 +69,18 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
     if (!overlayRef.current) {
       overlayRef.current = new MeasureOverlay(ctx.utilityLayer);
     }
-    overlayRef.current.setWorldUnit(worldUnitRef.current ?? 0.024);
-    overlayRef.current.update(visibleMeasurePoints);
 
     return () => {
       overlayRef.current?.dispose();
       overlayRef.current = null;
     };
-  }, [visibleMeasurePoints, loadPhase, viewerRef, worldUnitRef]);
+  }, [loadPhase, viewerRef]);
+
+  useEffect(() => {
+    if (!overlayRef.current) return;
+    overlayRef.current.setWorldUnit(worldUnitRef.current ?? 0.024);
+    overlayRef.current.update(visibleMeasurePoints);
+  }, [visibleMeasurePoints, worldUnitRef]);
 
   useEffect(() => {
     if (mode !== 'measure') {
@@ -129,7 +134,7 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
       if (draggedSincePointerDown(e)) return;
       try {
         const pick = pickWorldFromEvent(e);
-        if (pick?.isSnapped) onAddPoint(pick.position);
+        if (pick) onAddPoint(pick.position);
       } catch (err) {
         console.warn('[Babylon] Measure pick failed:', err);
       }
@@ -148,7 +153,7 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
     const buildSegmentText = (pick: PickResult | null, previousWorld: Vector3 | null): string | null => {
       const pickCtx = measurePickCtxRef.current;
       const visible = pickCtx.measurePhase === 'calibrate' ? pickCtx.calibPoints : pickCtx.measurePoints;
-      if (!pick?.isSnapped || !previousWorld || visible.length !== 1) return null;
+      if (!pick || !previousWorld || visible.length !== 1) return null;
       const raw = Vector3.Distance(previousWorld, pick.position);
       if (pickCtx.measurePhase === 'measure' && pickCtx.calibration) {
         return `A→B: ${(raw * pickCtx.calibration.scaleFactor).toFixed(3)} m`;
@@ -156,34 +161,13 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
       return `A→B: ${raw.toFixed(2)} u`;
     };
 
-    let lastHoverMs = 0;
     const lastPreviewWorld = new Vector3();
     let hasLastPreviewWorld = false;
-    let pendingHint: string | null = null;
-    let hintDirty = false;
+    let pendingMouse: MouseEvent | null = null;
+    let rafId = 0;
+    let pointerInside = true;
 
-    const flushHint = () => {
-      if (pendingHint !== null) {
-        onPickHint(pendingHint);
-        pendingHint = null;
-      }
-      hintDirty = false;
-    };
-
-    const scheduleHint = (hint: string) => {
-      pendingHint = hint;
-      hintDirty = true;
-    };
-
-    const beforeRender = () => {
-      if (hintDirty) flushHint();
-    };
-    scene.onBeforeRenderObservable.add(beforeRender);
-
-    const onMove = (e: MouseEvent) => {
-      const now = performance.now();
-      if (now - lastHoverMs < MEASURE_HOVER_MIN_MS) return;
-      lastHoverMs = now;
+    const processHover = (e: MouseEvent) => {
       try {
         const pick = pickWorldFromEvent(e);
         const pickCtx = measurePickCtxRef.current;
@@ -192,7 +176,7 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
         const segmentText = buildSegmentText(pick, previousWorld);
 
         if (pick && hasLastPreviewWorld && Vector3.Distance(lastPreviewWorld, pick.position) < MEASURE_PREVIEW_MOVE_EPS) {
-          scheduleHint(
+          onPickHint(
             buildMeasurePickHint(pickCtx.measurePhase, pickCtx.calibPoints.length, pickCtx.measurePoints.length, pick, segmentText),
           );
           return;
@@ -205,20 +189,40 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
           hasLastPreviewWorld = false;
           gizmo.hide();
         }
-        scheduleHint(
+        onPickHint(
           buildMeasurePickHint(pickCtx.measurePhase, pickCtx.calibPoints.length, pickCtx.measurePoints.length, pick, segmentText),
         );
       } catch {
         gizmo.hide();
-        scheduleHint(MEASURE_PICK_HINT_IDLE);
+        onPickHint(MEASURE_PICK_HINT_IDLE);
         hasLastPreviewWorld = false;
       }
     };
 
+    const hoverLoop = () => {
+      rafId = 0;
+      if (pendingMouse && pointerInside) {
+        processHover(pendingMouse);
+      }
+    };
+
+    const onMove = (e: MouseEvent) => {
+      pendingMouse = e;
+      if (!rafId) {
+        rafId = requestAnimationFrame(hoverLoop);
+      }
+    };
+
     const onLeave = () => {
+      pointerInside = false;
+      pendingMouse = null;
       hasLastPreviewWorld = false;
       gizmo.hide();
-      scheduleHint(MEASURE_PICK_HINT_IDLE);
+      onPickHint(MEASURE_PICK_HINT_IDLE);
+    };
+
+    const onEnter = () => {
+      pointerInside = true;
     };
 
     canvas.addEventListener('pointerdown', onPointerDown);
@@ -226,15 +230,17 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
     canvas.addEventListener('contextmenu', onContextMenu);
     canvas.addEventListener('mousemove', onMove);
     canvas.addEventListener('pointerleave', onLeave);
+    canvas.addEventListener('pointerenter', onEnter);
     window.addEventListener('keydown', onKeyDown);
 
     return () => {
-      scene.onBeforeRenderObservable.removeCallback(beforeRender);
+      if (rafId) cancelAnimationFrame(rafId);
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('click', onClick);
       canvas.removeEventListener('contextmenu', onContextMenu);
       canvas.removeEventListener('mousemove', onMove);
       canvas.removeEventListener('pointerleave', onLeave);
+      canvas.removeEventListener('pointerenter', onEnter);
       window.removeEventListener('keydown', onKeyDown);
       gizmo.dispose();
     };
