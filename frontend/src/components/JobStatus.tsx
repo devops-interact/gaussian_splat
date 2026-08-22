@@ -161,11 +161,14 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, on
           if (response.estimated_minutes) setEstimatedMinutes(response.estimated_minutes);
           if (response.current_zone != null) setCurrentZone(response.current_zone);
           if (response.total_zones != null) setTotalZones(response.total_zones);
-          if (response.status === JobStatusEnum.COMPLETED && response.model_url) {
+          if (
+            response.status === JobStatusEnum.COMPLETED &&
+            (response.model_url || (response.scene_manifest?.zones?.length ?? 0) > 0)
+          ) {
             if (completionNotifiedForJobIdRef.current !== jobId) {
               completionNotifiedForJobIdRef.current = jobId;
               onCompleteRef.current(
-                response.model_url,
+                response.model_url ?? '',
                 response.model_url_obj ?? undefined,
                 response.model_metadata,
                 {

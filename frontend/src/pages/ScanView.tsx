@@ -63,8 +63,8 @@ export default function ScanView() {
     getJobStatus(jobId)
       .then((response) => {
         if (cancelled) return;
-        if (response.status === JobStatusEnum.COMPLETED && response.model_url) {
-          setModelUrl(response.model_url);
+        if (response.status === JobStatusEnum.COMPLETED && (response.model_url || response.scene_manifest?.zones?.length)) {
+          if (response.model_url) setModelUrl(response.model_url);
           setObjUrl(response.model_url_obj ?? null);
           setPrefetchedJobModelMetadata(response.model_metadata ?? null);
           setKeyframes(response.keyframes ?? []);
@@ -184,8 +184,19 @@ export default function ScanView() {
               Upload video scans to generate AI-reconstructed 3D meshes via Meshy.
             </p>
             <p className="text-gray-700 text-xs max-w-2xl mt-1">
-              Single-object presets produce one mesh; Room (beta) composes multiple zone meshes for full-space reconstruction.
+              Use <strong>Room — full space</strong> for walkthrough videos (multi-zone). Object presets produce a single mesh.
             </p>
+            {jobQualityPreset && (
+              <span className={`inline-block mt-2 text-[10px] px-2 py-0.5 rounded border uppercase tracking-wide ${
+                sceneManifest?.composition_mode === 'zone_mesh'
+                  ? 'text-amber-400 border-amber-500/30 bg-amber-500/10'
+                  : 'text-white/50 border-white/20 bg-white/5'
+              }`}>
+                {sceneManifest?.composition_mode === 'zone_mesh'
+                  ? `Room · ${sceneManifest.zones?.length ?? 0} zones`
+                  : `Single object · ${jobQualityPreset}`}
+              </span>
+            )}
           </div>
         </div>
 
@@ -215,16 +226,18 @@ export default function ScanView() {
                       <span className="block text-[10px] text-white/30">Textured mesh</span>
                     </div>
                   </button>
-                  <button
-                    onClick={handleObjDownload}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm text-white/70 hover:text-white hover:bg-white/[0.06] transition-colors group"
-                  >
-                    <FileCode className="w-4 h-4 text-amber-400/50 group-hover:text-amber-400" />
-                    <div>
-                      <span className="block text-white/80 group-hover:text-white">.obj</span>
-                      <span className="block text-[10px] text-white/30">Wavefront OBJ</span>
-                    </div>
-                  </button>
+                  {objUrl && (
+                    <button
+                      onClick={handleObjDownload}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm text-white/70 hover:text-white hover:bg-white/[0.06] transition-colors group"
+                    >
+                      <FileCode className="w-4 h-4 text-amber-400/50 group-hover:text-amber-400" />
+                      <div>
+                        <span className="block text-white/80 group-hover:text-white">.obj</span>
+                        <span className="block text-[10px] text-white/30">Wavefront OBJ</span>
+                      </div>
+                    </button>
+                  )}
                 </div>
               </div>
             )}

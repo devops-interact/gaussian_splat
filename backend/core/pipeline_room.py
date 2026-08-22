@@ -23,7 +23,7 @@ from services.meshy.keyframe_selector import (
 )
 from services.meshy.meshy_params import meshy_task_kwargs
 from services.meshy.room_shell import create_room_shell
-from services.meshy.scene_compose import compose_zone_transforms
+from services.meshy.scene_compose import compose_zone_transforms_for_ids
 from services.meshy.storage_upload import publish_keyframes
 from services.video.extract_frames import extract_frames
 
@@ -88,6 +88,12 @@ async def process_room_job(job: Job) -> Job:
         if not zones:
             raise ValueError("No zone keyframes selected — walk the full room in your video")
 
+        if len(zones) < 2:
+            raise ValueError(
+                f"Video needs a 360° walk — only {len(zones)} zone(s) found. "
+                "Pan slowly around the full room while recording."
+            )
+
         job.total_zones = len(zones)
         walk_path = build_walk_path(frame_paths, yaw_by_index)
 
@@ -100,6 +106,17 @@ async def process_room_job(job: Job) -> Job:
             sharpness_by_index=sharpness_by_index,
         )
         path_to_candidate = {c.path: c for c in candidates}
+        path_to_index = {p: i for i, p in enumerate(frame_paths)}
+
+        zone_yaws: Dict[int, float] = {}
+        for zone_id, paths in zones.items():
+            yaws = [
+                yaw_by_index.get(path_to_index[p], 0.0)
+                for p in paths
+                if p in path_to_index
+            ]
+            if yaws:
+                zone_yaws[zone_id] = sum(yaws) / len(yaws)
 
         for zone_id, paths in sorted(zones.items()):
             urls = publish_keyframes(job.job_id, paths, zone_id=zone_id)
@@ -123,7 +140,7 @@ async def process_room_job(job: Job) -> Job:
         )
 
         job.status = JobStatus.RECONSTRUCTING
-        transforms = compose_zone_transforms(n_zones)
+        transforms = compose_zone_transforms_for_ids(list(zones.keys()), zone_yaws)
         zone_results: Dict[int, tuple[str, dict]] = {}
         sem = asyncio.Semaphore(settings.MESHY_MAX_PARALLEL_JOBS)
 
@@ -169,8 +186,14 @@ async def process_room_job(job: Job) -> Job:
                 id=zone_id,
                 mesh_url=f"/api/jobs/{job.job_id}/zones/{zone_id}",
                 meshy_task_id=task_id,
-                transform=transforms.get(zone_id, transforms[0]),
+                transform=transforms[zone_id],
             ))
+
+        if len(manifest_zones) < 2:
+            raise ValueError(
+                f"Room reconstruction produced only {len(manifest_zones)} zone mesh(es). "
+                "Check Meshy task logs or retry with better video coverage."
+            )
 
         shell_url = None
         if preset_config.room_shell_enabled:

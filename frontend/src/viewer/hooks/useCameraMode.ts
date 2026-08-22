@@ -33,7 +33,7 @@ export function useCameraMode(
       if (ctx.collisionMesh) {
         ctx.collisionMesh.checkCollisions = true;
       }
-      scene.gravity = new Vector3(0, -0.15, 0);
+      scene.gravity = new Vector3(0, -Math.max(0.08, ctx.effectiveDiagonal * 0.06), 0);
       scene.activeCamera = walkCamera;
       orbitCamera.detachControl();
       walkCamera.attachControl(canvas, true);

@@ -42,24 +42,36 @@ export default function VideoUpload({
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
-  const [selectedPreset, setSelectedPreset] = useState('balanced');
+  const [selectedPreset, setSelectedPreset] = useState('room');
   const [presets, setPresets] = useState<PresetInfo[]>([]);
+  const [presetsWarning, setPresetsWarning] = useState<string | null>(null);
   const [videoInfo, setVideoInfo] = useState<UploadResult['video_info'] | null>(null);
   const [showRerun, setShowRerun] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     getPresets()
-      .then(setPresets)
+      .then((list) => {
+        setPresets(list);
+        if (!list.some((p) => p.id === 'room')) {
+          setPresetsWarning('Room preset missing from API — redeploy backend or refresh.');
+        } else {
+          setPresetsWarning(null);
+        }
+      })
       .catch(() => {
+        setPresetsWarning('Could not load presets from API — using local fallback.');
         setPresets([
-          { id: 'fast', name: 'Fast', description: 'Quick AI mesh preview. Lower polycount.', estimated_minutes: 5 },
-          { id: 'balanced', name: 'Balanced', description: 'Recommended balance of quality and speed.', estimated_minutes: 8 },
-          { id: 'quality', name: 'Quality', description: 'Highest fidelity mesh with 4K textures.', estimated_minutes: 22 },
-          { id: 'room', name: 'Room (beta)', description: 'Reconstructs space by zones; 4 meshes composed.', estimated_minutes: 40, composition_mode: 'zone_mesh' },
+          { id: 'fast', name: 'Fast', description: 'Quick preview. Single object.', estimated_minutes: 5, composition_mode: 'single_object' },
+          { id: 'balanced', name: 'Balanced', description: 'Balance of speed and quality. Single object.', estimated_minutes: 8, composition_mode: 'single_object' },
+          { id: 'quality', name: 'Object — highest detail', description: 'One mesh, 4K textures. Not for full rooms.', estimated_minutes: 22, composition_mode: 'single_object' },
+          { id: 'room', name: 'Room — full space', description: 'Multi-zone room reconstruction. Recommended for walkthroughs.', estimated_minutes: 40, composition_mode: 'zone_mesh' },
         ]);
       });
   }, []);
+
+  const selectedPresetInfo = presets.find((p) => p.id === selectedPreset);
+  const isSingleObject = selectedPresetInfo?.composition_mode !== 'zone_mesh';
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -113,7 +125,7 @@ export default function VideoUpload({
   const onUploadClick = () => fileInputRef.current?.click();
 
   const presetGrid = (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+    <div className="grid grid-cols-1 gap-3">
       {presets.map((preset) => (
         <button
           key={preset.id}
@@ -125,6 +137,7 @@ export default function VideoUpload({
               ? 'border-white/48 bg-white/[0.06] text-white'
               : 'border-white/[0.22] bg-neutral-950/50 text-gray-400 hover:border-white/[0.32] hover:bg-white/[0.06]',
             uploading && 'opacity-50 cursor-not-allowed',
+            preset.composition_mode === 'zone_mesh' && 'ring-1 ring-amber-500/20',
           )}
         >
           <div className="flex items-center justify-between w-full mb-1">
@@ -135,9 +148,12 @@ export default function VideoUpload({
             <Clock className="w-3 h-3 mr-1" /> {formatPresetTime(preset.estimated_minutes)}
           </span>
           <p className="text-[10px] opacity-60 leading-tight">{preset.description}</p>
-          {preset.composition_mode === 'zone_mesh' && (
-            <span className="mt-1 text-[9px] text-amber-400/80 uppercase tracking-wide">Multi-zone</span>
-          )}
+          <span className={cn(
+            'mt-1 text-[9px] uppercase tracking-wide',
+            preset.composition_mode === 'zone_mesh' ? 'text-amber-400/90' : 'text-white/35',
+          )}>
+            {preset.composition_mode === 'zone_mesh' ? 'Full room · multi-zone' : 'Single object'}
+          </span>
         </button>
       ))}
     </div>
@@ -203,8 +219,19 @@ export default function VideoUpload({
 
       <CardContent className="space-y-6">
         <div className="space-y-3">
-          <label className="text-sm font-medium text-gray-300">Quality Preset</label>
+          <label className="text-sm font-medium text-gray-300">Reconstruction Preset</label>
+          {presetsWarning && (
+            <p className="text-xs text-amber-400/80 flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+              {presetsWarning}
+            </p>
+          )}
           {presetGrid}
+          {isSingleObject && selectedPreset === 'quality' && (
+            <p className="text-xs text-amber-400/70 border border-amber-500/20 rounded-lg p-2.5">
+              Quality reconstructs <strong>one object</strong> only. For walls and floor, select <strong>Room — full space</strong>.
+            </p>
+          )}
         </div>
 
         <div

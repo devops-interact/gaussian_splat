@@ -58,13 +58,25 @@ export function bboxFromMesh(mesh: AbstractMesh): {
   return { min: bbMin, max: bbMax, diagonal };
 }
 
-export function defaultBboxCameraPosition(diagonal: number): {
+export function defaultBboxCameraPosition(
+  diagonal: number,
+  centroid: [number, number, number] = [0, 0, 0],
+): {
   position: [number, number, number];
   lookAt: [number, number, number];
 } {
   const camDist = Math.max(diagonal * BBOX_CAM_DIST_MULT, BBOX_CAM_DIST_MIN);
+  const [cx, cy, cz] = centroid;
   return {
-    position: [0, camDist * 0.45, camDist * 0.85],
-    lookAt: [0, 0, 0],
+    position: [cx, cy + camDist * 0.45, cz + camDist * 0.85],
+    lookAt: [cx, cy, cz],
   };
+}
+
+export function bboxCentroid(min: [number, number, number], max: [number, number, number]): [number, number, number] {
+  return [
+    (min[0] + max[0]) / 2,
+    (min[1] + max[1]) / 2,
+    (min[2] + max[2]) / 2,
+  ];
 }

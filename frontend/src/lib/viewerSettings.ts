@@ -5,6 +5,7 @@ const STORAGE_KEY = 'meshup_viewer_settings';
 export interface ViewerSettings {
   sceneScale: number;
   lighting: LightingState;
+  exposure: number;
 }
 
 const DEFAULTS: ViewerSettings = {
@@ -14,6 +15,7 @@ const DEFAULTS: ViewerSettings = {
     dirIntensity: 0.65,
     envIntensity: 1,
   },
+  exposure: 1,
 };
 
 export function loadViewerSettings(): ViewerSettings {
@@ -28,6 +30,7 @@ export function loadViewerSettings(): ViewerSettings {
         dirIntensity: parsed.lighting?.dirIntensity ?? DEFAULTS.lighting.dirIntensity,
         envIntensity: parsed.lighting?.envIntensity ?? DEFAULTS.lighting.envIntensity,
       },
+      exposure: typeof parsed.exposure === 'number' ? parsed.exposure : DEFAULTS.exposure,
     };
   } catch {
     return { ...DEFAULTS };

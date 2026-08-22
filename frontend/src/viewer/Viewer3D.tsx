@@ -12,12 +12,20 @@ import { isWebXRAvailable, tryCreateWebXRExperience, type WebXRHandle } from './
 import { downloadModel } from '@/api/jobs';
 import { MeasurePanel } from './ui/MeasurePanel';
 import { ViewerToolbar, ViewerModeHint } from './ui/ViewerToolbar';
-import { LightingPanel } from './ui/LightingPanel';
-import { ZoneToggles } from './ui/ZoneToggles';
-import { applyLighting, type LightingState } from './lighting/sceneLighting';
-import { loadViewerSettings } from '@/lib/viewerSettings';
+import { InspectionPanel } from './ui/InspectionPanel';
+import { applyInspectionState, DEFAULT_INSPECTION, type InspectionState } from './inspection/inspectionControls';
+import { loadViewerSettings, saveViewerSettings } from '@/lib/viewerSettings';
 
 export type { ModelMetadata };
+
+function buildInitialInspection(): InspectionState {
+  const saved = loadViewerSettings();
+  return {
+    ...DEFAULT_INSPECTION,
+    lighting: saved.lighting,
+    exposure: saved.exposure,
+  };
+}
 
 export default function Viewer3D({
   modelUrl,
@@ -29,13 +37,14 @@ export default function Viewer3D({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [mode, setMode] = useState<ViewerMode>('orbit');
   const [showHelp, setShowHelp] = useState(false);
-  const [showLighting, setShowLighting] = useState(false);
-  const [lighting, setLighting] = useState<LightingState>(() => loadViewerSettings().lighting);
+  const [showInspection, setShowInspection] = useState(false);
+  const [inspection, setInspection] = useState<InspectionState>(buildInitialInspection);
   const [visibleZones, setVisibleZones] = useState<Set<number>>(() => new Set());
   const [autoRotate, setAutoRotate] = useState(false);
   const [webXrAvailable, setWebXrAvailable] = useState(false);
   const [webXrBusy, setWebXrBusy] = useState(false);
   const xrRef = useRef<WebXRHandle | null>(null);
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [measurePhase, setMeasurePhase] = useState<MeasurePhase>('calibrate');
   const [calibration, setCalibration] = useState<CalibrationState | null>(null);
@@ -47,6 +56,11 @@ export default function Viewer3D({
   const [downloadBusy, setDownloadBusy] = useState(false);
 
   const visibleMeasurePoints = measurePhase === 'calibrate' ? calibPoints : measurePoints;
+
+  const isRoom = sceneManifest?.composition_mode === 'zone_mesh';
+  const compositionLabel = isRoom
+    ? `Room · ${sceneManifest?.zones?.length ?? 0} zones`
+    : 'Single object';
 
   const {
     viewerRef,
@@ -77,11 +91,20 @@ export default function Viewer3D({
   }, [zoneMeshes]);
 
   useEffect(() => {
-    const scene = viewerRef.current?.scene;
-    if (scene && loadPhase === 'ready') {
-      applyLighting(scene, lighting);
+    const ctx = viewerRef.current;
+    if (ctx && loadPhase === 'ready') {
+      applyInspectionState(ctx, inspection);
     }
-  }, [lighting, loadPhase, viewerRef]);
+  }, [inspection, loadPhase, viewerRef]);
+
+  const handleInspectionChange = useCallback((next: InspectionState) => {
+    setInspection(next);
+    if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+    persistTimerRef.current = setTimeout(() => {
+      const saved = loadViewerSettings();
+      saveViewerSettings({ ...saved, lighting: next.lighting, exposure: next.exposure });
+    }, 400);
+  }, []);
 
   const handleZoneToggle = useCallback((zoneId: number) => {
     setVisibleZones((prev) => {
@@ -102,7 +125,7 @@ export default function Viewer3D({
   }, [viewerRef]);
 
   useCameraMode(viewerRef, canvasRef, mode, loadPhase, autoRotate);
-  useWalkthroughMode(viewerRef, canvasRef, mode, loadPhase, sceneManifest);
+  useWalkthroughMode(viewerRef, canvasRef, mode, loadPhase);
 
   const resetView = useResetView(viewerRef, canvasRef, initialPoseRef);
 
@@ -176,7 +199,6 @@ export default function Viewer3D({
     if (!canvas) return;
     try {
       if (mode === 'measure') canvas.style.cursor = 'crosshair';
-      else if (mode === 'walkthrough') canvas.style.cursor = 'grab';
       else canvas.style.cursor = 'grab';
     } catch { /* ignore */ }
   }, [mode, loadPhase]);
@@ -282,17 +304,6 @@ export default function Viewer3D({
 
       {loadPhase === 'ready' && !error && (
         <>
-          <div className="absolute bottom-4 right-3 z-20">
-            <button
-              type="button"
-              disabled={downloadBusy}
-              onClick={() => void handleDownloadGlb()}
-              className="p-2 rounded-lg border text-xs flex items-center gap-2 shadow-lg glass-panel text-white/60 hover:text-white"
-            >
-              <Download className="w-4 h-4" /> {downloadBusy ? '…' : 'GLB'}
-            </button>
-          </div>
-
           <ViewerToolbar
             mode={mode}
             autoRotate={autoRotate}
@@ -305,20 +316,31 @@ export default function Viewer3D({
             onToggleAutoRotate={() => setAutoRotate((v) => !v)}
             onEnterVR={() => void handleEnterVR()}
             onToggleHelp={() => setShowHelp((v) => !v)}
+            compositionLabel={compositionLabel}
+            inspectionSlot={
+              <InspectionPanel
+                state={inspection}
+                onChange={handleInspectionChange}
+                open={showInspection}
+                onToggle={() => setShowInspection((v) => !v)}
+                zoneMeshes={zoneMeshes}
+                visibleZones={visibleZones}
+                onZoneToggle={handleZoneToggle}
+                compositionLabel={compositionLabel}
+              />
+            }
           />
 
-          <LightingPanel
-            lighting={lighting}
-            onChange={setLighting}
-            open={showLighting}
-            onToggle={() => setShowLighting((v) => !v)}
-          />
-
-          <ZoneToggles
-            zoneMeshes={zoneMeshes}
-            visibleZones={visibleZones}
-            onToggle={handleZoneToggle}
-          />
+          <div className="absolute bottom-4 right-3 z-20">
+            <button
+              type="button"
+              disabled={downloadBusy}
+              onClick={() => void handleDownloadGlb()}
+              className="p-2 rounded-lg border text-xs flex items-center gap-2 shadow-lg glass-panel text-white/60 hover:text-white"
+            >
+              <Download className="w-4 h-4" /> {downloadBusy ? '…' : 'GLB'}
+            </button>
+          </div>
 
           {mode === 'measure' && (
             <MeasurePanel

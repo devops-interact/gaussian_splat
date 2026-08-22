@@ -111,6 +111,19 @@ export default function Settings() {
             />
           </label>
 
+          <label className="block text-sm text-gray-400">
+            Exposure
+            <input
+              type="range"
+              min={0.2}
+              max={2.5}
+              step={0.05}
+              value={settings.exposure ?? 1}
+              onChange={(e) => setSettings((s) => ({ ...s, exposure: parseFloat(e.target.value) }))}
+              className="w-full mt-1 accent-white"
+            />
+          </label>
+
           <Button onClick={handleSave} className="w-full">
             {saved ? 'Saved' : 'Save defaults'}
           </Button>

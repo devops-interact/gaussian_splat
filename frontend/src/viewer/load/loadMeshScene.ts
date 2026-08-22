@@ -1,6 +1,6 @@
 import { ImportMeshAsync } from '@babylonjs/core/Loading/sceneLoader';
 import type { AbstractMesh, Scene } from '@babylonjs/core';
-import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
+import { Matrix, MeshBuilder, Vector3 } from '@babylonjs/core';
 import axios from 'axios';
 import { isCancel } from 'axios';
 import { getAuthHeaders } from '@/lib/authHeaders';
@@ -68,13 +68,18 @@ export async function importGlbBuffer(
   }
 }
 
+function hierarchyBounds(source: AbstractMesh): { min: Vector3; max: Vector3 } {
+  source.computeWorldMatrix(true);
+  return source.getHierarchyBoundingVectors(true);
+}
+
 /**
- * Create a simplified collision hull for walkthrough mode.
+ * Create a simplified collision hull for walkthrough mode (uses full hierarchy bounds).
  */
 export function createCollisionProxy(scene: Scene, source: AbstractMesh): AbstractMesh {
-  const bounds = source.getBoundingInfo().boundingBox;
-  const size = bounds.maximumWorld.subtract(bounds.minimumWorld);
-  const center = bounds.minimumWorld.add(size.scale(0.5));
+  const bounds = hierarchyBounds(source);
+  const size = bounds.max.subtract(bounds.min);
+  const center = bounds.min.add(size.scale(0.5));
 
   const box = MeshBuilder.CreateBox(
     'collision_proxy',
@@ -90,6 +95,17 @@ export function createCollisionProxy(scene: Scene, source: AbstractMesh): Abstra
   box.isPickable = false;
   box.checkCollisions = true;
   return box;
+}
+
+/** Backend sends row-major 4x4; Babylon Matrix.FromArray expects column-major. */
+export function matrixFromRowMajor(rows: number[][]): Matrix {
+  const flat = [
+    rows[0][0], rows[1][0], rows[2][0], rows[3][0],
+    rows[0][1], rows[1][1], rows[2][1], rows[3][1],
+    rows[0][2], rows[1][2], rows[2][2], rows[3][2],
+    rows[0][3], rows[1][3], rows[2][3], rows[3][3],
+  ];
+  return Matrix.FromArray(flat);
 }
 
 export function glbModelUrl(modelUrl: string, apiBase: string): string {
@@ -130,7 +146,7 @@ export async function importComposedScene(
   manifest: import('@/types/job').SceneManifestResponse,
   apiBase: string,
 ): Promise<{ rootMesh: AbstractMesh; geometryMeshes: AbstractMesh[]; zoneMeshes: ZoneMeshHandle[] }> {
-  const { TransformNode, Matrix, Vector3, Quaternion } = await import('@babylonjs/core');
+  const { TransformNode, Vector3, Quaternion } = await import('@babylonjs/core');
   const roomRoot = new TransformNode('room_root', scene);
   const allGeometry: AbstractMesh[] = [];
   const zoneMeshes: ZoneMeshHandle[] = [];
@@ -142,7 +158,7 @@ export async function importComposedScene(
     rootMesh.parent = roomRoot;
 
     if (zone.transform?.length === 4) {
-      const matrix = Matrix.FromArray(zone.transform.flat());
+      const matrix = matrixFromRowMajor(zone.transform);
       const scale = new Vector3();
       const rotation = new Quaternion();
       const position = new Vector3();

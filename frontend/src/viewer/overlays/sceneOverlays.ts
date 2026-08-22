@@ -1,8 +1,13 @@
 import { AxesViewer, MeshBuilder, Vector3 } from '@babylonjs/core';
-import type { Scene } from '@babylonjs/core';
+import type { AbstractMesh, Scene } from '@babylonjs/core';
 import { GridMaterial } from '@babylonjs/materials/grid/gridMaterial';
 
-export function addSceneOverlays(scene: Scene): void {
+export interface SceneOverlayHandles {
+  gridMesh: AbstractMesh;
+  axesViewer: AxesViewer;
+}
+
+export function addSceneOverlays(scene: Scene): SceneOverlayHandles {
   const half = 15;
   const ground = MeshBuilder.CreateGround('viewerGrid', { width: half * 2, height: half * 2, subdivisions: 1 }, scene);
   ground.position.y = -0.01;
@@ -19,7 +24,14 @@ export function addSceneOverlays(scene: Scene): void {
   gridMat.opacity = 0.85;
   ground.material = gridMat;
 
-  new AxesViewer(scene, 1.5, 1);
+  const axesViewer = new AxesViewer(scene, 1.5, 1);
+  return { gridMesh: ground, axesViewer };
+}
+
+/** Align floor grid to mesh bottom (Meshy origin_at: bottom). */
+export function alignGridToFloor(scene: Scene, floorY: number): void {
+  const grid = scene.getMeshByName('viewerGrid');
+  if (grid) grid.position.y = floorY;
 }
 
 export { Vector3 };

@@ -9,6 +9,7 @@ import type { SceneManifestResponse } from '@/types/job';
 import {
   applyInitialCameraPose,
   attachFramingBehavior,
+  bboxCentroid,
   bboxFromMesh,
   defaultBboxCameraPosition,
   frameCameraOnMesh,
@@ -27,7 +28,7 @@ import {
   importGlbBuffer,
   modelMetadataFromJobResponse,
 } from '../load/loadMeshScene';
-import { addSceneOverlays } from '../overlays/sceneOverlays';
+import { addSceneOverlays, alignGridToFloor } from '../overlays/sceneOverlays';
 import { setupSceneLighting } from '../lighting/sceneLighting';
 import { showInspectorIfRequested, resetInspectorFlag } from '../dev/inspector';
 import type { BabylonViewerCtx, LoadPhase, ModelMetadata, StoredCameraPose } from '../types';
@@ -136,6 +137,8 @@ export function useMeshViewer({
       collisionMesh: null,
       utilityLayer,
       framingBehavior,
+      floorY: 0,
+      effectiveDiagonal: 2,
     };
 
     (async () => {
@@ -179,12 +182,16 @@ export function useMeshViewer({
         metadataRef.current = modelMeta;
         onMetadataRef.current?.(modelMeta);
 
+        const prefetchedCentroid = bboxCentroid(
+          modelMeta.boundingBox.min,
+          modelMeta.boundingBox.max,
+        );
         const diag = Math.sqrt(
           (modelMeta.boundingBox.max[0] - modelMeta.boundingBox.min[0]) ** 2 +
           (modelMeta.boundingBox.max[1] - modelMeta.boundingBox.min[1]) ** 2 +
           (modelMeta.boundingBox.max[2] - modelMeta.boundingBox.min[2]) ** 2,
         ) || 2;
-        const def = defaultBboxCameraPosition(diag * sceneScale);
+        const def = defaultBboxCameraPosition(diag, prefetchedCentroid);
         applyInitialCameraPose(orbitCamera, def.position, def.lookAt, [0, 1, 0]);
 
         setLoadPhase('parsing');
@@ -208,16 +215,16 @@ export function useMeshViewer({
 
         if (sceneScale !== 1) rootMesh.scaling.setAll(sceneScale);
         rootMesh.computeWorldMatrix(true);
-        for (const gm of geometryMeshes) {
-          if (sceneScale !== 1) gm.scaling.setAll(sceneScale);
-          gm.computeWorldMatrix(true);
-        }
 
         const collisionMesh = createCollisionProxy(scene, rootMesh);
-        collisionMesh.scaling.copyFrom(rootMesh.scaling);
 
         const meshBbox = bboxFromMesh(rootMesh);
-        const effectiveDiagonal = meshBbox.diagonal * sceneScale;
+        const effectiveDiagonal = meshBbox.diagonal;
+        const floorY = meshBbox.min[1];
+        alignGridToFloor(scene, floorY);
+
+        const ellipsoidH = Math.max(0.15, effectiveDiagonal * 0.04);
+        walkCamera.ellipsoid = new Vector3(ellipsoidH * 0.28, ellipsoidH, ellipsoidH * 0.28);
         worldUnitRef.current = Math.min(0.12, Math.max(0.008, effectiveDiagonal * 0.004));
         walkSpeedRef.current = Math.min(20, Math.max(1, effectiveDiagonal * 0.5));
         walkCamera.speed = walkSpeedRef.current;
@@ -246,6 +253,8 @@ export function useMeshViewer({
           collisionMesh,
           utilityLayer,
           framingBehavior,
+          floorY,
+          effectiveDiagonal,
         };
         setZoneMeshes(zoneMeshes);
 

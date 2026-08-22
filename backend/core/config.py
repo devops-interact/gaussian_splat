@@ -73,8 +73,8 @@ QUALITY_PRESETS: Dict[QualityPreset, MeshyPresetConfig] = {
         auto_size=True,
     ),
     QualityPreset.QUALITY: MeshyPresetConfig(
-        name="Quality",
-        description="Highest fidelity (~15–25 min). 4K textures, max detail.",
+        name="Object — highest detail",
+        description="Single mesh from 4 views (~15–25 min). Best for one object, not full rooms.",
         fps=1.0,
         estimated_minutes=22,
         ai_model="meshy-7",
@@ -89,8 +89,8 @@ QUALITY_PRESETS: Dict[QualityPreset, MeshyPresetConfig] = {
         auto_size=True,
     ),
     QualityPreset.ROOM: MeshyPresetConfig(
-        name="Room (beta)",
-        description="Full-space reconstruction by zones (~35–45 min). Walls, floor, and scene coverage.",
+        name="Room — full space",
+        description="Reconstructs walls/floor by zones (~35–45 min). Recommended for walkthrough videos.",
         fps=1.0,
         estimated_minutes=40,
         ai_model="meshy-7",

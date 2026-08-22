@@ -22,6 +22,8 @@ export interface ViewerToolbarProps {
   onToggleAutoRotate: () => void;
   onEnterVR: () => void;
   onToggleHelp: () => void;
+  inspectionSlot?: React.ReactNode;
+  compositionLabel?: string;
 }
 
 export function ViewerToolbar({
@@ -36,21 +38,29 @@ export function ViewerToolbar({
   onToggleAutoRotate,
   onEnterVR,
   onToggleHelp,
+  inspectionSlot,
+  compositionLabel,
 }: ViewerToolbarProps) {
   return (
     <>
-      <div className="absolute top-3 left-3 z-10">
+      <div className="absolute top-3 left-3 z-10 flex flex-col gap-1.5">
         <div className="glass-panel text-white/80 text-xs px-3 py-1.5 flex items-center gap-2">
           {mode === 'orbit' && <><MousePointer className="w-3 h-3" /> Orbit</>}
           {mode === 'walkthrough' && <><Footprints className="w-3 h-3" /> Walk-Through</>}
           {mode === 'measure' && <><Ruler className="w-3 h-3" /> Measure</>}
         </div>
+        {compositionLabel && (
+          <div className="glass-panel text-[10px] text-amber-400/90 px-2.5 py-1 uppercase tracking-wide">
+            {compositionLabel}
+          </div>
+        )}
       </div>
 
       <div className="absolute top-3 right-3 z-10 flex flex-col gap-1.5">
         <ToolbarButton icon={<MousePointer className="w-3.5 h-3.5" />} label="Orbit" active={mode === 'orbit'} onClick={() => onModeChange('orbit')} />
         <ToolbarButton icon={<Footprints className="w-3.5 h-3.5" />} label="Walk" active={mode === 'walkthrough'} onClick={() => onModeChange('walkthrough')} />
         <ToolbarButton icon={<Ruler className="w-3.5 h-3.5" />} label="Measure" active={mode === 'measure'} onClick={() => onModeChange('measure')} />
+        {inspectionSlot}
         <div className="border-t border-white/[0.18] my-1" />
         <ToolbarButton icon={<Camera className="w-3.5 h-3.5" />} label="Snapshot" onClick={onSnapshot} />
         <ToolbarButton icon={<RotateCcw className="w-3.5 h-3.5" />} label="Reset" onClick={onReset} />
@@ -80,6 +90,7 @@ export function ViewerToolbar({
             <HelpItem icon={<MousePointer className="w-3 h-3" />} title="Orbit">Left-drag rotate. Shift/right-drag pan. Scroll zoom.</HelpItem>
             <HelpItem icon={<Footprints className="w-3 h-3" />} title="Walk-Through">WASD move with collision proxy. Mouse look.</HelpItem>
             <HelpItem icon={<Ruler className="w-3 h-3" />} title="Measure">Calibrate with two known points, then measure on mesh surfaces.</HelpItem>
+            <HelpItem icon={<Glasses className="w-3 h-3" />} title="Inspect">Wireframe, textures, PBR, exposure, grid, zones.</HelpItem>
             <HelpItem icon={<Glasses className="w-3 h-3" />} title="WebXR">Enter VR when a headset is available.</HelpItem>
           </div>
         </div>

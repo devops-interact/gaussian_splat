@@ -60,4 +60,6 @@ export interface BabylonViewerCtx {
   collisionMesh: AbstractMesh | null;
   utilityLayer: UtilityLayerRenderer;
   framingBehavior: FramingBehavior;
+  floorY: number;
+  effectiveDiagonal: number;
 }
