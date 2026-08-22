@@ -2,7 +2,7 @@
 Configuration settings for the application
 """
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Literal, Optional
 from pydantic_settings import BaseSettings
 from pydantic import BaseModel
 from functools import lru_cache
@@ -14,6 +14,7 @@ class QualityPreset(str, Enum):
     FAST = "fast"
     BALANCED = "balanced"
     QUALITY = "quality"
+    ROOM = "room"
 
 
 class MeshyPresetConfig(BaseModel):
@@ -28,9 +29,21 @@ class MeshyPresetConfig(BaseModel):
     texture_resolution: str = "2k"
     target_polycount: int = 50_000
     should_remesh: bool = False
-    ultra_mode: bool = False
     max_keyframes: int = 4
     meshy_timeout_s: float = 600.0
+    # Color / fidelity
+    texture_image_urls_mode: Literal["same", "wall_priority"] = "same"
+    image_enhancement: bool = False
+    remove_lighting: bool = False
+    auto_size: bool = True
+    origin_at: str = "bottom"
+    decimation_mode: Optional[int] = None
+    save_pre_remeshed_model: bool = True
+    multi_view_thumbnails: bool = False
+    # Room composition (preset room only)
+    n_zones: int = 4
+    composition_mode: Literal["single_object", "zone_mesh"] = "single_object"
+    room_shell_enabled: bool = False
 
 
 QUALITY_PRESETS: Dict[QualityPreset, MeshyPresetConfig] = {
@@ -43,6 +56,8 @@ QUALITY_PRESETS: Dict[QualityPreset, MeshyPresetConfig] = {
         enable_pbr=False,
         target_polycount=30_000,
         meshy_timeout_s=600.0,
+        image_enhancement=False,
+        auto_size=True,
     ),
     QualityPreset.BALANCED: MeshyPresetConfig(
         name="Balanced",
@@ -53,18 +68,45 @@ QUALITY_PRESETS: Dict[QualityPreset, MeshyPresetConfig] = {
         enable_pbr=True,
         target_polycount=50_000,
         meshy_timeout_s=900.0,
+        texture_image_urls_mode="wall_priority",
+        image_enhancement=False,
+        auto_size=True,
     ),
     QualityPreset.QUALITY: MeshyPresetConfig(
         name="Quality",
-        description="Highest fidelity (~15–25 min). 4K textures, ultra mode.",
+        description="Highest fidelity (~15–25 min). 4K textures, max detail.",
         fps=1.0,
         estimated_minutes=22,
         ai_model="meshy-7",
         enable_pbr=True,
         texture_resolution="4k",
         target_polycount=100_000,
-        ultra_mode=True,
         meshy_timeout_s=1800.0,
+        texture_image_urls_mode="wall_priority",
+        image_enhancement=False,
+        decimation_mode=1,
+        save_pre_remeshed_model=True,
+        auto_size=True,
+    ),
+    QualityPreset.ROOM: MeshyPresetConfig(
+        name="Room (beta)",
+        description="Full-space reconstruction by zones (~35–45 min). Walls, floor, and scene coverage.",
+        fps=1.0,
+        estimated_minutes=40,
+        ai_model="meshy-7",
+        enable_pbr=True,
+        texture_resolution="4k",
+        target_polycount=80_000,
+        meshy_timeout_s=1800.0,
+        texture_image_urls_mode="wall_priority",
+        image_enhancement=False,
+        decimation_mode=1,
+        save_pre_remeshed_model=True,
+        auto_size=True,
+        n_zones=4,
+        composition_mode="zone_mesh",
+        room_shell_enabled=True,
+        multi_view_thumbnails=True,
     ),
 }
 
@@ -103,6 +145,7 @@ class Settings(BaseSettings):
     MESHY_POLL_INTERVAL_S: float = 5.0
     MESHY_TIMEOUT_S: float = 600.0
     MESHY_WEBHOOK_SECRET: str = ""
+    MESHY_MAX_PARALLEL_JOBS: int = 3
 
     # Public base URL for keyframe images (Railway domain). Empty = data URIs.
     STORAGE_PUBLIC_BASE_URL: str = ""

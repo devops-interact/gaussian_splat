@@ -15,12 +15,12 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
-def publish_keyframes(job_id: str, keyframe_paths: List[Path]) -> List[str]:
+def publish_keyframes(job_id: str, keyframe_paths: List[Path], zone_id: int = 0) -> List[str]:
     """
     Copy keyframes to a public static path and return absolute URLs for Meshy.
     Falls back to data URIs when STORAGE_PUBLIC_BASE_URL is unset.
     """
-    dest_dir = settings.FRAMES_DIR / job_id / "keyframes"
+    dest_dir = settings.FRAMES_DIR / job_id / "keyframes" / f"zone_{zone_id}"
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     published: List[Path] = []
@@ -31,8 +31,11 @@ def publish_keyframes(job_id: str, keyframe_paths: List[Path]) -> List[str]:
 
     base = settings.STORAGE_PUBLIC_BASE_URL.rstrip("/") if settings.STORAGE_PUBLIC_BASE_URL else ""
     if base:
-        urls = [f"{base}/static/frames/{job_id}/keyframes/{p.name}" for p in published]
-        logger.info("Published %d keyframes at %s", len(urls), base)
+        urls = [
+            f"{base}/static/frames/{job_id}/keyframes/zone_{zone_id}/{p.name}"
+            for p in published
+        ]
+        logger.info("Published %d keyframes (zone %s) at %s", len(urls), zone_id, base)
         return urls
 
     logger.info("STORAGE_PUBLIC_BASE_URL unset — using data URIs for Meshy input")

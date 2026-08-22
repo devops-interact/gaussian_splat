@@ -1,14 +1,16 @@
 """
-Lightweight asyncio job queue — one Meshy reconstruction at a time.
+Lightweight asyncio job queue — Meshy reconstructions with limited parallelism.
 """
 import asyncio
 import logging
+from core.config import get_settings
 from core.models import Job
 from core.pipeline import process_job
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
-_semaphore = asyncio.Semaphore(1)
+_semaphore = asyncio.Semaphore(settings.MESHY_MAX_PARALLEL_JOBS)
 _active: set[str] = set()
 
 

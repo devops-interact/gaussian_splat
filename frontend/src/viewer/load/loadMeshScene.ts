@@ -118,3 +118,67 @@ export function modelMetadataFromJobResponse(
 }
 
 export { isCancel };
+
+export interface ZoneMeshHandle {
+  zoneId: number;
+  rootMesh: AbstractMesh;
+  geometryMeshes: AbstractMesh[];
+}
+
+export async function importComposedScene(
+  scene: Scene,
+  manifest: import('@/types/job').SceneManifestResponse,
+  apiBase: string,
+): Promise<{ rootMesh: AbstractMesh; geometryMeshes: AbstractMesh[]; zoneMeshes: ZoneMeshHandle[] }> {
+  const { TransformNode, Matrix, Vector3, Quaternion } = await import('@babylonjs/core');
+  const roomRoot = new TransformNode('room_root', scene);
+  const allGeometry: AbstractMesh[] = [];
+  const zoneMeshes: ZoneMeshHandle[] = [];
+
+  for (const zone of manifest.zones) {
+    const url = glbModelUrl(zone.mesh_url, apiBase);
+    const buffer = await fetchModelBuffer(url);
+    const { rootMesh, geometryMeshes } = await importGlbBuffer(scene, buffer, `zone_${zone.id}`);
+    rootMesh.parent = roomRoot;
+
+    if (zone.transform?.length === 4) {
+      const matrix = Matrix.FromArray(zone.transform.flat());
+      const scale = new Vector3();
+      const rotation = new Quaternion();
+      const position = new Vector3();
+      matrix.decompose(scale, rotation, position);
+      rootMesh.position = position;
+      rootMesh.rotationQuaternion = rotation;
+      rootMesh.scaling = scale;
+    }
+
+    for (const gm of geometryMeshes) {
+      gm.isPickable = true;
+      allGeometry.push(gm);
+    }
+    zoneMeshes.push({ zoneId: zone.id, rootMesh, geometryMeshes });
+  }
+
+  if (manifest.shell_url) {
+    try {
+      const shellUrl = glbModelUrl(manifest.shell_url, apiBase);
+      const shellBuf = await fetchModelBuffer(shellUrl);
+      const { rootMesh: shellRoot, geometryMeshes: shellGeo } = await importGlbBuffer(
+        scene, shellBuf, 'room_shell',
+      );
+      shellRoot.parent = roomRoot;
+      shellRoot.name = 'room_shell';
+      for (const gm of shellGeo) {
+        gm.isPickable = false;
+      }
+    } catch (e) {
+      console.warn('[Babylon] Room shell load failed:', e);
+    }
+  }
+
+  return {
+    rootMesh: roomRoot as unknown as AbstractMesh,
+    geometryMeshes: allGeometry,
+    zoneMeshes,
+  };
+}

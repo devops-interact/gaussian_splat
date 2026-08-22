@@ -33,4 +33,4 @@ def test_publish_keyframes_public_url(temp_storage, monkeypatch):
         "https://api.example.com",
     )
     urls = publish_keyframes("job-2", [src])
-    assert urls[0] == "https://api.example.com/static/frames/job-2/keyframes/keyframe_00.jpg"
+        assert urls[0] == "https://api.example.com/static/frames/job-2/keyframes/zone_0/keyframe_00.jpg"

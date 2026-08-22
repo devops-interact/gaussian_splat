@@ -12,6 +12,10 @@ import { isWebXRAvailable, tryCreateWebXRExperience, type WebXRHandle } from './
 import { downloadModel } from '@/api/jobs';
 import { MeasurePanel } from './ui/MeasurePanel';
 import { ViewerToolbar, ViewerModeHint } from './ui/ViewerToolbar';
+import { LightingPanel } from './ui/LightingPanel';
+import { ZoneToggles } from './ui/ZoneToggles';
+import { applyLighting, type LightingState } from './lighting/sceneLighting';
+import { loadViewerSettings } from '@/lib/viewerSettings';
 
 export type { ModelMetadata };
 
@@ -19,11 +23,15 @@ export default function Viewer3D({
   modelUrl,
   jobId = null,
   prefetchedJobModelMetadata = null,
+  sceneManifest = null,
   onModelMetadata,
 }: Viewer3DProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [mode, setMode] = useState<ViewerMode>('orbit');
   const [showHelp, setShowHelp] = useState(false);
+  const [showLighting, setShowLighting] = useState(false);
+  const [lighting, setLighting] = useState<LightingState>(() => loadViewerSettings().lighting);
+  const [visibleZones, setVisibleZones] = useState<Set<number>>(() => new Set());
   const [autoRotate, setAutoRotate] = useState(false);
   const [webXrAvailable, setWebXrAvailable] = useState(false);
   const [webXrBusy, setWebXrBusy] = useState(false);
@@ -50,18 +58,51 @@ export default function Viewer3D({
     metadataRef,
     sceneScaleRef,
     worldUnitRef,
+    zoneMeshes,
   } = useMeshViewer({
     canvasRef,
     modelUrl,
     jobId,
     prefetchedJobModelMetadata,
+    sceneManifest,
     onModelMetadata,
   });
 
   const isLoading = loadPhase !== 'ready' && loadPhase !== 'error' && loadPhase !== 'idle';
 
+  useEffect(() => {
+    if (zoneMeshes.length > 0) {
+      setVisibleZones(new Set(zoneMeshes.map((z) => z.zoneId)));
+    }
+  }, [zoneMeshes]);
+
+  useEffect(() => {
+    const scene = viewerRef.current?.scene;
+    if (scene && loadPhase === 'ready') {
+      applyLighting(scene, lighting);
+    }
+  }, [lighting, loadPhase, viewerRef]);
+
+  const handleZoneToggle = useCallback((zoneId: number) => {
+    setVisibleZones((prev) => {
+      const next = new Set(prev);
+      if (next.has(zoneId)) next.delete(zoneId);
+      else next.add(zoneId);
+      const ctx = viewerRef.current;
+      if (ctx) {
+        const zm = ctx.zoneMeshes.find((z) => z.zoneId === zoneId);
+        if (zm) {
+          const visible = next.has(zoneId);
+          zm.rootMesh.setEnabled(visible);
+          for (const gm of zm.geometryMeshes) gm.setEnabled(visible);
+        }
+      }
+      return next;
+    });
+  }, [viewerRef]);
+
   useCameraMode(viewerRef, canvasRef, mode, loadPhase, autoRotate);
-  useWalkthroughMode(viewerRef, canvasRef, mode, loadPhase);
+  useWalkthroughMode(viewerRef, canvasRef, mode, loadPhase, sceneManifest);
 
   const resetView = useResetView(viewerRef, canvasRef, initialPoseRef);
 
@@ -213,7 +254,7 @@ export default function Viewer3D({
     }
   }, [viewerRef, webXrBusy]);
 
-  if (!modelUrl) return null;
+  if (!modelUrl && !(sceneManifest?.zones?.length)) return null;
 
   return (
     <div className="w-full h-full relative group bg-neutral-950 rounded-xl overflow-hidden">
@@ -264,6 +305,19 @@ export default function Viewer3D({
             onToggleAutoRotate={() => setAutoRotate((v) => !v)}
             onEnterVR={() => void handleEnterVR()}
             onToggleHelp={() => setShowHelp((v) => !v)}
+          />
+
+          <LightingPanel
+            lighting={lighting}
+            onChange={setLighting}
+            open={showLighting}
+            onToggle={() => setShowLighting((v) => !v)}
+          />
+
+          <ZoneToggles
+            zoneMeshes={zoneMeshes}
+            visibleZones={visibleZones}
+            onToggle={handleZoneToggle}
           />
 
           {mode === 'measure' && (

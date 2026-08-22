@@ -111,7 +111,8 @@ async def get_presets():
             id=preset.value,
             name=config.name,
             description=config.description,
-            estimated_minutes=config.estimated_minutes
+            estimated_minutes=config.estimated_minutes,
+            composition_mode=config.composition_mode,
         )
         for preset, config in QUALITY_PRESETS.items()
     ]
@@ -127,7 +128,8 @@ async def get_preset(preset_id: str):
             id=preset.value,
             name=config.name,
             description=config.description,
-            estimated_minutes=config.estimated_minutes
+            estimated_minutes=config.estimated_minutes,
+            composition_mode=config.composition_mode,
         )
     except ValueError:
         from fastapi import HTTPException

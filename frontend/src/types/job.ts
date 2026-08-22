@@ -6,6 +6,7 @@ export enum JobStatus {
   SUBMITTING_RECONSTRUCTION = "submitting_reconstruction",
   RECONSTRUCTING = "reconstructing",
   DOWNLOADING_MODEL = "downloading_model",
+  COMPOSING_SCENE = "composing_scene",
   COMPLETED = "completed",
   ERROR = "error",
 }
@@ -32,6 +33,36 @@ export interface ModelMetadataResponse {
   meshy_task_id?: string;
 }
 
+export interface KeyframeInfo {
+  url: string;
+  index: number;
+  zone_id?: number | null;
+  yaw_deg?: number | null;
+  sharpness?: number | null;
+}
+
+export interface ZoneMeshInfo {
+  id: number;
+  mesh_url: string;
+  meshy_task_id?: string | null;
+  transform: number[][];
+}
+
+export interface SceneManifestResponse {
+  composition_mode: string;
+  zones: ZoneMeshInfo[];
+  shell_url?: string | null;
+  walk_path?: number[][] | null;
+}
+
+export interface PresetInfo {
+  id: string;
+  name: string;
+  description: string;
+  estimated_minutes: number;
+  composition_mode?: string;
+}
+
 export interface Job {
   job_id: string;
   status: JobStatus;
@@ -45,6 +76,10 @@ export interface Job {
   meshy_task_id?: string;
   validation?: ValidationInfo;
   model_metadata?: ModelMetadataResponse;
+  keyframes?: KeyframeInfo[];
+  scene_manifest?: SceneManifestResponse;
+  current_zone?: number;
+  total_zones?: number;
   created_at: string;
   updated_at: string;
 }
@@ -62,6 +97,10 @@ export interface JobStatusResponse {
   meshy_task_id?: string;
   validation?: ValidationInfo;
   model_metadata?: ModelMetadataResponse;
+  keyframes?: KeyframeInfo[];
+  scene_manifest?: SceneManifestResponse;
+  current_zone?: number;
+  total_zones?: number;
   created_at: string;
   updated_at: string;
 }

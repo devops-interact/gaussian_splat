@@ -28,10 +28,10 @@ export function modelFetchAbortSignal(): AbortSignal | undefined {
   return undefined;
 }
 
+import { getSceneScale } from '@/lib/viewerSettings';
+
 export function parseViewerSceneScale(): number {
-  const raw = import.meta.env.VITE_VIEWER_SCENE_SCALE;
-  if (raw === undefined || raw === '') return 1;
-  const n = Number(String(raw).trim());
+  const n = getSceneScale();
   if (!Number.isFinite(n) || n <= 0) return 1;
   return Math.max(VIEWER_SCENE_SCALE_MIN, Math.min(VIEWER_SCENE_SCALE_MAX, n));
 }

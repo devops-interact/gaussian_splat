@@ -214,7 +214,106 @@ async def get_job_status(job_id: str, request: Request):
             "meshy_task_id": md.meshy_task_id,
         }
 
+    if job.keyframes:
+        response["keyframes"] = [
+            {
+                "url": k.url,
+                "index": k.index,
+                "zone_id": k.zone_id,
+                "yaw_deg": k.yaw_deg,
+                "sharpness": k.sharpness,
+            }
+            for k in job.keyframes
+        ]
+
+    if job.scene_manifest:
+        sm = job.scene_manifest
+        response["scene_manifest"] = {
+            "composition_mode": sm.composition_mode,
+            "zones": [
+                {
+                    "id": z.id,
+                    "mesh_url": z.mesh_url,
+                    "meshy_task_id": z.meshy_task_id,
+                    "transform": z.transform,
+                }
+                for z in sm.zones
+            ],
+            "shell_url": sm.shell_url,
+            "walk_path": sm.walk_path,
+        }
+
+    if job.current_zone is not None:
+        response["current_zone"] = job.current_zone
+    if job.total_zones is not None:
+        response["total_zones"] = job.total_zones
+
     return response
+
+
+@router.get("/{job_id}/scene")
+async def get_scene_manifest(job_id: str):
+    job_manager = get_job_manager()
+    job = await job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not job.scene_manifest:
+        raise HTTPException(status_code=404, detail="Scene manifest not available")
+    sm = job.scene_manifest
+    return {
+        "composition_mode": sm.composition_mode,
+        "zones": [
+            {
+                "id": z.id,
+                "mesh_url": z.mesh_url,
+                "meshy_task_id": z.meshy_task_id,
+                "transform": z.transform,
+            }
+            for z in sm.zones
+        ],
+        "shell_url": sm.shell_url,
+        "walk_path": sm.walk_path,
+    }
+
+
+@router.get("/{job_id}/zones/{zone_id}")
+async def download_zone_model(job_id: str, zone_id: int):
+    job_manager = get_job_manager()
+    job = await job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != JobStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail=f"Job not completed. Current status: {job.status}")
+
+    zone_path = settings.MODELS_DIR / job_id / f"zone_{zone_id}.glb"
+    if not zone_path.exists():
+        raise HTTPException(status_code=404, detail="Zone model not found")
+
+    return FileResponse(
+        path=str(zone_path),
+        filename=f"{job_id}_zone_{zone_id}.glb",
+        media_type="model/gltf-binary",
+        headers={"Cross-Origin-Resource-Policy": "cross-origin"},
+    )
+
+
+@router.get("/{job_id}/shell")
+async def download_shell_model(job_id: str):
+    job_manager = get_job_manager()
+    job = await job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    shell_path = settings.MODELS_DIR / job_id / "shell.glb"
+    if not shell_path.exists():
+        raise HTTPException(status_code=404, detail="Room shell not found")
+
+    return FileResponse(
+        path=str(shell_path),
+        filename=f"{job_id}_shell.glb",
+        media_type="model/gltf-binary",
+        headers={"Cross-Origin-Resource-Policy": "cross-origin"},
+    )
 
 
 @router.get("/{job_id}/model")
@@ -272,11 +371,22 @@ async def get_preview_url(job_id: str):
 
 @router.post("/webhooks/meshy")
 async def meshy_webhook(request: Request):
-    """Optional webhook for Meshy task completion (future use)."""
+    """Meshy task completion webhook — triggers recovery for timed-out jobs."""
     if settings.MESHY_WEBHOOK_SECRET:
         token = request.headers.get("X-Meshy-Webhook-Secret", "")
         if token != settings.MESHY_WEBHOOK_SECRET:
             raise HTTPException(status_code=401, detail="Invalid webhook secret")
     body = await request.json()
     logger.info("Meshy webhook received: %s", json.dumps(body)[:500])
+
+    task_id = body.get("id") or body.get("task_id") or (body.get("result") or {}).get("id")
+    status = (body.get("status") or "").upper()
+    if task_id and status == "SUCCEEDED":
+        job_manager = get_job_manager()
+        try:
+            import asyncio
+            asyncio.create_task(job_manager._recover_meshy_errored_jobs())
+        except Exception as e:
+            logger.warning("Webhook recovery trigger failed: %s", e)
+
     return {"ok": True}

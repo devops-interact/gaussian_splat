@@ -1,12 +1,13 @@
 import type { AbstractMesh, ArcRotateCamera, Engine, Scene, UniversalCamera } from '@babylonjs/core';
 import type { UtilityLayerRenderer } from '@babylonjs/core/Rendering/utilityLayerRenderer';
 import type { FramingBehavior } from '@babylonjs/core/Behaviors/Cameras/framingBehavior';
-import type { ModelMetadataResponse } from '@/types/job';
+import type { ModelMetadataResponse, SceneManifestResponse } from '@/types/job';
 
 export interface Viewer3DProps {
   modelUrl: string | null;
   jobId?: string | null;
   prefetchedJobModelMetadata?: ModelMetadataResponse | null;
+  sceneManifest?: SceneManifestResponse | null;
   onModelMetadata?: (meta: ModelMetadata) => void;
 }
 
@@ -55,6 +56,7 @@ export interface BabylonViewerCtx {
   walkCamera: UniversalCamera;
   rootMesh: AbstractMesh | null;
   geometryMeshes: AbstractMesh[];
+  zoneMeshes: import('./load/loadMeshScene').ZoneMeshHandle[];
   collisionMesh: AbstractMesh | null;
   utilityLayer: UtilityLayerRenderer;
   framingBehavior: FramingBehavior;

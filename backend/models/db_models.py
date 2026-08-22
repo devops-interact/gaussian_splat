@@ -64,6 +64,10 @@ class JobRecord(Base):
     meshy_task_id = Column(String(64), nullable=True)
     validation_json = Column(Text, nullable=True)
     model_metadata_json = Column(Text, nullable=True)
+    keyframes_json = Column(Text, nullable=True)
+    scene_manifest_json = Column(Text, nullable=True)
+    current_zone = Column(Integer, nullable=True)
+    total_zones = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -78,3 +82,15 @@ class JobRecord(Base):
 
     def get_model_metadata(self):
         return json.loads(self.model_metadata_json) if self.model_metadata_json else None
+
+    def set_keyframes(self, data) -> None:
+        self.keyframes_json = json.dumps(data) if data else None
+
+    def get_keyframes(self):
+        return json.loads(self.keyframes_json) if self.keyframes_json else None
+
+    def set_scene_manifest(self, data) -> None:
+        self.scene_manifest_json = json.dumps(data) if data else None
+
+    def get_scene_manifest(self):
+        return json.loads(self.scene_manifest_json) if self.scene_manifest_json else None

@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import type { ModelMetadata } from './Viewer3D';
+import { getApiBaseUrl } from '@/lib/apiBase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   HardDrive,
@@ -11,6 +12,8 @@ import {
   CheckCircle,
   Palette,
   Loader2,
+  Link2,
+  Image,
 } from 'lucide-react';
 
 interface TechnicalDetailsProps {
@@ -19,8 +22,17 @@ interface TechnicalDetailsProps {
     qualityPreset?: string;
     elapsedTime?: string;
     isProcessing?: boolean;
+    meshyTaskId?: string;
+    thumbnailUrl?: string;
+    processingTimeSeconds?: number;
   };
   embedded?: boolean;
+}
+
+function resolveAssetUrl(url: string): string {
+  if (url.startsWith('http')) return url;
+  const base = getApiBaseUrl().replace(/\/$/, '');
+  return `${base}${url.startsWith('/') ? url : `/${url}`}`;
 }
 
 function formatFileSize(bytes: number): string {
@@ -89,7 +101,25 @@ export default function TechnicalDetails({ metadata, jobInfo, embedded }: Techni
         {details ? (
           <div className="divide-y divide-white/[0.05]">
             <DetailRow icon={<HardDrive className="w-3.5 h-3.5" />} label="File Size" value={details.fileSize} />
-            <DetailRow icon={<Clock className="w-3.5 h-3.5" />} label="Processing Time" value={jobInfo?.elapsedTime || '--'} />
+            <DetailRow icon={<Clock className="w-3.5 h-3.5" />} label="Processing Time" value={
+              jobInfo?.processingTimeSeconds
+                ? `${Math.floor(jobInfo.processingTimeSeconds / 60)}:${String(jobInfo.processingTimeSeconds % 60).padStart(2, '0')}`
+                : (jobInfo?.elapsedTime || '--')
+            } />
+            {jobInfo?.meshyTaskId && (
+              <DetailRow
+                icon={<Link2 className="w-3.5 h-3.5" />}
+                label="Meshy Task"
+                value={<span className="font-mono text-[10px]">{jobInfo.meshyTaskId.slice(0, 12)}…</span>}
+              />
+            )}
+            {jobInfo?.thumbnailUrl && (
+              <DetailRow
+                icon={<Image className="w-3.5 h-3.5" />}
+                label="Thumbnail"
+                value={<img src={resolveAssetUrl(jobInfo.thumbnailUrl)} alt="Meshy preview" className="w-8 h-8 rounded object-cover" />}
+              />
+            )}
             <DetailRow icon={<Layers className="w-3.5 h-3.5" />} label="Vertices" value={details.vertexCount} />
             <DetailRow icon={<Grid3X3 className="w-3.5 h-3.5" />} label="Faces" value={details.faceCount} />
             <DetailRow icon={<Camera className="w-3.5 h-3.5" />} label="Quality Preset" value={jobInfo?.qualityPreset || '--'} capitalize />

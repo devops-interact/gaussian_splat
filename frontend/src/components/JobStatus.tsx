@@ -12,6 +12,13 @@ interface JobStatusProps {
     modelUrl: string,
     objUrl?: string,
     modelMetadata?: ModelMetadataResponse,
+    extras?: {
+      keyframes?: import('../types/job').KeyframeInfo[];
+      scene_manifest?: import('../types/job').SceneManifestResponse;
+      processing_time_seconds?: number;
+      meshy_task_id?: string;
+      quality_preset?: string;
+    },
   ) => void;
   /** Mirrors `quality_preset` from each successful status poll (null when job id changes, before first poll). */
   onQualityPresetChange?: (preset: string | null) => void;
@@ -27,6 +34,7 @@ const STATUS_LABELS: Record<JobStatusEnum, string> = {
   [JobStatusEnum.SUBMITTING_RECONSTRUCTION]: 'Submitting to Meshy AI',
   [JobStatusEnum.RECONSTRUCTING]: 'AI reconstructing 3D mesh',
   [JobStatusEnum.DOWNLOADING_MODEL]: 'Downloading model',
+  [JobStatusEnum.COMPOSING_SCENE]: 'Composing room scene',
   [JobStatusEnum.COMPLETED]: 'Completed',
   [JobStatusEnum.ERROR]: 'Processing Error',
 };
@@ -35,6 +43,7 @@ const PRESET_LABELS: Record<string, string> = {
   fast: 'Fast (~5 min est.)',
   balanced: 'Balanced (~8 min est.)',
   quality: 'Quality (~22 min est.)',
+  room: 'Room beta (~40 min est.)',
 };
 
 const POLL_OK_MS = 2000;
@@ -92,6 +101,8 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, on
   const [pollSession, setPollSession] = useState(0);
   const [qualityPreset, setQualityPreset] = useState<string | null>(null);
   const [estimatedMinutes, setEstimatedMinutes] = useState<number | null>(null);
+  const [currentZone, setCurrentZone] = useState<number | null>(null);
+  const [totalZones, setTotalZones] = useState<number | null>(null);
   const [startTime] = useState<Date>(new Date());
   const [elapsedTime, setElapsedTime] = useState<string>('0:00');
 
@@ -148,6 +159,8 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, on
             onQualityPresetChangeRef.current?.(response.quality_preset);
           }
           if (response.estimated_minutes) setEstimatedMinutes(response.estimated_minutes);
+          if (response.current_zone != null) setCurrentZone(response.current_zone);
+          if (response.total_zones != null) setTotalZones(response.total_zones);
           if (response.status === JobStatusEnum.COMPLETED && response.model_url) {
             if (completionNotifiedForJobIdRef.current !== jobId) {
               completionNotifiedForJobIdRef.current = jobId;
@@ -155,6 +168,13 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, on
                 response.model_url,
                 response.model_url_obj ?? undefined,
                 response.model_metadata,
+                {
+                  keyframes: response.keyframes,
+                  scene_manifest: response.scene_manifest,
+                  processing_time_seconds: response.processing_time_seconds,
+                  meshy_task_id: response.meshy_task_id,
+                  quality_preset: response.quality_preset,
+                },
               );
             }
             return;
@@ -262,6 +282,11 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, on
             {estimatedMinutes && (
               <p className="text-xs text-center text-gray-600 mt-2">
                 Estimated total time: ~{estimatedMinutes} minutes
+                {totalZones != null && totalZones > 1 && currentZone != null && (
+                  <span className="block text-gray-500 mt-0.5">
+                    Zone {currentZone + 1} of {totalZones}
+                  </span>
+                )}
               </p>
             )}
           </div>

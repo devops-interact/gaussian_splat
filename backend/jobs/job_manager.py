@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from core.models import Job, JobStatus, VideoValidation, ModelMetadata
+from core.models import Job, JobStatus, VideoValidation, ModelMetadata, KeyframeInfo, SceneManifest
 from core.config import get_settings, QualityPreset
 import database
 from models.db_models import JobRecord
@@ -42,6 +42,14 @@ def _record_to_job(record: JobRecord) -> Job:
     if record.model_metadata_json:
         model_metadata = ModelMetadata(**record.get_model_metadata())
 
+    keyframes = []
+    if record.keyframes_json:
+        keyframes = [KeyframeInfo(**k) for k in record.get_keyframes()]
+
+    scene_manifest = None
+    if record.scene_manifest_json:
+        scene_manifest = SceneManifest(**record.get_scene_manifest())
+
     return Job(
         job_id=record.job_id,
         status=status,
@@ -59,6 +67,10 @@ def _record_to_job(record: JobRecord) -> Job:
         model_metadata=model_metadata,
         processing_time_seconds=record.processing_time_seconds,
         meshy_task_id=record.meshy_task_id,
+        keyframes=keyframes,
+        scene_manifest=scene_manifest,
+        current_zone=record.current_zone,
+        total_zones=record.total_zones,
     )
 
 
@@ -76,11 +88,19 @@ def _job_to_record(job: Job, record: Optional[JobRecord] = None) -> JobRecord:
     record.estimated_minutes = job.estimated_minutes
     record.processing_time_seconds = job.processing_time_seconds
     record.meshy_task_id = job.meshy_task_id
+    record.current_zone = job.current_zone
+    record.total_zones = job.total_zones
     record.updated_at = job.updated_at
     if job.validation:
         record.set_validation(job.validation.model_dump(mode="json"))
     if job.model_metadata:
         record.set_model_metadata(job.model_metadata.model_dump(mode="json"))
+    if job.keyframes:
+        record.set_keyframes([k.model_dump(mode="json") for k in job.keyframes])
+    elif job.keyframes == []:
+        record.set_keyframes([])
+    if job.scene_manifest:
+        record.set_scene_manifest(job.scene_manifest.model_dump(mode="json"))
     return record
 
 
@@ -190,6 +210,7 @@ class JobManager:
             JobStatus.SUBMITTING_RECONSTRUCTION,
             JobStatus.RECONSTRUCTING,
             JobStatus.DOWNLOADING_MODEL,
+            JobStatus.COMPOSING_SCENE,
         }
         recovered = 0
         db = database.SessionLocal()

@@ -4,18 +4,21 @@ High-level orchestration: video → keyframes → Meshy multi-image-to-3D → GL
 import logging
 import time
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
-from core.config import get_settings, QUALITY_PRESETS, QualityPreset
-from core.models import Job, JobStatus, ModelMetadata
+from core.config import get_settings, QUALITY_PRESETS, QualityPreset, MeshyPresetConfig
+from core.models import Job, JobStatus, ModelMetadata, KeyframeInfo
 from jobs.job_manager import get_job_manager
 from services.video.extract_frames import extract_frames
 from services.meshy.client import MeshyClient, MeshyError
+from services.meshy.camera_pose import estimate_yaw_by_index
 from services.meshy.keyframe_selector import (
+    frame_candidates_from_paths,
     laplacian_sharpness,
     list_frame_paths,
     select_keyframes,
 )
+from services.meshy.meshy_params import meshy_task_kwargs
 from services.meshy.storage_upload import publish_keyframes
 
 logger = logging.getLogger(__name__)
@@ -72,15 +75,14 @@ async def finalize_meshy_result(
     processing_time_seconds: Optional[float] = None,
 ) -> Job:
     """Download GLB/OBJ from a succeeded Meshy task and mark the job completed."""
-    model_urls = result.get("model_urls") or {}
-    glb_url = model_urls.get("glb") or model_urls.get("pre_remeshed_glb")
+    glb_url = MeshyClient.best_glb_url(result)
     if not glb_url:
         raise MeshyError("Meshy task succeeded but no GLB URL returned")
 
     glb_path = settings.MODELS_DIR / f"{job.job_id}.glb"
     await client.download_file(glb_url, str(glb_path))
 
-    obj_url = model_urls.get("obj")
+    obj_url = (result.get("model_urls") or {}).get("obj")
     if obj_url:
         obj_path = settings.MODELS_DIR / job.job_id / f"{job.job_id}.obj"
         try:
@@ -110,106 +112,137 @@ def _meshy_timeout_for_preset(preset: QualityPreset) -> float:
     return preset_config.meshy_timeout_s or settings.MESHY_TIMEOUT_S
 
 
-async def process_job(job: Job) -> Job:
+def _build_keyframe_metadata(
+    job_id: str,
+    keyframe_paths: List[Path],
+    image_urls: List[str],
+    yaw_by_index: dict,
+    sharpness_by_index: dict,
+) -> List[KeyframeInfo]:
+    candidates = frame_candidates_from_paths(
+        keyframe_paths,
+        yaw_by_index=yaw_by_index,
+        sharpness_by_index=sharpness_by_index,
+    )
+    path_to_c = {c.path: c for c in candidates}
+    result: List[KeyframeInfo] = []
+    for i, path in enumerate(keyframe_paths):
+        c = path_to_c.get(path)
+        result.append(KeyframeInfo(
+            url=image_urls[i] if i < len(image_urls) else "",
+            index=c.index if c else i,
+            zone_id=None,
+            yaw_deg=c.yaw_deg if c else yaw_by_index.get(i),
+            sharpness=c.sharpness if c else sharpness_by_index.get(i),
+        ))
+    return result
+
+
+async def process_single_object_job(job: Job) -> Job:
     job_manager = get_job_manager()
     start_time = time.time()
 
+    preset = job.quality_preset or QualityPreset.BALANCED
+    preset_config = QUALITY_PRESETS[preset]
+    meshy_timeout = _meshy_timeout_for_preset(preset)
+    logger.info(
+        "Processing job %s preset=%s meshy_timeout_s=%s",
+        job.job_id,
+        preset.value,
+        meshy_timeout,
+    )
+
+    job.status = JobStatus.EXTRACTING_FRAMES
+    job.progress = 0.15
+    await job_manager.update_job(job)
+
+    video_path = settings.UPLOADS_DIR / job.video_filename
+    frames_dir = settings.FRAMES_DIR / job.job_id
+    await extract_frames(video_path, frames_dir, preset_config.fps)
+
+    job.status = JobStatus.SELECTING_KEYFRAMES
+    job.progress = 0.25
+    await job_manager.update_job(job)
+
+    frame_paths = list_frame_paths(frames_dir)
+    if not frame_paths:
+        raise ValueError(f"No frames found in {frames_dir}")
+
+    yaw_by_index = estimate_yaw_by_index(frame_paths, fps=preset_config.fps)
+    sharpness_by_index = {i: laplacian_sharpness(p) for i, p in enumerate(frame_paths)}
+    keyframes = select_keyframes(
+        frame_paths,
+        max_count=preset_config.max_keyframes,
+        yaw_by_index=yaw_by_index,
+        sharpness_by_index=sharpness_by_index,
+    )
+    image_urls = publish_keyframes(job.job_id, keyframes)
+    job.keyframes = _build_keyframe_metadata(
+        job.job_id, keyframes, image_urls, yaw_by_index, sharpness_by_index
+    )
+
+    job.status = JobStatus.SUBMITTING_RECONSTRUCTION
+    job.progress = 0.35
+    await job_manager.update_job(job)
+
+    client = MeshyClient(
+        api_key=settings.MESHY_API_KEY,
+        poll_interval_s=settings.MESHY_POLL_INTERVAL_S,
+        timeout_s=meshy_timeout,
+    )
+
+    kwargs = meshy_task_kwargs(preset_config, image_urls)
+    task_id = await client.create_multi_image_task(image_urls=image_urls, **kwargs)
+    job.meshy_task_id = task_id
+
+    job.status = JobStatus.RECONSTRUCTING
+    job.progress = 0.45
+    await job_manager.update_job(job)
+
+    async def on_poll(task: dict) -> None:
+        progress = task.get("progress", 0)
+        job.progress = 0.35 + (progress / 100.0) * 0.50
+        await job_manager.update_job(job)
+
+    result = await client.poll_until_complete(task_id, on_poll=on_poll)
+
+    job.status = JobStatus.DOWNLOADING_MODEL
+    job.progress = 0.90
+    await job_manager.update_job(job)
+
+    job = await finalize_meshy_result(
+        job,
+        client,
+        result,
+        task_id,
+        processing_time_seconds=round(time.time() - start_time, 1),
+    )
+    await job_manager.update_job(job)
+
+    logger.info(
+        "Job %s completed in %ss (Meshy task %s)",
+        job.job_id,
+        job.processing_time_seconds,
+        task_id,
+    )
+    return job
+
+
+async def process_job(job: Job) -> Job:
     if not settings.MESHY_API_KEY:
         job.status = JobStatus.ERROR
         job.error_message = "MESHY_API_KEY is not configured"
-        await job_manager.update_job(job)
+        await get_job_manager().update_job(job)
         return job
+
+    preset = job.quality_preset or QualityPreset.BALANCED
+    preset_config = QUALITY_PRESETS[preset]
 
     try:
-        preset = job.quality_preset or QualityPreset.BALANCED
-        preset_config = QUALITY_PRESETS[preset]
-        meshy_timeout = _meshy_timeout_for_preset(preset)
-        logger.info(
-            "Processing job %s preset=%s meshy_timeout_s=%s",
-            job.job_id,
-            preset.value,
-            meshy_timeout,
-        )
-
-        job.status = JobStatus.EXTRACTING_FRAMES
-        job.progress = 0.15
-        await job_manager.update_job(job)
-
-        video_path = settings.UPLOADS_DIR / job.video_filename
-        frames_dir = settings.FRAMES_DIR / job.job_id
-        await extract_frames(video_path, frames_dir, preset_config.fps)
-
-        job.status = JobStatus.SELECTING_KEYFRAMES
-        job.progress = 0.25
-        await job_manager.update_job(job)
-
-        frame_paths = list_frame_paths(frames_dir)
-        if not frame_paths:
-            raise ValueError(f"No frames found in {frames_dir}")
-
-        sharpness_by_index = {i: laplacian_sharpness(p) for i, p in enumerate(frame_paths)}
-        keyframes = select_keyframes(
-            frame_paths,
-            max_count=preset_config.max_keyframes,
-            sharpness_by_index=sharpness_by_index,
-        )
-        image_urls = publish_keyframes(job.job_id, keyframes)
-
-        job.status = JobStatus.SUBMITTING_RECONSTRUCTION
-        job.progress = 0.35
-        await job_manager.update_job(job)
-
-        client = MeshyClient(
-            api_key=settings.MESHY_API_KEY,
-            poll_interval_s=settings.MESHY_POLL_INTERVAL_S,
-            timeout_s=meshy_timeout,
-        )
-
-        task_id = await client.create_multi_image_task(
-            image_urls=image_urls,
-            ai_model=preset_config.ai_model,
-            should_texture=preset_config.should_texture,
-            enable_pbr=preset_config.enable_pbr,
-            texture_resolution=preset_config.texture_resolution,
-            target_polycount=preset_config.target_polycount,
-            should_remesh=preset_config.should_remesh,
-            ultra_mode=preset_config.ultra_mode,
-            target_formats=["glb", "obj"],
-        )
-        job.meshy_task_id = task_id
-
-        job.status = JobStatus.RECONSTRUCTING
-        job.progress = 0.45
-        await job_manager.update_job(job)
-
-        async def on_poll(task: dict) -> None:
-            progress = task.get("progress", 0)
-            job.progress = 0.35 + (progress / 100.0) * 0.50
-            await job_manager.update_job(job)
-
-        result = await client.poll_until_complete(task_id, on_poll=on_poll)
-
-        job.status = JobStatus.DOWNLOADING_MODEL
-        job.progress = 0.90
-        await job_manager.update_job(job)
-
-        job = await finalize_meshy_result(
-            job,
-            client,
-            result,
-            task_id,
-            processing_time_seconds=round(time.time() - start_time, 1),
-        )
-        await job_manager.update_job(job)
-
-        logger.info(
-            "Job %s completed in %ss (Meshy task %s)",
-            job.job_id,
-            job.processing_time_seconds,
-            task_id,
-        )
-        return job
-
+        if preset_config.composition_mode == "zone_mesh":
+            from core.pipeline_room import process_room_job
+            return await process_room_job(job)
+        return await process_single_object_job(job)
     except MeshyError as e:
         msg = str(e)
         if job.meshy_task_id and "timed out" in msg.lower():
@@ -221,11 +254,11 @@ async def process_job(job: Job) -> Job:
         logger.error("Error processing job %s: %s", job.job_id, msg, exc_info=True)
         job.status = JobStatus.ERROR
         job.error_message = msg
-        await job_manager.update_job(job)
+        await get_job_manager().update_job(job)
         return job
     except Exception as e:
         logger.error("Error processing job %s: %s", job.job_id, e, exc_info=True)
         job.status = JobStatus.ERROR
         job.error_message = str(e)
-        await job_manager.update_job(job)
+        await get_job_manager().update_job(job)
         return job

@@ -5,6 +5,7 @@ import { UtilityLayerRenderer } from '@babylonjs/core/Rendering/utilityLayerRend
 import { isAxiosError, isCancel } from 'axios';
 import { getApiBaseUrl } from '@/lib/apiBase';
 import type { ModelMetadataResponse } from '@/types/job';
+import type { SceneManifestResponse } from '@/types/job';
 import {
   applyInitialCameraPose,
   attachFramingBehavior,
@@ -22,6 +23,7 @@ import {
   createCollisionProxy,
   fetchModelBuffer,
   glbModelUrl,
+  importComposedScene,
   importGlbBuffer,
   modelMetadataFromJobResponse,
 } from '../load/loadMeshScene';
@@ -35,6 +37,7 @@ export interface UseMeshViewerOptions {
   modelUrl: string | null;
   jobId?: string | null;
   prefetchedJobModelMetadata?: ModelMetadataResponse | null;
+  sceneManifest?: SceneManifestResponse | null;
   onModelMetadata?: (meta: ModelMetadata) => void;
 }
 
@@ -49,12 +52,14 @@ export interface UseMeshViewerResult {
   sceneScaleRef: RefObject<number>;
   worldUnitRef: RefObject<number>;
   walkSpeedRef: RefObject<number>;
+  zoneMeshes: import('../load/loadMeshScene').ZoneMeshHandle[];
 }
 
 export function useMeshViewer({
   canvasRef,
   modelUrl,
   prefetchedJobModelMetadata = null,
+  sceneManifest = null,
   onModelMetadata,
 }: UseMeshViewerOptions): UseMeshViewerResult {
   const viewerRef = useRef<BabylonViewerCtx | null>(null);
@@ -70,9 +75,11 @@ export function useMeshViewer({
   const [loadProgress, setLoadProgress] = useState(0);
   const [loadLabel, setLoadLabel] = useState('Initializing…');
   const [error, setError] = useState<string | null>(null);
+  const [zoneMeshes, setZoneMeshes] = useState<import('../load/loadMeshScene').ZoneMeshHandle[]>([]);
 
   useEffect(() => {
-    if (!canvasRef.current || !modelUrl) return;
+    const hasScene = sceneManifest?.composition_mode === 'zone_mesh' && (sceneManifest.zones?.length ?? 0) > 0;
+    if (!canvasRef.current || (!modelUrl && !hasScene)) return;
 
     let disposed = false;
     let resizeObserver: ResizeObserver | undefined;
@@ -125,6 +132,7 @@ export function useMeshViewer({
       walkCamera,
       rootMesh: null,
       geometryMeshes: [],
+      zoneMeshes: [],
       collisionMesh: null,
       utilityLayer,
       framingBehavior,
@@ -132,27 +140,35 @@ export function useMeshViewer({
 
     (async () => {
       try {
-        setLoadPhase('fetching');
-        setLoadLabel('Fetching 3D model…');
+        const isComposed = sceneManifest?.composition_mode === 'zone_mesh' && (sceneManifest.zones?.length ?? 0) > 0;
+        let buffer: ArrayBuffer | null = null;
 
-        const glbUrl = glbModelUrl(modelUrl, apiBase);
-        const fetchSignal = modelFetchAbortSignal();
-        const buffer = await fetchModelBuffer(glbUrl, fetchSignal, (pct) => {
-          if (!disposed) setLoadProgress(pct);
-        });
+        if (!isComposed) {
+          setLoadPhase('fetching');
+          setLoadLabel('Fetching 3D model…');
 
-        if (disposed) return;
+          const glbUrl = glbModelUrl(modelUrl!, apiBase);
+          const fetchSignal = modelFetchAbortSignal();
+          buffer = await fetchModelBuffer(glbUrl, fetchSignal, (pct) => {
+            if (!disposed) setLoadProgress(pct);
+          });
+          if (disposed) return;
+        } else {
+          setLoadPhase('fetching');
+          setLoadLabel('Loading room zones…');
+          setLoadProgress(10);
+        }
 
         const prefetched = prefetchedJobModelMetadata;
         let modelMeta: ModelMetadata;
         if (prefetched && prefetched.vertex_count) {
-          modelMeta = modelMetadataFromJobResponse(prefetched, buffer.byteLength);
+          modelMeta = modelMetadataFromJobResponse(prefetched, buffer?.byteLength ?? 0);
         } else {
           modelMeta = {
             vertexCount: 0,
             faceCount: 0,
             pointCount: 0,
-            fileSize: buffer.byteLength,
+            fileSize: buffer?.byteLength ?? 0,
             boundingBox: { min: [-1, -1, -1], max: [1, 1, 1] },
             hasColors: true,
             hasPbr: true,
@@ -172,9 +188,22 @@ export function useMeshViewer({
         applyInitialCameraPose(orbitCamera, def.position, def.lookAt, [0, 1, 0]);
 
         setLoadPhase('parsing');
-        setLoadLabel('Loading mesh…');
+        setLoadLabel(sceneManifest?.composition_mode === 'zone_mesh' ? 'Loading room scene…' : 'Loading mesh…');
 
-        const { rootMesh, geometryMeshes } = await importGlbBuffer(scene, buffer);
+        let rootMesh;
+        let geometryMeshes;
+        let zoneMeshes: import('../load/loadMeshScene').ZoneMeshHandle[] = [];
+
+        if (sceneManifest?.composition_mode === 'zone_mesh' && sceneManifest.zones.length > 0) {
+          const composed = await importComposedScene(scene, sceneManifest, apiBase);
+          rootMesh = composed.rootMesh;
+          geometryMeshes = composed.geometryMeshes;
+          zoneMeshes = composed.zoneMeshes;
+        } else {
+          const imported = await importGlbBuffer(scene, buffer!);
+          rootMesh = imported.rootMesh;
+          geometryMeshes = imported.geometryMeshes;
+        }
         if (disposed) return;
 
         if (sceneScale !== 1) rootMesh.scaling.setAll(sceneScale);
@@ -213,10 +242,12 @@ export function useMeshViewer({
           walkCamera,
           rootMesh,
           geometryMeshes,
+          zoneMeshes,
           collisionMesh,
           utilityLayer,
           framingBehavior,
         };
+        setZoneMeshes(zoneMeshes);
 
         setLoadPhase('ready');
         setLoadLabel('');
@@ -245,9 +276,10 @@ export function useMeshViewer({
       scene.dispose();
       engine.dispose();
       viewerRef.current = null;
+      setZoneMeshes([]);
       resetInspectorFlag();
     };
-  }, [modelUrl, prefetchedJobModelMetadata, canvasRef]);
+  }, [modelUrl, prefetchedJobModelMetadata, sceneManifest, canvasRef]);
 
   return {
     viewerRef,
@@ -260,6 +292,7 @@ export function useMeshViewer({
     sceneScaleRef,
     worldUnitRef,
     walkSpeedRef,
+    zoneMeshes,
   };
 }
 

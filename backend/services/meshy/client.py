@@ -52,7 +52,14 @@ class MeshyClient:
         target_formats: Optional[List[str]] = None,
         target_polycount: int = 50_000,
         should_remesh: bool = False,
-        ultra_mode: bool = False,
+        texture_image_urls: Optional[List[str]] = None,
+        image_enhancement: Optional[bool] = None,
+        remove_lighting: Optional[bool] = None,
+        auto_size: Optional[bool] = None,
+        origin_at: Optional[str] = None,
+        decimation_mode: Optional[int] = None,
+        save_pre_remeshed_model: Optional[bool] = None,
+        multi_view_thumbnails: Optional[bool] = None,
     ) -> str:
         if not image_urls:
             raise MeshyError("At least one image URL is required")
@@ -66,10 +73,26 @@ class MeshyClient:
             "enable_pbr": enable_pbr,
             "texture_resolution": texture_resolution,
             "should_remesh": should_remesh,
-            "ultra_mode": ultra_mode,
             "target_polycount": target_polycount,
             "target_formats": target_formats or ["glb"],
         }
+
+        if texture_image_urls:
+            body["texture_image_urls"] = texture_image_urls[:4]
+        if image_enhancement is not None:
+            body["image_enhancement"] = image_enhancement
+        if remove_lighting is not None:
+            body["remove_lighting"] = remove_lighting
+        if auto_size is not None:
+            body["auto_size"] = auto_size
+        if origin_at:
+            body["origin_at"] = origin_at
+        if decimation_mode is not None:
+            body["decimation_mode"] = decimation_mode
+        if save_pre_remeshed_model is not None:
+            body["save_pre_remeshed_model"] = save_pre_remeshed_model
+        if multi_view_thumbnails is not None:
+            body["multi_view_thumbnails"] = multi_view_thumbnails
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
@@ -144,14 +167,6 @@ class MeshyClient:
         task = await self.get_task(task_id)
         if on_poll is not None:
             await on_poll(task)
-        status = task.get("status", "").upper()
-        progress = task.get("progress", 0)
-        logger.info(
-            "Meshy task %s final poll status=%s progress=%s",
-            task_id,
-            status,
-            progress,
-        )
         done = _check_task(task)
         if done is not None:
             return done
@@ -169,3 +184,11 @@ class MeshyClient:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(resp.content)
             logger.info("Downloaded %s (%d bytes)", dest_path, len(resp.content))
+
+    @staticmethod
+    def best_glb_url(result: dict) -> Optional[str]:
+        model_urls = result.get("model_urls") or {}
+        return (
+            model_urls.get("pre_remeshed_glb")
+            or model_urls.get("glb")
+        )

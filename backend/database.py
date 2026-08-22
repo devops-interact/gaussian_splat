@@ -35,7 +35,32 @@ def init_db():
     """Create all tables and run seed if needed"""
     from models.db_models import User, Project, Scan, JobRecord
     Base.metadata.create_all(bind=engine)
+    _migrate_job_columns()
     _seed_demo_user()
+
+
+def _migrate_job_columns():
+    """Add new columns to jobs table if missing (SQLite)."""
+    import logging
+    from sqlalchemy import text
+    logger = logging.getLogger(__name__)
+    new_cols = {
+        "keyframes_json": "TEXT",
+        "scene_manifest_json": "TEXT",
+        "current_zone": "INTEGER",
+        "total_zones": "INTEGER",
+    }
+    try:
+        with engine.connect() as conn:
+            rows = conn.execute(text("PRAGMA table_info(jobs)")).fetchall()
+            existing = {row[1] for row in rows}
+            for col, typ in new_cols.items():
+                if col not in existing:
+                    conn.execute(text(f"ALTER TABLE jobs ADD COLUMN {col} {typ}"))
+                    logger.info("Migrated jobs table: added column %s", col)
+            conn.commit()
+    except Exception as e:
+        logger.warning("Job column migration skipped: %s", e)
 
 
 def _seed_demo_user():

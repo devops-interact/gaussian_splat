@@ -4,8 +4,7 @@ Data models for job state and processing
 from enum import Enum
 from datetime import datetime
 from typing import Optional, List
-from pydantic import ConfigDict
-from pydantic import BaseModel
+from pydantic import ConfigDict, BaseModel, Field
 from core.config import QualityPreset
 
 
@@ -17,6 +16,7 @@ class JobStatus(str, Enum):
     SUBMITTING_RECONSTRUCTION = "submitting_reconstruction"
     RECONSTRUCTING = "reconstructing"
     DOWNLOADING_MODEL = "downloading_model"
+    COMPOSING_SCENE = "composing_scene"
     COMPLETED = "completed"
     ERROR = "error"
 
@@ -43,6 +43,33 @@ class ModelMetadata(BaseModel):
     meshy_task_id: Optional[str] = None
 
 
+class KeyframeInfo(BaseModel):
+    url: str
+    index: int
+    zone_id: Optional[int] = None
+    yaw_deg: Optional[float] = None
+    sharpness: Optional[float] = None
+
+
+class ZoneMeshInfo(BaseModel):
+    id: int
+    mesh_url: str
+    meshy_task_id: Optional[str] = None
+    transform: List[List[float]] = Field(default_factory=lambda: [
+        [1, 0, 0, 0],
+        [0, 1, 0, 0],
+        [0, 0, 1, 0],
+        [0, 0, 0, 1],
+    ])
+
+
+class SceneManifest(BaseModel):
+    composition_mode: str = "single_object"
+    zones: List[ZoneMeshInfo] = Field(default_factory=list)
+    shell_url: Optional[str] = None
+    walk_path: Optional[List[List[float]]] = None
+
+
 class Job(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
 
@@ -62,6 +89,10 @@ class Job(BaseModel):
     model_metadata: Optional[ModelMetadata] = None
     processing_time_seconds: Optional[float] = None
     meshy_task_id: Optional[str] = None
+    keyframes: List[KeyframeInfo] = Field(default_factory=list)
+    scene_manifest: Optional[SceneManifest] = None
+    current_zone: Optional[int] = None
+    total_zones: Optional[int] = None
 
 
 class JobCreate(BaseModel):
@@ -74,3 +105,4 @@ class PresetInfo(BaseModel):
     name: str
     description: str
     estimated_minutes: int
+    composition_mode: str = "single_object"

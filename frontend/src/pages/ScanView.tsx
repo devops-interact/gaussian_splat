@@ -6,8 +6,9 @@ import VideoUpload from '@/components/VideoUpload';
 import JobStatus from '@/components/JobStatus';
 import Viewer3D from '@/components/Viewer3D';
 import TechnicalDetails from '@/components/TechnicalDetails';
+import KeyframeStrip from '@/components/KeyframeStrip';
 import type { ModelMetadata } from '@/components/Viewer3D';
-import type { ModelMetadataResponse } from '@/types/job';
+import type { ModelMetadataResponse, KeyframeInfo, SceneManifestResponse } from '@/types/job';
 import { Card, CardContent } from '@/components/ui/card';
 import { Box, Download, ChevronDown, FileBox, FileCode, ArrowLeft } from 'lucide-react';
 import { downloadModel, getJobStatus } from '@/api/jobs';
@@ -27,7 +28,11 @@ export default function ScanView() {
   const [objUrl, setObjUrl] = useState<string | null>(null);
   const [modelMetadata, setModelMetadata] = useState<ModelMetadata | null>(null);
   const [prefetchedJobModelMetadata, setPrefetchedJobModelMetadata] = useState<ModelMetadataResponse | null>(null);
+  const [keyframes, setKeyframes] = useState<KeyframeInfo[]>([]);
+  const [sceneManifest, setSceneManifest] = useState<SceneManifestResponse | null>(null);
   const [jobQualityPreset, setJobQualityPreset] = useState<string | null>(null);
+  const [processingTimeSeconds, setProcessingTimeSeconds] = useState<number | null>(null);
+  const [meshyTaskId, setMeshyTaskId] = useState<string | null>(null);
   const [elapsedTime, setElapsedTime] = useState<string>('--');
   const [downloading, setDownloading] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
@@ -62,7 +67,11 @@ export default function ScanView() {
           setModelUrl(response.model_url);
           setObjUrl(response.model_url_obj ?? null);
           setPrefetchedJobModelMetadata(response.model_metadata ?? null);
+          setKeyframes(response.keyframes ?? []);
+          setSceneManifest(response.scene_manifest ?? null);
           if (response.quality_preset) setJobQualityPreset(response.quality_preset);
+          if (response.processing_time_seconds) setProcessingTimeSeconds(response.processing_time_seconds);
+          if (response.meshy_task_id) setMeshyTaskId(response.meshy_task_id);
         }
       })
       .catch(() => { /* JobStatus component will retry */ });
@@ -83,10 +92,21 @@ export default function ScanView() {
   }, [downloadOpen]);
 
   const handleProcessingComplete = useCallback(
-    (url: string, objUrlResp?: string, jobMeta?: ModelMetadataResponse) => {
+    (url: string, objUrlResp?: string, jobMeta?: ModelMetadataResponse, statusExtras?: {
+      keyframes?: KeyframeInfo[];
+      scene_manifest?: SceneManifestResponse;
+      processing_time_seconds?: number;
+      meshy_task_id?: string;
+      quality_preset?: string;
+    }) => {
       setModelUrl(url);
       setObjUrl(objUrlResp ?? null);
       setPrefetchedJobModelMetadata(jobMeta ?? null);
+      if (statusExtras?.keyframes) setKeyframes(statusExtras.keyframes);
+      if (statusExtras?.scene_manifest) setSceneManifest(statusExtras.scene_manifest);
+      if (statusExtras?.processing_time_seconds) setProcessingTimeSeconds(statusExtras.processing_time_seconds);
+      if (statusExtras?.meshy_task_id) setMeshyTaskId(statusExtras.meshy_task_id);
+      if (statusExtras?.quality_preset) setJobQualityPreset(statusExtras.quality_preset);
     },
     [],
   );
@@ -135,7 +155,11 @@ export default function ScanView() {
     setObjUrl(null);
     setModelMetadata(null);
     setPrefetchedJobModelMetadata(null);
+    setKeyframes([]);
+    setSceneManifest(null);
     setJobQualityPreset(null);
+    setProcessingTimeSeconds(null);
+    setMeshyTaskId(null);
     if (scanIdFromResponse && isNewScan && projectId) {
       setScan({ id: scanIdFromResponse, job_id: newJobId });
       navigate(`/projects/${projectId}/scans/${scanIdFromResponse}`, { replace: true });
@@ -160,7 +184,7 @@ export default function ScanView() {
               Upload video scans to generate AI-reconstructed 3D meshes via Meshy.
             </p>
             <p className="text-gray-700 text-xs max-w-2xl mt-1">
-              Current output: single-object mesh from 1–4 keyframes. Full room scanning coming soon.
+              Single-object presets produce one mesh; Room (beta) composes multiple zone meshes for full-space reconstruction.
             </p>
           </div>
         </div>
@@ -210,12 +234,13 @@ export default function ScanView() {
 
       <div className="flex flex-col lg:flex-row gap-4 lg:items-start">
         <div className="w-full lg:w-2/3 flex-shrink-0">
-          {modelUrl ? (
+          {modelUrl || sceneManifest?.zones?.length ? (
             <div className="rounded-xl overflow-hidden border border-white/[0.26] bg-neutral-950 h-[400px] sm:h-[520px] lg:h-[calc(100vh-160px)] shadow-2xl shadow-white/[0.03]">
               <Viewer3D
                 modelUrl={modelUrl}
                 jobId={jobId}
                 prefetchedJobModelMetadata={prefetchedJobModelMetadata}
+                sceneManifest={sceneManifest}
                 onModelMetadata={handleModelMetadata}
               />
             </div>
@@ -238,9 +263,16 @@ export default function ScanView() {
           <VideoUpload
             onUploadSuccess={handleUploadSuccess}
             jobStarted={!!jobId}
+            allowRerun
             projectId={projectIdNum}
             scanId={isNewScan ? undefined : scan?.id}
           />
+
+          {keyframes.length > 0 && (
+            <Card className="w-full p-4">
+              <KeyframeStrip keyframes={keyframes} embedded />
+            </Card>
+          )}
 
           <Card className="w-full">
             {jobId ? (
@@ -265,7 +297,10 @@ export default function ScanView() {
               jobInfo={{
                 qualityPreset: jobQualityPreset ?? undefined,
                 elapsedTime,
-                isProcessing: !!jobId && modelUrl === null,
+                isProcessing: !!jobId && modelUrl === null && !sceneManifest?.zones?.length,
+                meshyTaskId: meshyTaskId ?? prefetchedJobModelMetadata?.meshy_task_id,
+                thumbnailUrl: prefetchedJobModelMetadata?.thumbnail_url,
+                processingTimeSeconds: processingTimeSeconds ?? undefined,
               }}
               embedded
             />

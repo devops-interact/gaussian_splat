@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { JobStatusResponse } from '../types/job';
+import { JobStatusResponse, PresetInfo, SceneManifestResponse } from '../types/job';
 import { getApiBaseUrl } from '../lib/apiBase';
 import { getAuthHeaders } from '../lib/authHeaders';
 
@@ -78,12 +78,12 @@ export const downloadModel = async (jobId: string): Promise<Blob> => {
   return response.data;
 };
 
-export interface PresetInfo {
-  id: string;
-  name: string;
-  description: string;
-  estimated_minutes: number;
-}
+export const getSceneManifest = async (jobId: string): Promise<SceneManifestResponse> => {
+  const response = await axios.get(`${API_JOBS_URL}/${jobId}/scene`);
+  return response.data;
+};
+
+export { type PresetInfo };
 
 export const getPresets = async (): Promise<PresetInfo[]> => {
   const response = await axios.get(`${API_BASE_URL}/api/presets`);
