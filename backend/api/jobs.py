@@ -10,7 +10,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from core.models import Job, JobStatus, VideoValidation
-from core.config import get_settings, QualityPreset, QUALITY_PRESETS
+from core.config import get_settings, QualityPreset, QUALITY_PRESETS, resolve_quality_preset
 from jobs.worker import enqueue_job
 from jobs.job_manager import get_job_manager
 from services.video.validate import validate_video
@@ -31,17 +31,13 @@ settings = get_settings()
 @router.post("/upload")
 async def upload_video(
     file: UploadFile = File(...),
-    quality_preset: str = Form(default="balanced"),
+    quality_preset: str = Form(default="room"),
     project_id: Optional[int] = Form(default=None),
     scan_id: Optional[int] = Form(default=None),
     current_user: Optional[User] = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ):
-    try:
-        preset = QualityPreset(quality_preset)
-    except ValueError:
-        preset = QualityPreset.BALANCED
-        logger.warning(f"Invalid preset '{quality_preset}', using balanced")
+    preset = resolve_quality_preset(quality_preset)
 
     preset_config = QUALITY_PRESETS[preset]
 
@@ -197,7 +193,7 @@ async def get_job_status(job_id: str, request: Request):
         "error_message": job.error_message,
         "model_url": job.model_url,
         "model_url_obj": job.model_url_obj,
-        "quality_preset": job.quality_preset.value if job.quality_preset else "balanced",
+        "quality_preset": job.quality_preset.value if job.quality_preset else "quality",
         "estimated_minutes": job.estimated_minutes,
         "processing_time_seconds": job.processing_time_seconds,
         "meshy_task_id": job.meshy_task_id,

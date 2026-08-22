@@ -53,7 +53,7 @@ class JobRecord(Base):
     job_id = Column(String(36), primary_key=True)
     status = Column(String(32), nullable=False)
     video_filename = Column(String(512), nullable=False)
-    quality_preset = Column(String(16), default="balanced")
+    quality_preset = Column(String(16), default="quality")
     progress = Column(Float, default=0.0)
     error_message = Column(Text, nullable=True)
     model_filename = Column(String(512), nullable=True)

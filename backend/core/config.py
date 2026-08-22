@@ -11,10 +11,24 @@ from enum import Enum
 
 class QualityPreset(str, Enum):
     """Quality presets for Meshy image-to-3D reconstruction"""
-    FAST = "fast"
-    BALANCED = "balanced"
     QUALITY = "quality"
     ROOM = "room"
+
+
+LEGACY_PRESET_ALIASES: Dict[str, QualityPreset] = {
+    "fast": QualityPreset.QUALITY,
+    "balanced": QualityPreset.QUALITY,
+}
+
+
+def resolve_quality_preset(value: Optional[str]) -> QualityPreset:
+    """Map API/DB preset strings to active presets (legacy fast/balanced → quality)."""
+    if not value:
+        return QualityPreset.QUALITY
+    try:
+        return QualityPreset(value)
+    except ValueError:
+        return LEGACY_PRESET_ALIASES.get(value, QualityPreset.QUALITY)
 
 
 class MeshyPresetConfig(BaseModel):
@@ -47,31 +61,6 @@ class MeshyPresetConfig(BaseModel):
 
 
 QUALITY_PRESETS: Dict[QualityPreset, MeshyPresetConfig] = {
-    QualityPreset.FAST: MeshyPresetConfig(
-        name="Fast",
-        description="Quick AI mesh (~3–5 min). Lower polycount, good for previews.",
-        fps=2.0,
-        estimated_minutes=5,
-        ai_model="meshy-6",
-        enable_pbr=False,
-        target_polycount=30_000,
-        meshy_timeout_s=600.0,
-        image_enhancement=False,
-        auto_size=True,
-    ),
-    QualityPreset.BALANCED: MeshyPresetConfig(
-        name="Balanced",
-        description="Balanced quality and speed (~5–8 min). Recommended default.",
-        fps=1.5,
-        estimated_minutes=8,
-        ai_model="meshy-7",
-        enable_pbr=True,
-        target_polycount=50_000,
-        meshy_timeout_s=900.0,
-        texture_image_urls_mode="wall_priority",
-        image_enhancement=False,
-        auto_size=True,
-    ),
     QualityPreset.QUALITY: MeshyPresetConfig(
         name="Object — highest detail",
         description="Single mesh from 4 views (~15–25 min). Best for one object, not full rooms.",
@@ -93,6 +82,7 @@ QUALITY_PRESETS: Dict[QualityPreset, MeshyPresetConfig] = {
         description="Reconstructs walls/floor by zones (~35–45 min). Recommended for walkthrough videos.",
         fps=1.5,
         estimated_minutes=40,
+        ai_model="meshy-7",
         enable_pbr=True,
         texture_resolution="4k",
         target_polycount=80_000,

@@ -87,7 +87,7 @@ class Job(BaseModel):
     model_filename: Optional[str] = None
     model_url: Optional[str] = None
     model_url_obj: Optional[str] = None
-    quality_preset: QualityPreset = QualityPreset.BALANCED
+    quality_preset: QualityPreset = QualityPreset.QUALITY
     validation: Optional[VideoValidation] = None
     estimated_minutes: Optional[int] = None
     model_metadata: Optional[ModelMetadata] = None
@@ -101,7 +101,7 @@ class Job(BaseModel):
 
 class JobCreate(BaseModel):
     video_filename: str
-    quality_preset: QualityPreset = QualityPreset.BALANCED
+    quality_preset: QualityPreset = QualityPreset.QUALITY
 
 
 class PresetInfo(BaseModel):

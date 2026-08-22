@@ -41,10 +41,10 @@ const STATUS_LABELS: Record<JobStatusEnum, string> = {
 };
 
 const PRESET_LABELS: Record<string, string> = {
-  fast: 'Fast (~5 min est.)',
-  balanced: 'Balanced (~8 min est.)',
-  quality: 'Quality (~22 min est.)',
-  room: 'Room beta (~40 min est.)',
+  quality: 'Object — highest detail (~22 min est.)',
+  room: 'Room — full space (~40 min est.)',
+  fast: 'Object — highest detail (~22 min est.)',
+  balanced: 'Object — highest detail (~22 min est.)',
 };
 
 const POLL_OK_MS = 2000;

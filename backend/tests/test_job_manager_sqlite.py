@@ -6,6 +6,7 @@ import pytest
 from datetime import datetime
 
 from core.models import Job, JobStatus
+from core.config import QualityPreset
 from jobs.job_manager import JobManager
 
 
@@ -56,6 +57,7 @@ def test_migrate_jobs_json(temp_storage):
         assert job is not None
         assert job.status == JobStatus.RECONSTRUCTING
         assert job.video_filename == "old.mp4"
+        assert job.quality_preset == QualityPreset.QUALITY
 
     asyncio.run(run())
     assert not jobs_file.exists() or (logs_dir / "jobs.json.bak").exists()

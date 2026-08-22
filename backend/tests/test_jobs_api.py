@@ -22,6 +22,6 @@ def test_presets_list():
     resp = client.get("/api/presets")
     assert resp.status_code == 200
     presets = resp.json()
-    assert len(presets) >= 3
+    assert len(presets) == 2
     ids = {p["id"] for p in presets}
-    assert "balanced" in ids
+    assert ids == {"quality", "room"}

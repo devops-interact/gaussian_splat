@@ -24,7 +24,7 @@ export interface UploadResponse {
 
 export const uploadVideo = async (
   file: File,
-  qualityPreset: string = 'balanced',
+  qualityPreset: string = 'room',
   projectId?: number,
   scanId?: number
 ): Promise<UploadResponse> => {

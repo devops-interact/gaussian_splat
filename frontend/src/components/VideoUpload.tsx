@@ -62,10 +62,8 @@ export default function VideoUpload({
       .catch(() => {
         setPresetsWarning('Could not load presets from API — using local fallback.');
         setPresets([
-          { id: 'fast', name: 'Fast', description: 'Quick preview. Single object.', estimated_minutes: 5, composition_mode: 'single_object' },
-          { id: 'balanced', name: 'Balanced', description: 'Balance of speed and quality. Single object.', estimated_minutes: 8, composition_mode: 'single_object' },
-          { id: 'quality', name: 'Object — highest detail', description: 'One mesh, 4K textures. Not for full rooms.', estimated_minutes: 22, composition_mode: 'single_object' },
-          { id: 'room', name: 'Room — full space', description: 'Multi-zone room reconstruction. Recommended for walkthroughs.', estimated_minutes: 40, composition_mode: 'zone_mesh' },
+          { id: 'quality', name: 'Object — highest detail', description: 'One mesh, 4K textures. Best for a single object.', estimated_minutes: 22, composition_mode: 'single_object' },
+          { id: 'room', name: 'Room — full space', description: 'Multi-zone room reconstruction. For interior walkthroughs.', estimated_minutes: 40, composition_mode: 'zone_mesh' },
         ]);
       });
   }, []);

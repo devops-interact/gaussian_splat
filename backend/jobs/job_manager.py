@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from core.models import Job, JobStatus, VideoValidation, ModelMetadata, KeyframeInfo, SceneManifest
-from core.config import get_settings, QualityPreset
+from core.config import get_settings, QualityPreset, resolve_quality_preset
 import database
 from models.db_models import JobRecord
 
@@ -29,10 +29,7 @@ def _record_to_job(record: JobRecord) -> Job:
     except ValueError:
         status = LEGACY_STATUS_MAP.get(raw_status, JobStatus.ERROR)
 
-    try:
-        quality_preset = QualityPreset(record.quality_preset or "balanced")
-    except ValueError:
-        quality_preset = QualityPreset.BALANCED
+    quality_preset = resolve_quality_preset(record.quality_preset)
 
     validation = None
     if record.validation_json:
@@ -79,7 +76,7 @@ def _job_to_record(job: Job, record: Optional[JobRecord] = None) -> JobRecord:
         record = JobRecord(job_id=job.job_id, video_filename=job.video_filename, status=job.status.value)
     record.status = job.status.value
     record.video_filename = job.video_filename
-    record.quality_preset = job.quality_preset.value if job.quality_preset else "balanced"
+    record.quality_preset = job.quality_preset.value if job.quality_preset else "quality"
     record.progress = job.progress
     record.error_message = job.error_message
     record.model_filename = job.model_filename
@@ -133,7 +130,7 @@ class JobManager:
                     job_id=job_id,
                     status=status,
                     video_filename=job_data.get("video_filename", ""),
-                    quality_preset=job_data.get("quality_preset", "balanced"),
+                    quality_preset=resolve_quality_preset(job_data.get("quality_preset")).value,
                     progress=float(job_data.get("progress", 0)),
                     error_message=job_data.get("error_message"),
                     model_filename=job_data.get("model_filename"),
@@ -278,7 +275,7 @@ class JobManager:
                 if glb_path.exists():
                     continue
 
-                preset = job.quality_preset or QualityPreset.BALANCED
+                preset = job.quality_preset or QualityPreset.QUALITY
                 client = MeshyClient(
                     api_key=cfg.MESHY_API_KEY,
                     poll_interval_s=cfg.MESHY_POLL_INTERVAL_S,

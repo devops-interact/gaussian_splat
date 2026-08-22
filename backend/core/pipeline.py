@@ -142,7 +142,7 @@ async def process_single_object_job(job: Job) -> Job:
     job_manager = get_job_manager()
     start_time = time.time()
 
-    preset = job.quality_preset or QualityPreset.BALANCED
+    preset = job.quality_preset or QualityPreset.QUALITY
     preset_config = QUALITY_PRESETS[preset]
     meshy_timeout = _meshy_timeout_for_preset(preset)
     logger.info(
@@ -237,7 +237,7 @@ async def process_job(job: Job) -> Job:
         await get_job_manager().update_job(job)
         return job
 
-    preset = job.quality_preset or QualityPreset.BALANCED
+    preset = job.quality_preset or QualityPreset.QUALITY
     preset_config = QUALITY_PRESETS[preset]
 
     try:

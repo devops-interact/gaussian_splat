@@ -15,7 +15,7 @@ def test_process_job_completes_with_mocked_meshy(temp_storage, tmp_path):
         job_id="test-job",
         status=JobStatus.UPLOADED,
         video_filename="test-job.mp4",
-        quality_preset=QualityPreset.FAST,
+        quality_preset=QualityPreset.QUALITY,
         created_at=now,
         updated_at=now,
     )
