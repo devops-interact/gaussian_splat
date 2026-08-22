@@ -6,11 +6,13 @@ import logging
 from pathlib import Path
 from typing import Literal
 
-from services.meshy.zone_normalize import bbox_extent, glb_bbox
+from services.meshy.zone_normalize import bbox_extent, glb_bbox, glb_vertex_count
 
 logger = logging.getLogger(__name__)
 
 MeshClass = Literal["architectural", "object", "unknown"]
+THIN_CARD_DEPTH_RATIO = 0.35
+THIN_CARD_MAX_VERTS = 8000
 
 
 def classify_zone_mesh(glb_path: Path) -> MeshClass:
@@ -41,7 +43,7 @@ def classify_zone_mesh(glb_path: Path) -> MeshClass:
         return "architectural"
 
     # Thin depth profile — wall-like
-    if thin_depth < 0.35 and footprint > height * 0.5:
+    if thin_depth < THIN_CARD_DEPTH_RATIO and footprint > height * 0.5:
         return "architectural"
 
     # Tall humanoid — standing figure hallucinated by Meshy
@@ -58,6 +60,32 @@ def classify_zone_mesh(glb_path: Path) -> MeshClass:
         return "object"
 
     return "unknown"
+
+
+def is_thin_card_mesh(glb_path: Path) -> bool:
+    """Reject flat billboard-like meshes even when classified as architectural."""
+    bbox = glb_bbox(glb_path)
+    if not bbox:
+        return False
+
+    ext = bbox_extent(bbox)
+    ex, ey, ez = ext
+    footprint = max(ex, ez)
+    height = ey
+    depth = min(ex, ez)
+    if footprint <= 0:
+        return False
+
+    thin_depth = depth / footprint
+    verts = glb_vertex_count(glb_path)
+
+    if thin_depth >= THIN_CARD_DEPTH_RATIO:
+        return False
+
+    if footprint > height * 0.5 and verts <= THIN_CARD_MAX_VERTS:
+        return True
+
+    return thin_depth < 0.2 and verts <= THIN_CARD_MAX_VERTS
 
 
 def _is_compact_unknown(ext: tuple[float, float, float]) -> bool:
@@ -77,7 +105,11 @@ def _is_compact_unknown(ext: tuple[float, float, float]) -> bool:
 
 
 def mesh_passes_quality_gate(glb_path: Path) -> bool:
-    """Zone detail meshes must not be classified as dominant objects."""
+    """Zone detail meshes must not be objects or flat video-frame cards."""
+    if is_thin_card_mesh(glb_path):
+        logger.info("Mesh quality gate rejected thin-card mesh: %s", glb_path)
+        return False
+
     kind = classify_zone_mesh(glb_path)
     if kind == "object":
         logger.info("Mesh quality gate rejected object-like mesh: %s", glb_path)

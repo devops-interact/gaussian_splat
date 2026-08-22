@@ -271,7 +271,7 @@ export async function importComposedScene(
     );
   }
 
-  const geometryMeshes = shellGeometry.length > 0 ? [...shellGeometry, ...allGeometry] : allGeometry;
+  const geometryMeshes = allGeometry;
 
   return {
     rootMesh: roomRoot as unknown as AbstractMesh,

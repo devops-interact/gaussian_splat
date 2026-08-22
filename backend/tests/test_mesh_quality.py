@@ -44,3 +44,16 @@ def test_mesh_passes_quality_gate_rejects_object(tmp_path: Path) -> None:
     path.write_bytes(b"fake")
     with patch("services.meshy.mesh_quality.classify_zone_mesh", return_value="object"):
         assert mesh_passes_quality_gate(path) is False
+
+
+def test_mesh_passes_quality_gate_rejects_thin_card(tmp_path: Path) -> None:
+    path = tmp_path / "card.glb"
+    path.write_bytes(b"fake")
+    card_bbox = {"min": [0, 0, 0], "max": [4.0, 2.5, 0.15]}
+    with (
+        patch("services.meshy.mesh_quality.glb_bbox", return_value=card_bbox),
+        patch("services.meshy.mesh_quality.glb_vertex_count", return_value=1200),
+        patch("services.meshy.mesh_quality.classify_zone_mesh", return_value="architectural"),
+    ):
+        assert mesh_passes_quality_gate(path) is False
+

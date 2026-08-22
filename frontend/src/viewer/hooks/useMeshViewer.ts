@@ -233,9 +233,11 @@ export function useMeshViewer({
         if (sceneScale !== 1) rootMesh.scaling.setAll(sceneScale);
         rootMesh.computeWorldMatrix(true);
 
-        const collisionMesh = createCollisionProxy(scene, rootMesh);
+        const boundsMesh =
+          geometryMeshes.length > 0 ? geometryMeshes[0] : rootMesh;
+        const collisionMesh = createCollisionProxy(scene, boundsMesh);
 
-        const meshBbox = bboxFromMesh(rootMesh);
+        const meshBbox = bboxFromMesh(boundsMesh);
         const effectiveDiagonal = meshBbox.diagonal;
         const floorY = meshBbox.min[1];
         alignGridToFloor(scene, floorY);

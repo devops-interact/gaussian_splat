@@ -33,7 +33,7 @@ from services.meshy.mesh_quality import mesh_passes_quality_gate
 from services.meshy.meshy_params import meshy_task_kwargs
 from services.meshy.person_filter import person_flags_by_index
 from services.meshy.room_shell import create_room_shell, estimate_room_envelope
-from services.meshy.scene_compose import compose_zone_transforms_for_ids
+from services.meshy.scene_compose import compose_radius_from_bbox, compose_zone_transforms_for_ids
 from services.meshy.storage_upload import publish_keyframes
 from services.meshy.zone_normalize import (
     aggregate_bbox,
@@ -205,7 +205,7 @@ async def _process_zone_with_retry(
         await client.download_file(glb_url, str(glb_path))
 
         if not mesh_passes_quality_gate(glb_path):
-            last_error = "Mesh classified as dominant object (not room detail)"
+            last_error = "Mesh rejected — object-like or flat billboard (not room geometry)"
             logger.info("Zone %s rejected by quality gate (attempt %d)", zone_id, attempt)
             continue
 
@@ -474,7 +474,10 @@ async def process_room_job(job: Job) -> Job:
         }
 
         ref_height = envelope["size_y"]
-        compose_radius = preset_config.zone_compose_radius
+        compose_radius = compose_radius_from_bbox(
+            agg_bbox,
+            ref_height=ref_height,
+        ) if kept_zone_ids else preset_config.zone_compose_radius
         transforms = compose_zone_transforms_for_ids(
             kept_zone_ids,
             n_zones=n_zones,
@@ -495,7 +498,7 @@ async def process_room_job(job: Job) -> Job:
             ))
 
         shell_url = f"/api/jobs/{job.job_id}/shell" if shell_path and shell_path.exists() else None
-        primary_geometry = "shell" if shell_url else "zones"
+        primary_geometry = "zones" if manifest_zones else ("shell" if shell_url else "zones")
 
         manifest = SceneManifest(
             composition_mode="room_shell" if shell_url else "zone_mesh",

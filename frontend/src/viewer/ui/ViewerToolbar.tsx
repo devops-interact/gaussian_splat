@@ -87,7 +87,7 @@ export function ViewerToolbar({
               <span className="font-semibold text-white text-sm">Viewer Controls</span>
               <button type="button" onClick={onToggleHelp} className="text-white/40 hover:text-white"><X className="w-3 h-3" /></button>
             </div>
-            <HelpItem icon={<MousePointer className="w-3 h-3" />} title="Orbit">Left-drag rotate. Shift/right-drag pan. Scroll zoom.</HelpItem>
+            <HelpItem icon={<MousePointer className="w-3 h-3" />} title="Orbit">Left-drag: orbit. Right-drag / Ctrl+left-drag: pan. Scroll: zoom.</HelpItem>
             <HelpItem icon={<Footprints className="w-3 h-3" />} title="Walk-Through">WASD move with collision proxy. Mouse look.</HelpItem>
             <HelpItem icon={<Ruler className="w-3 h-3" />} title="Measure">Calibrate with two known points, then measure on mesh surfaces.</HelpItem>
             <HelpItem icon={<Glasses className="w-3 h-3" />} title="Inspect">Wireframe, textures, PBR, exposure, grid, zones.</HelpItem>

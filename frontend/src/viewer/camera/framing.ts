@@ -23,6 +23,7 @@ export function attachFramingBehavior(orbitCamera: ArcRotateCamera): FramingBeha
   behavior.framingTime = 0;
   behavior.radiusScale = 1;
   behavior.elevationReturnTime = -1;
+  behavior.autoCorrectCameraLimitsAndSensibility = false;
   return behavior;
 }
 
@@ -40,7 +41,7 @@ export function resetViewWithFraming(
 ): void {
   if (!rootMesh) return;
   framingBehavior.framingTime = animate ? 500 : 0;
-  framingBehavior.zoomOnMeshHierarchy(rootMesh, true);
+  framingBehavior.zoomOnMeshHierarchy(rootMesh, false);
 }
 
 export function bboxFromMesh(mesh: AbstractMesh): {

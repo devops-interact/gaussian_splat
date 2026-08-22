@@ -24,7 +24,7 @@ export function useCameraMode(
 
     if (mode === 'orbit') {
       scene.activeCamera = orbitCamera;
-      orbitCamera.attachControl(canvas, true);
+      orbitCamera.attachControl(canvas, false);
       walkCamera.detachControl();
     } else if (mode === 'walkthrough') {
       walkCamera.position.copyFrom(orbitCamera.position);
@@ -36,7 +36,7 @@ export function useCameraMode(
       scene.gravity = new Vector3(0, -Math.max(0.08, ctx.effectiveDiagonal * 0.06), 0);
       scene.activeCamera = walkCamera;
       orbitCamera.detachControl();
-      walkCamera.attachControl(canvas, true);
+      walkCamera.attachControl(canvas, false);
     } else {
       // measure — orbit stays active camera but controls detached for picking
       scene.activeCamera = orbitCamera;
@@ -94,7 +94,7 @@ export function useResetView(
     walkCamera.setTarget(orbitCamera.getTarget());
     walkCamera.upVector.copyFrom(orbitCamera.upVector);
     scene.activeCamera = orbitCamera;
-    orbitCamera.attachControl(canvas, true);
+    orbitCamera.attachControl(canvas, false);
     walkCamera.detachControl();
   };
 }

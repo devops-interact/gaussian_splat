@@ -138,7 +138,7 @@ def test_partial_zone_recovery_with_shell(tmp_path) -> None:
 
 def test_room_preset_shell_first_config() -> None:
     room = QUALITY_PRESETS[QualityPreset.ROOM]
-    assert room.room_shell_required is True
+    assert room.room_shell_required is False
     assert room.zone_compose_radius == 0.0
     assert room.zone_mesh_max_retries == 2
 

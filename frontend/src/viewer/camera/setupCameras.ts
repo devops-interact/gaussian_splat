@@ -13,9 +13,11 @@ export function applyOrbitZoomLimitsFromDiagonal(orbitCam: ArcRotateCamera, effe
 export function configureOrbitControls(orbitCamera: ArcRotateCamera): void {
   orbitCamera.lowerBetaLimit = ORBIT_BETA_MIN;
   orbitCamera.upperBetaLimit = ORBIT_BETA_MAX;
-  orbitCamera.panningAxis = Vector3.Up();
-  orbitCamera.panningSensibility = 50;
-  orbitCamera.wheelPrecision = 50;
+  orbitCamera.panningAxis = new Vector3(1, 1, 0);
+  orbitCamera.panningSensibility = 1000;
+  orbitCamera.wheelPrecision = 3;
+  orbitCamera.inertia = 0.9;
+  orbitCamera.panningInertia = 0.9;
   orbitCamera.useNaturalPinchZoom = true;
   orbitCamera.zoomToMouseLocation = true;
 }
@@ -36,7 +38,7 @@ export function setupCamerasFromPose(
   orbitCamera.upVector = up;
   orbitCamera.setPosition(eye);
   orbitCamera.setTarget(target);
-  orbitCamera.attachControl(canvas, true);
+  orbitCamera.attachControl(canvas, false);
   orbitCamera.minZ = 0.01;
   orbitCamera.maxZ = 10000;
   configureOrbitControls(orbitCamera);
