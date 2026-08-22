@@ -9,9 +9,11 @@ from typing import Mapping, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
-COVERAGE_MIN_SPAN_DEG = 240.0
+COVERAGE_MIN_SPAN_DEG = 200.0
 COVERAGE_MIN_ZONES = 3
 DOMINANT_ZONE_MAX_FRACTION = 0.75
+MIN_WALKTHROUGH_DURATION_S = 25.0
+MIN_WALKTHROUGH_FRAMES = 30
 COVERAGE_ACTIONABLE_MSG = (
     "Record at least 30 seconds while slowly panning 360° from the center of the room."
 )
@@ -22,6 +24,7 @@ def estimate_yaw_by_index(
     *,
     fps: float = 1.5,
     allow_uniform_fallback: bool = False,
+    calibrate_undercount: bool = True,
 ) -> tuple[dict[int, float], bool]:
     """
     Estimate per-frame cumulative yaw in degrees (unwrapped, may exceed 360).
@@ -91,7 +94,41 @@ def estimate_yaw_by_index(
             + COVERAGE_ACTIONABLE_MSG
         )
 
+    if calibrate_undercount:
+        yaws = calibrate_yaw_undercount(yaws, len(frame_paths), fps)
+
     return yaws, False
+
+
+def calibrate_yaw_undercount(
+    yaw_by_index: dict[int, float],
+    n_frames: int,
+    extraction_fps: float,
+) -> dict[int, float]:
+    """
+    Scale yaw estimates when optical flow systematically undercounts slow pans.
+
+    Long walkthroughs (30+ frames, 25+ seconds) with low measured rotation are
+    likely full 360° pans that flow failed to quantify.
+    """
+    total = _total_rotation_deg(yaw_by_index)
+    duration_s = n_frames / max(extraction_fps, 0.1)
+
+    if duration_s < MIN_WALKTHROUGH_DURATION_S or n_frames < MIN_WALKTHROUGH_FRAMES:
+        return yaw_by_index
+    if total >= COVERAGE_MIN_SPAN_DEG:
+        return yaw_by_index
+
+    # Assume user intended a full pan; scale cumulative yaws to ~360°
+    scale = 360.0 / max(total, 1.0)
+    if scale < 1.8 or scale > 20.0:
+        return yaw_by_index
+
+    logger.info(
+        "Yaw calibration: scaling %.1f° -> ~360° (%.1fx, %d frames, %.0fs)",
+        total, scale, n_frames, duration_s,
+    )
+    return {k: float(v) * scale for k, v in yaw_by_index.items()}
 
 
 def _estimate_frame_rotation_deg(prev_gray, gray, cv2) -> Optional[float]:
@@ -129,8 +166,7 @@ def _estimate_frame_rotation_deg(prev_gray, gray, cv2) -> Optional[float]:
     )
     if M is not None:
         angle = math.degrees(math.atan2(M[1, 0], M[0, 0]))
-        if abs(angle) < 45.0:
-            return angle
+        return angle
 
     return _rotation_from_horizontal_flow(prev, curr, cv2, np, width=w)
 
@@ -246,7 +282,11 @@ def validate_room_coverage(
     if total_rotation >= min_span_deg and zones_populated >= min_zones:
         return
 
-    if total_rotation < min_span_deg:
+    # Accept if angular span across frames is wide even when step-sum is low
+    if span_deg >= min_span_deg and zones_populated >= min_zones:
+        return
+
+    if total_rotation < min_span_deg and span_deg < min_span_deg:
         raise ValueError(
             f"Insufficient 360° pan ({total_rotation:.0f}° of ~360° detected). "
             + COVERAGE_ACTIONABLE_MSG

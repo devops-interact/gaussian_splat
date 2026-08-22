@@ -55,6 +55,25 @@ def test_validate_room_coverage_accepts_good_walkthrough() -> None:
     validate_room_coverage(yaw, 4, used_uniform_fallback=False)
 
 
+def test_calibrate_yaw_undercount_scales_long_walkthrough() -> None:
+    from services.meshy.camera_pose import calibrate_yaw_undercount
+
+    yaw = {i: float(i * 2.3) for i in range(40)}  # ~89° total
+    calibrated = calibrate_yaw_undercount(yaw, n_frames=40, extraction_fps=1.5)
+    total = sum(
+        abs(calibrated[i] - calibrated[i - 1])
+        for i in range(1, 40)
+    )
+    assert total == pytest.approx(360.0, abs=5.0)
+
+
+def test_calibrate_yaw_skips_short_clips() -> None:
+    from services.meshy.camera_pose import calibrate_yaw_undercount
+
+    yaw = {i: float(i) for i in range(10)}
+    assert calibrate_yaw_undercount(yaw, n_frames=10, extraction_fps=1.5) == yaw
+
+
 def test_uniform_yaw_for_tests_only() -> None:
     yaws = _uniform_yaw(5)
     assert len(yaws) == 5
