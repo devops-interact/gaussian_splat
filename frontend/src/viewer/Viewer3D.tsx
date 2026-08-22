@@ -99,10 +99,15 @@ export default function Viewer3D({
   }, [zoneMeshes]);
 
   useEffect(() => {
-    if (sceneManifest?.shell_url || sceneManifest?.primary_geometry === 'shell') {
-      setInspection((prev) => ({ ...prev, showShell: true }));
+    const hasZones = (sceneManifest?.zones?.length ?? 0) > 0;
+    if (sceneManifest?.shell_url) {
+      setInspection((prev) => ({
+        ...prev,
+        showShell: !hasZones,
+        showZoneDetail: true,
+      }));
     }
-  }, [sceneManifest?.shell_url, sceneManifest?.primary_geometry]);
+  }, [sceneManifest?.shell_url, sceneManifest?.zones?.length]);
 
   useEffect(() => {
     const ctx = viewerRef.current;

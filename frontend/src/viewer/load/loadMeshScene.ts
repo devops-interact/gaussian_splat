@@ -141,8 +141,8 @@ export interface ZoneMeshHandle {
   geometryMeshes: AbstractMesh[];
 }
 
-export const SHELL_VISIBILITY = 1.0;
-export const ZONE_DETAIL_VISIBILITY = 0.5;
+export const SHELL_VISIBILITY = 0.3;
+export const ZONE_DETAIL_VISIBILITY = 1.0;
 
 export function isRoomManifest(
   manifest: import('@/types/job').SceneManifestResponse | null | undefined,
@@ -166,6 +166,9 @@ async function loadRoomShell(
     gm.parent = shellNode;
     gm.isPickable = true;
     gm.visibility = SHELL_VISIBILITY;
+    if (gm.material && 'backFaceCulling' in gm.material) {
+      (gm.material as import('@babylonjs/core').Material).backFaceCulling = false;
+    }
     if (gm.getTotalVertices() > 0) {
       gm.name = 'room_shell';
       shellGeometry.push(gm);

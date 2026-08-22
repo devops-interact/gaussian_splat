@@ -68,6 +68,46 @@ def _extract_glb_metadata(glb_path: Path, thumbnail_url: Optional[str] = None) -
         )
 
 
+def _aggregate_glb_metadata(
+    glb_paths: list[Path],
+    *,
+    thumbnail_url: Optional[str] = None,
+    bounding_box: Optional[dict] = None,
+) -> Optional[ModelMetadata]:
+    """Sum vertex/face counts and file sizes across multiple GLB assets."""
+    total_verts = 0
+    total_faces = 0
+    total_size = 0
+    has_pbr = False
+    has_colors = False
+
+    for glb_path in glb_paths:
+        if not glb_path.exists():
+            continue
+        meta = _extract_glb_metadata(glb_path, thumbnail_url=thumbnail_url)
+        if not meta:
+            continue
+        total_verts += meta.vertex_count or 0
+        total_faces += meta.face_count or 0
+        total_size += meta.file_size or 0
+        has_pbr = has_pbr or bool(meta.has_pbr)
+        has_colors = has_colors or bool(meta.has_colors)
+
+    if total_verts == 0 and total_faces == 0 and total_size == 0:
+        return None
+
+    return ModelMetadata(
+        file_size=total_size or None,
+        vertex_count=total_verts,
+        face_count=total_faces,
+        has_colors=has_colors,
+        has_pbr=has_pbr,
+        bounding_box=bounding_box,
+        format="glb",
+        thumbnail_url=thumbnail_url,
+    )
+
+
 async def finalize_meshy_result(
     job: Job,
     client: MeshyClient,

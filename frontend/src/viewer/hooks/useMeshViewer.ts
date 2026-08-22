@@ -255,7 +255,13 @@ export function useMeshViewer({
         metadataRef.current = modelMeta;
         onMetadataRef.current?.(modelMeta);
 
-        const frameTargets = geometryMeshes.length > 0 ? geometryMeshes : [rootMesh];
+        const zoneFrameTargets = zoneMeshes.flatMap((z) => z.geometryMeshes);
+        const frameTargets =
+          zoneFrameTargets.length > 0
+            ? zoneFrameTargets
+            : geometryMeshes.length > 0
+              ? geometryMeshes
+              : [rootMesh];
         frameCameraOnMesh(orbitCamera, frameTargets);
         initialPoseRef.current = storeCameraPose(orbitCamera);
 

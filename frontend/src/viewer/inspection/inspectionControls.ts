@@ -28,7 +28,7 @@ export const DEFAULT_INSPECTION: InspectionState = {
   },
   showGrid: true,
   showAxes: true,
-  showShell: true,
+  showShell: false,
   showZoneDetail: true,
 };
 

@@ -252,7 +252,7 @@ export default function VideoUpload({
             <div className="text-xs text-gray-400 border border-white/10 rounded-lg p-2.5 space-y-1">
               <p className="text-gray-300 font-medium">Room walkthrough checklist</p>
               <ul className="list-disc list-inside space-y-0.5 text-gray-500">
-                <li>30+ seconds, slow 360° pan from room center</li>
+                <li>30+ seconds — slow 360° pan from room center, or walk a full loop with walls in frame</li>
                 <li>Walls and floor visible throughout</li>
                 <li>Works in horizontal and vertical — keep the phone steady while panning 360°</li>
                 <li>Builds a textured room envelope (walls/floor) plus optional furniture detail meshes</li>

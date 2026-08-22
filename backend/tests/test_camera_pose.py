@@ -41,7 +41,44 @@ def test_validate_room_coverage_rejects_uniform_fallback() -> None:
 def test_validate_room_coverage_rejects_object_centric_video() -> None:
     yaw = {i: 10.0 for i in range(30)}
     with pytest.raises(ValueError, match="single-object"):
-        validate_room_coverage(yaw, 4, used_uniform_fallback=False)
+        validate_room_coverage(
+            yaw,
+            4,
+            used_uniform_fallback=False,
+            n_frames=30,
+            extraction_fps=2.0,
+        )
+
+
+def test_validate_room_coverage_accepts_long_walk_forward_via_fallback() -> None:
+    yaw = {i: 5.0 for i in range(50)}
+    validate_room_coverage(
+        yaw,
+        4,
+        used_uniform_fallback=False,
+        n_frames=50,
+        extraction_fps=2.0,
+    )
+
+
+def test_validate_room_coverage_accepts_wide_span_despite_dominant_zone() -> None:
+    yaw = {i: 5.0 for i in range(38)}
+    for i in range(38, 42):
+        yaw[i] = 95.0
+    for i in range(42, 45):
+        yaw[i] = 185.0
+    for i in range(45, 50):
+        yaw[i] = 275.0
+    validate_room_coverage(yaw, 4, used_uniform_fallback=False)
+
+
+def test_maybe_apply_frame_index_yaw_fallback_spreads_long_clip() -> None:
+    from services.meshy.camera_pose import maybe_apply_frame_index_yaw_fallback
+
+    yaw = {i: 0.0 for i in range(50)}
+    result = maybe_apply_frame_index_yaw_fallback(yaw, n_frames=50, extraction_fps=2.0)
+    assert result[0] == pytest.approx(0.0, abs=0.1)
+    assert result[49] == pytest.approx(360.0, abs=0.1)
 
 
 def test_validate_room_coverage_rejects_low_rotation() -> None:

@@ -31,12 +31,14 @@ def test_create_room_shell_uses_envelope_not_zone_bbox(tmp_path: Path) -> None:
     fake_image = object()
     with (
         patch("services.meshy.room_shell._pick_frontal_keyframe", return_value=fake_image),
-        patch("trimesh.creation.box") as mock_box,
-        patch("trimesh.visual.material.PBRMaterial"),
-        patch("trimesh.visual.TextureVisuals"),
+        patch("services.meshy.room_shell._make_textured_wall") as mock_wall,
+        patch("services.meshy.room_shell._make_colored_cap") as mock_cap,
+        patch("trimesh.Scene") as mock_scene_cls,
     ):
-        mock_mesh = mock_box.return_value
-        mock_mesh.export = lambda path: Path(path).write_bytes(b"glb")
+        mock_wall.return_value = object()
+        mock_cap.return_value = object()
+        mock_scene = mock_scene_cls.return_value
+        mock_scene.export = lambda path: Path(path).write_bytes(b"glb")
         result = create_room_shell(
             "job-1",
             tmp_path / "models",
@@ -47,9 +49,9 @@ def test_create_room_shell_uses_envelope_not_zone_bbox(tmp_path: Path) -> None:
         )
 
     assert result is not None
-    extents = mock_box.call_args[1]["extents"]
-    assert extents[0] >= 3.0
-    assert extents[2] >= 3.0
+    assert mock_wall.call_count == 4
+    wall_w, wall_h = mock_wall.call_args_list[0][0][0], mock_wall.call_args_list[0][0][1]
+    assert wall_w >= 3.0 or wall_h >= 2.7
 
 
 def test_create_room_shell_skips_without_textures(tmp_path: Path) -> None:

@@ -219,6 +219,7 @@ export default function ScanView() {
             </p>
             <p className="text-gray-700 text-xs max-w-2xl mt-1">
               Use <strong>Room — full space</strong> for walkthrough videos (multi-zone). Object presets produce a single mesh.
+              For rooms: slowly rotate the phone 360° from the center, or walk a full loop with walls visible.
             </p>
             {jobQualityPreset && (
               <span className={`inline-block mt-2 text-[10px] px-2 py-0.5 rounded border uppercase tracking-wide ${
@@ -236,15 +237,25 @@ export default function ScanView() {
             {viewerZoneWarning && (
               <p className="text-amber-400/90 text-xs mt-2">{viewerZoneWarning}</p>
             )}
+            {sceneManifest?.shell_url
+              && (sceneManifest.zones?.length ?? 0) > 0
+              && prefetchedJobModelMetadata
+              && (prefetchedJobModelMetadata.vertex_count ?? 0) <= 32
+              && (prefetchedJobModelMetadata.face_count ?? 0) <= 48 && (
+              <p className="text-amber-400/90 text-xs mt-2">
+                Room envelope loaded — toggle <strong>Furniture detail</strong> in Inspect to view zone meshes.
+                Metadata totals include shell + detail meshes after reprocessing.
+              </p>
+            )}
             {sceneManifest?.zone_errors && Object.keys(sceneManifest.zone_errors).length > 0 && (
               <p className="text-amber-400/90 text-xs mt-2">
                 {sceneManifest.shell_url ? (
                   <>
                     Room envelope loaded
                     {(sceneManifest.zone_count ?? sceneManifest.zones?.length ?? 0) > 0
-                      ? ` · ${sceneManifest.zone_count ?? sceneManifest.zones?.length} optional detail mesh(es)`
+                      ? ` · ${sceneManifest.zone_count ?? sceneManifest.zones?.length} detail mesh(es) kept`
                       : ''}
-                    .
+                    . Some zones were skipped or merged — detail may be incomplete.
                   </>
                 ) : (
                   <>

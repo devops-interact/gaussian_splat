@@ -11,12 +11,13 @@ from typing import Dict, List, Optional, Set, Tuple
 
 from core.config import QUALITY_PRESETS, QualityPreset, get_settings
 from core.models import Job, JobStatus, KeyframeInfo, SceneManifest, ZoneMeshInfo
-from core.pipeline import _extract_glb_metadata, _meshy_timeout_for_preset
+from core.pipeline import _aggregate_glb_metadata, _extract_glb_metadata, _meshy_timeout_for_preset
 from jobs.job_manager import get_job_manager
 from services.meshy.architectural_scoring import architecture_scores_by_index
 from services.meshy.camera_pose import (
     build_walk_path,
     estimate_yaw_by_index,
+    maybe_apply_frame_index_yaw_fallback,
     measure_yaw_coverage,
     validate_room_coverage,
 )
@@ -270,7 +271,18 @@ async def process_room_job(job: Job) -> Job:
             allow_uniform_fallback=False,
             is_portrait=is_portrait,
         )
-        validate_room_coverage(yaw_by_index, n_zones, used_uniform_fallback=used_uniform)
+        yaw_by_index = maybe_apply_frame_index_yaw_fallback(
+            yaw_by_index,
+            len(frame_paths),
+            preset_config.fps,
+        )
+        validate_room_coverage(
+            yaw_by_index,
+            n_zones,
+            used_uniform_fallback=used_uniform,
+            n_frames=len(frame_paths),
+            extraction_fps=preset_config.fps,
+        )
         coverage = measure_yaw_coverage(yaw_by_index, n_zones)
         coverage_span = float(coverage["span_deg"])
 
@@ -498,16 +510,20 @@ async def process_room_job(job: Job) -> Job:
         )
         job.scene_manifest = manifest
 
+        meta_paths: List[Path] = []
+        if shell_path and shell_path.exists():
+            meta_paths.append(shell_path)
+        for zone_id in sorted(kept_zone_ids):
+            zone_glb = job_dir / f"zone_{zone_id}.glb"
+            if zone_glb.exists():
+                meta_paths.append(zone_glb)
+
         if shell_path and shell_path.exists():
             compat = settings.MODELS_DIR / f"{job.job_id}.glb"
             import shutil
             shutil.copy2(shell_path, compat)
             job.model_filename = f"{job.job_id}.glb"
             job.model_url = f"/api/jobs/{job.job_id}/model"
-            meta = _extract_glb_metadata(compat)
-            if meta:
-                meta.bounding_box = agg_bbox
-                job.model_metadata = meta
         elif manifest_zones:
             primary = job_dir / f"zone_{manifest_zones[0].id}.glb"
             compat = settings.MODELS_DIR / f"{job.job_id}.glb"
@@ -517,7 +533,21 @@ async def process_room_job(job: Job) -> Job:
             job.model_filename = f"{job.job_id}.glb"
             job.model_url = f"/api/jobs/{job.job_id}/model"
             job.meshy_task_id = manifest_zones[0].meshy_task_id
-            meta = _extract_glb_metadata(compat if compat.exists() else primary)
+
+        if meta_paths:
+            meta = _aggregate_glb_metadata(meta_paths, bounding_box=agg_bbox)
+            if meta:
+                if manifest_zones and not job.meshy_task_id:
+                    job.meshy_task_id = manifest_zones[0].meshy_task_id
+                job.model_metadata = meta
+        elif shell_path and shell_path.exists():
+            meta = _extract_glb_metadata(shell_path)
+            if meta:
+                meta.bounding_box = agg_bbox
+                job.model_metadata = meta
+        elif manifest_zones:
+            primary = job_dir / f"zone_{manifest_zones[0].id}.glb"
+            meta = _extract_glb_metadata(primary)
             if meta and agg_bbox:
                 meta.bounding_box = agg_bbox
                 job.model_metadata = meta
