@@ -18,6 +18,7 @@ interface JobStatusProps {
       processing_time_seconds?: number;
       meshy_task_id?: string;
       quality_preset?: string;
+      total_zones?: number;
     },
   ) => void;
   /** Mirrors `quality_preset` from each successful status poll (null when job id changes, before first poll). */
@@ -103,6 +104,8 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, on
   const [estimatedMinutes, setEstimatedMinutes] = useState<number | null>(null);
   const [currentZone, setCurrentZone] = useState<number | null>(null);
   const [totalZones, setTotalZones] = useState<number | null>(null);
+  const [zoneErrors, setZoneErrors] = useState<Record<string, string> | null>(null);
+  const [zonesCompleted, setZonesCompleted] = useState<number | null>(null);
   const [startTime] = useState<Date>(new Date());
   const [elapsedTime, setElapsedTime] = useState<string>('0:00');
 
@@ -161,6 +164,12 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, on
           if (response.estimated_minutes) setEstimatedMinutes(response.estimated_minutes);
           if (response.current_zone != null) setCurrentZone(response.current_zone);
           if (response.total_zones != null) setTotalZones(response.total_zones);
+          if (response.scene_manifest?.zone_errors) {
+            setZoneErrors(response.scene_manifest.zone_errors);
+          }
+          if (response.scene_manifest?.zone_count != null) {
+            setZonesCompleted(response.scene_manifest.zone_count);
+          }
           if (
             response.status === JobStatusEnum.COMPLETED &&
             (response.model_url || (response.scene_manifest?.zones?.length ?? 0) > 0)
@@ -177,6 +186,7 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, on
                   processing_time_seconds: response.processing_time_seconds,
                   meshy_task_id: response.meshy_task_id,
                   quality_preset: response.quality_preset,
+                  total_zones: response.total_zones,
                 },
               );
             }
@@ -347,6 +357,28 @@ export default function JobStatus({ jobId, onComplete, onQualityPresetChange, on
             <div>
               <p className="font-semibold mb-1">Process Failed</p>
               <p className="opacity-90">{error}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Partial zone failures on completed room jobs */}
+        {isComplete && zoneErrors && Object.keys(zoneErrors).length > 0 && (
+          <div className="p-4 rounded-lg bg-amber-500/[0.06] border border-amber-500/28 text-amber-200 text-sm">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-amber-400" />
+              <div>
+                <p className="font-semibold text-amber-100 mb-1">Some zones failed</p>
+                <p className="opacity-90 text-xs mb-2">
+                  {zonesCompleted ?? '?'} of {totalZones ?? '?'} zones reconstructed successfully.
+                </p>
+                <ul className="space-y-1 text-xs opacity-90">
+                  {Object.entries(zoneErrors).map(([zoneId, msg]) => (
+                    <li key={zoneId}>
+                      Zone {Number(zoneId) + 1}: {msg}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
           </div>
         )}

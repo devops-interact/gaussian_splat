@@ -118,6 +118,65 @@ def _minimum_index_spacing(selected: Sequence[FrameCandidate], candidate: FrameC
     return min(abs(candidate.index - existing.index) for existing in selected)
 
 
+def _yaw_in_sector(yaw_deg: float, start: float, end: float) -> bool:
+    y = yaw_deg % 360.0
+    if start <= end:
+        return start <= y < end
+    return y >= start or y < end
+
+
+def _select_angular_diverse_keyframes(
+    zone_frames: Sequence[FrameCandidate],
+    zone_id: int,
+    n_zones: int,
+    max_count: int,
+) -> list[FrameCandidate]:
+    """Pick sharpest frame per angular sub-sector within a zone bucket."""
+    if max_count <= 0 or not zone_frames:
+        return []
+
+    bucket = 360.0 / n_zones
+    z_min = zone_id * bucket
+    sector_size = bucket / max_count
+    selected: list[FrameCandidate] = []
+
+    for sector in range(max_count):
+        s_start = z_min + sector * sector_size
+        s_end = s_start + sector_size
+        pool = [
+            f for f in zone_frames
+            if f.yaw_deg is not None and _yaw_in_sector(f.yaw_deg, s_start, s_end)
+        ]
+        if not pool:
+            center = (s_start + s_end) / 2.0
+            pool = sorted(
+                zone_frames,
+                key=lambda f: _angular_distance(f.yaw_deg or 0.0, center),
+            )[:1]
+        if pool:
+            best = max(pool, key=lambda f: f.sharpness if f.sharpness is not None else 0.0)
+            if best not in selected:
+                selected.append(best)
+
+    if len(selected) < max_count:
+        remaining = [f for f in zone_frames if f not in selected]
+        ranked = sorted(
+            remaining,
+            key=lambda f: -(f.sharpness if f.sharpness is not None else 0.0),
+        )
+        for candidate in ranked:
+            selected.append(candidate)
+            if len(selected) >= max_count:
+                break
+
+    return sorted(selected[:max_count], key=lambda f: f.index)
+
+
+def _angular_distance(a: float, b: float) -> float:
+    d = abs((a % 360.0) - (b % 360.0))
+    return min(d, 360.0 - d)
+
+
 def _select_diverse_keyframes(
     pool: Sequence[FrameCandidate],
     max_count: int,
@@ -216,11 +275,11 @@ def select_zone_keyframes(
     for zone_id, zone_frames in zones.items():
         if len(zone_frames) < min_frames_per_zone:
             continue
-        zone_gap = max(min_index_gap, len(zone_frames) // max(max_per_zone * 2, 1))
-        selected = _select_diverse_keyframes(
+        selected = _select_angular_diverse_keyframes(
             zone_frames,
+            zone_id,
+            n_zones,
             max_per_zone,
-            min_index_gap=zone_gap,
         )
         if selected:
             selected_by_zone[zone_id] = [frame.path for frame in selected]

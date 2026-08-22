@@ -11,7 +11,7 @@ import type { ModelMetadata } from '@/components/Viewer3D';
 import type { ModelMetadataResponse, KeyframeInfo, SceneManifestResponse } from '@/types/job';
 import { Card, CardContent } from '@/components/ui/card';
 import { Box, Download, ChevronDown, FileBox, FileCode, ArrowLeft } from 'lucide-react';
-import { downloadModel, getJobStatus } from '@/api/jobs';
+import { downloadModel, getJobStatus, getSceneManifest } from '@/api/jobs';
 import { getScan } from '@/api/scans';
 import { JobStatus as JobStatusEnum } from '@/types/job';
 import { getApiBaseUrl } from '@/lib/apiBase';
@@ -38,6 +38,21 @@ export default function ScanView() {
   const [downloadOpen, setDownloadOpen] = useState(false);
   const downloadRef = useRef<HTMLDivElement>(null);
 
+  const resolveSceneManifest = useCallback(async (
+    manifest: SceneManifestResponse | null | undefined,
+    totalZones?: number | null,
+  ): Promise<SceneManifestResponse | null> => {
+    if (!jobId) return manifest ?? null;
+    const zoneCount = manifest?.zones?.length ?? 0;
+    const needsFallback = zoneCount === 0 || (totalZones != null && totalZones > 0 && zoneCount < totalZones);
+    if (!needsFallback) return manifest ?? null;
+    try {
+      return await getSceneManifest(jobId);
+    } catch {
+      return manifest ?? null;
+    }
+  }, [jobId]);
+
   // Load existing scan or create placeholder for new
   useEffect(() => {
     if (!projectIdNum) return;
@@ -61,14 +76,18 @@ export default function ScanView() {
     if (!jobId || modelUrl) return;
     let cancelled = false;
     getJobStatus(jobId)
-      .then((response) => {
+      .then(async (response) => {
         if (cancelled) return;
         if (response.status === JobStatusEnum.COMPLETED && (response.model_url || response.scene_manifest?.zones?.length)) {
           if (response.model_url) setModelUrl(response.model_url);
           setObjUrl(response.model_url_obj ?? null);
           setPrefetchedJobModelMetadata(response.model_metadata ?? null);
           setKeyframes(response.keyframes ?? []);
-          setSceneManifest(response.scene_manifest ?? null);
+          const manifest = await resolveSceneManifest(
+            response.scene_manifest,
+            response.total_zones,
+          );
+          if (!cancelled) setSceneManifest(manifest);
           if (response.quality_preset) setJobQualityPreset(response.quality_preset);
           if (response.processing_time_seconds) setProcessingTimeSeconds(response.processing_time_seconds);
           if (response.meshy_task_id) setMeshyTaskId(response.meshy_task_id);
@@ -78,7 +97,7 @@ export default function ScanView() {
     return () => {
       cancelled = true;
     };
-  }, [jobId, modelUrl]);
+  }, [jobId, modelUrl, resolveSceneManifest]);
 
   useEffect(() => {
     if (!downloadOpen) return;
@@ -92,23 +111,28 @@ export default function ScanView() {
   }, [downloadOpen]);
 
   const handleProcessingComplete = useCallback(
-    (url: string, objUrlResp?: string, jobMeta?: ModelMetadataResponse, statusExtras?: {
+    async (url: string, objUrlResp?: string, jobMeta?: ModelMetadataResponse, statusExtras?: {
       keyframes?: KeyframeInfo[];
       scene_manifest?: SceneManifestResponse;
       processing_time_seconds?: number;
       meshy_task_id?: string;
       quality_preset?: string;
+      total_zones?: number;
     }) => {
       setModelUrl(url);
       setObjUrl(objUrlResp ?? null);
       setPrefetchedJobModelMetadata(jobMeta ?? null);
       if (statusExtras?.keyframes) setKeyframes(statusExtras.keyframes);
-      if (statusExtras?.scene_manifest) setSceneManifest(statusExtras.scene_manifest);
+      const manifest = await resolveSceneManifest(
+        statusExtras?.scene_manifest,
+        statusExtras?.total_zones,
+      );
+      setSceneManifest(manifest);
       if (statusExtras?.processing_time_seconds) setProcessingTimeSeconds(statusExtras.processing_time_seconds);
       if (statusExtras?.meshy_task_id) setMeshyTaskId(statusExtras.meshy_task_id);
       if (statusExtras?.quality_preset) setJobQualityPreset(statusExtras.quality_preset);
     },
-    [],
+    [resolveSceneManifest],
   );
 
   const handleModelMetadata = useCallback((meta: ModelMetadata) => {
@@ -188,14 +212,24 @@ export default function ScanView() {
             </p>
             {jobQualityPreset && (
               <span className={`inline-block mt-2 text-[10px] px-2 py-0.5 rounded border uppercase tracking-wide ${
-                sceneManifest?.composition_mode === 'zone_mesh'
+                (sceneManifest?.zones?.length ?? 0) > 0
                   ? 'text-amber-400 border-amber-500/30 bg-amber-500/10'
                   : 'text-white/50 border-white/20 bg-white/5'
               }`}>
-                {sceneManifest?.composition_mode === 'zone_mesh'
-                  ? `Room · ${sceneManifest.zones?.length ?? 0} zones`
+                {(sceneManifest?.zones?.length ?? 0) > 0
+                  ? `Room · ${sceneManifest?.zones?.length ?? 0} zones`
                   : `Single object · ${jobQualityPreset}`}
               </span>
+            )}
+            {sceneManifest?.zone_errors && Object.keys(sceneManifest.zone_errors).length > 0 && (
+              <p className="text-amber-400/90 text-xs mt-2">
+                Partial reconstruction: {sceneManifest.zone_count ?? sceneManifest.zones?.length} zones loaded.
+                {Object.entries(sceneManifest.zone_errors).map(([zid, msg]) => (
+                  <span key={zid} className="block text-amber-400/70">
+                    Zone {Number(zid) + 1} failed: {msg}
+                  </span>
+                ))}
+              </p>
             )}
           </div>
         </div>

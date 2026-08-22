@@ -168,7 +168,9 @@ async def process_single_object_job(job: Job) -> Job:
     if not frame_paths:
         raise ValueError(f"No frames found in {frames_dir}")
 
-    yaw_by_index = estimate_yaw_by_index(frame_paths, fps=preset_config.fps)
+    yaw_by_index, _ = estimate_yaw_by_index(
+        frame_paths, fps=preset_config.fps, allow_uniform_fallback=True,
+    )
     sharpness_by_index = {i: laplacian_sharpness(p) for i, p in enumerate(frame_paths)}
     keyframes = select_keyframes(
         frame_paths,

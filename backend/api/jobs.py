@@ -241,6 +241,10 @@ async def get_job_status(job_id: str, request: Request):
             ],
             "shell_url": sm.shell_url,
             "walk_path": sm.walk_path,
+            "zone_errors": sm.zone_errors,
+            "zone_count": sm.zone_count,
+            "coverage_span_deg": sm.coverage_span_deg,
+            "normalization_ref_height": sm.normalization_ref_height,
         }
 
     if job.current_zone is not None:
@@ -273,6 +277,10 @@ async def get_scene_manifest(job_id: str):
         ],
         "shell_url": sm.shell_url,
         "walk_path": sm.walk_path,
+        "zone_errors": sm.zone_errors,
+        "zone_count": sm.zone_count,
+        "coverage_span_deg": sm.coverage_span_deg,
+        "normalization_ref_height": sm.normalization_ref_height,
     }
 
 

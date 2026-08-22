@@ -3,7 +3,7 @@ Data models for job state and processing
 """
 from enum import Enum
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict
 from pydantic import ConfigDict, BaseModel, Field
 from core.config import QualityPreset
 
@@ -68,6 +68,10 @@ class SceneManifest(BaseModel):
     zones: List[ZoneMeshInfo] = Field(default_factory=list)
     shell_url: Optional[str] = None
     walk_path: Optional[List[List[float]]] = None
+    zone_errors: Optional[Dict[str, str]] = None
+    zone_count: Optional[int] = None
+    coverage_span_deg: Optional[float] = None
+    normalization_ref_height: Optional[float] = None
 
 
 class Job(BaseModel):

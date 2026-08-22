@@ -1,6 +1,6 @@
 import { ImportMeshAsync } from '@babylonjs/core/Loading/sceneLoader';
 import type { AbstractMesh, Scene } from '@babylonjs/core';
-import { Matrix, MeshBuilder, Vector3 } from '@babylonjs/core';
+import { Matrix, MeshBuilder, Quaternion, Vector3 } from '@babylonjs/core';
 import axios from 'axios';
 import { isCancel } from 'axios';
 import { getAuthHeaders } from '@/lib/authHeaders';
@@ -141,51 +141,78 @@ export interface ZoneMeshHandle {
   geometryMeshes: AbstractMesh[];
 }
 
+function applyTransformToNode(
+  node: import('@babylonjs/core').TransformNode,
+  transform: number[][] | undefined,
+): void {
+  if (!transform || transform.length !== 4) return;
+  const matrix = matrixFromRowMajor(transform);
+  const scale = new Vector3();
+  const rotation = new Quaternion();
+  const position = new Vector3();
+  matrix.decompose(scale, rotation, position);
+  node.position = position;
+  node.rotationQuaternion = rotation;
+  node.scaling = scale;
+}
+
 export async function importComposedScene(
   scene: Scene,
   manifest: import('@/types/job').SceneManifestResponse,
   apiBase: string,
 ): Promise<{ rootMesh: AbstractMesh; geometryMeshes: AbstractMesh[]; zoneMeshes: ZoneMeshHandle[] }> {
-  const { TransformNode, Vector3, Quaternion } = await import('@babylonjs/core');
+  const { TransformNode } = await import('@babylonjs/core');
   const roomRoot = new TransformNode('room_root', scene);
   const allGeometry: AbstractMesh[] = [];
   const zoneMeshes: ZoneMeshHandle[] = [];
+  let loaded = 0;
 
   for (const zone of manifest.zones) {
     const url = glbModelUrl(zone.mesh_url, apiBase);
-    const buffer = await fetchModelBuffer(url);
-    const { rootMesh, geometryMeshes } = await importGlbBuffer(scene, buffer, `zone_${zone.id}`);
-    rootMesh.parent = roomRoot;
-
-    if (zone.transform?.length === 4) {
-      const matrix = matrixFromRowMajor(zone.transform);
-      const scale = new Vector3();
-      const rotation = new Quaternion();
-      const position = new Vector3();
-      matrix.decompose(scale, rotation, position);
-      rootMesh.position = position;
-      rootMesh.rotationQuaternion = rotation;
-      rootMesh.scaling = scale;
+    let buffer: ArrayBuffer;
+    try {
+      buffer = await fetchModelBuffer(url);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(`Failed to load zone ${zone.id}: ${msg}`);
     }
 
-    for (const gm of geometryMeshes) {
-      gm.isPickable = true;
-      allGeometry.push(gm);
+    const zoneNode = new TransformNode(`zone_${zone.id}_root`, scene);
+    zoneNode.parent = roomRoot;
+    applyTransformToNode(zoneNode, zone.transform);
+
+    const { allMeshes, geometryMeshes } = await importGlbBuffer(scene, buffer, `zone_${zone.id}`);
+    for (const mesh of allMeshes) {
+      mesh.parent = zoneNode;
+      if (mesh.getTotalVertices() > 0) {
+        mesh.isPickable = true;
+        allGeometry.push(mesh);
+      }
     }
-    zoneMeshes.push({ zoneId: zone.id, rootMesh, geometryMeshes });
+
+    zoneMeshes.push({
+      zoneId: zone.id,
+      rootMesh: zoneNode as unknown as AbstractMesh,
+      geometryMeshes,
+    });
+    loaded += 1;
+  }
+
+  if (loaded === 0) {
+    throw new Error('Scene manifest has no loadable zone meshes');
   }
 
   if (manifest.shell_url) {
     try {
       const shellUrl = glbModelUrl(manifest.shell_url, apiBase);
       const shellBuf = await fetchModelBuffer(shellUrl);
-      const { rootMesh: shellRoot, geometryMeshes: shellGeo } = await importGlbBuffer(
-        scene, shellBuf, 'room_shell',
-      );
-      shellRoot.parent = roomRoot;
-      shellRoot.name = 'room_shell';
-      for (const gm of shellGeo) {
+      const shellNode = new TransformNode('room_shell_root', scene);
+      shellNode.parent = roomRoot;
+      const { allMeshes: shellMeshes } = await importGlbBuffer(scene, shellBuf, 'room_shell');
+      for (const gm of shellMeshes) {
+        gm.parent = shellNode;
         gm.isPickable = false;
+        if (gm.getTotalVertices() > 0) gm.name = 'room_shell';
       }
     } catch (e) {
       console.warn('[Babylon] Room shell load failed:', e);

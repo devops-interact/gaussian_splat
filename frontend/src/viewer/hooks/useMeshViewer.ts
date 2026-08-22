@@ -79,7 +79,7 @@ export function useMeshViewer({
   const [zoneMeshes, setZoneMeshes] = useState<import('../load/loadMeshScene').ZoneMeshHandle[]>([]);
 
   useEffect(() => {
-    const hasScene = sceneManifest?.composition_mode === 'zone_mesh' && (sceneManifest.zones?.length ?? 0) > 0;
+    const hasScene = (sceneManifest?.zones?.length ?? 0) > 0;
     if (!canvasRef.current || (!modelUrl && !hasScene)) return;
 
     let disposed = false;
@@ -143,7 +143,7 @@ export function useMeshViewer({
 
     (async () => {
       try {
-        const isComposed = sceneManifest?.composition_mode === 'zone_mesh' && (sceneManifest.zones?.length ?? 0) > 0;
+        const isComposed = (sceneManifest?.zones?.length ?? 0) > 0;
         let buffer: ArrayBuffer | null = null;
 
         if (!isComposed) {
@@ -195,13 +195,13 @@ export function useMeshViewer({
         applyInitialCameraPose(orbitCamera, def.position, def.lookAt, [0, 1, 0]);
 
         setLoadPhase('parsing');
-        setLoadLabel(sceneManifest?.composition_mode === 'zone_mesh' ? 'Loading room scene…' : 'Loading mesh…');
+        setLoadLabel(isComposed ? 'Loading room scene…' : 'Loading mesh…');
 
         let rootMesh;
         let geometryMeshes;
         let zoneMeshes: import('../load/loadMeshScene').ZoneMeshHandle[] = [];
 
-        if (sceneManifest?.composition_mode === 'zone_mesh' && sceneManifest.zones.length > 0) {
+        if (isComposed && sceneManifest) {
           const composed = await importComposedScene(scene, sceneManifest, apiBase);
           rootMesh = composed.rootMesh;
           geometryMeshes = composed.geometryMeshes;

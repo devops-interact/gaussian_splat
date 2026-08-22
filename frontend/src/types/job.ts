@@ -53,6 +53,10 @@ export interface SceneManifestResponse {
   zones: ZoneMeshInfo[];
   shell_url?: string | null;
   walk_path?: number[][] | null;
+  zone_errors?: Record<string, string> | null;
+  zone_count?: number | null;
+  coverage_span_deg?: number | null;
+  normalization_ref_height?: number | null;
 }
 
 export interface PresetInfo {
