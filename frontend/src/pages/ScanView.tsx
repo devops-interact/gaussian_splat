@@ -225,8 +225,10 @@ export default function ScanView() {
                   ? 'text-amber-400 border-amber-500/30 bg-amber-500/10'
                   : 'text-white/50 border-white/20 bg-white/5'
               }`}>
-                {(sceneManifest?.zones?.length ?? 0) > 0
-                  ? `Room · ${sceneManifest?.zones?.length ?? 0} zones`
+                {                (sceneManifest?.shell_url || sceneManifest?.composition_mode === 'room_shell' || (sceneManifest?.zones?.length ?? 0) > 0)
+                  ? sceneManifest?.shell_url
+                    ? `Room shell${(sceneManifest?.zones?.length ?? 0) > 0 ? ` · ${sceneManifest.zones.length} detail` : ''}`
+                    : `Room · ${sceneManifest?.zones?.length ?? 0} zones`
                   : `Single object · ${jobQualityPreset}`}
               </span>
             )}
@@ -235,10 +237,22 @@ export default function ScanView() {
             )}
             {sceneManifest?.zone_errors && Object.keys(sceneManifest.zone_errors).length > 0 && (
               <p className="text-amber-400/90 text-xs mt-2">
-                Partial reconstruction: {sceneManifest.zone_count ?? sceneManifest.zones?.length} zones loaded.
+                {sceneManifest.shell_url ? (
+                  <>
+                    Room envelope loaded
+                    {(sceneManifest.zone_count ?? sceneManifest.zones?.length ?? 0) > 0
+                      ? ` · ${sceneManifest.zone_count ?? sceneManifest.zones?.length} optional detail mesh(es)`
+                      : ''}
+                    .
+                  </>
+                ) : (
+                  <>
+                    Partial reconstruction: {sceneManifest.zone_count ?? sceneManifest.zones?.length} zones loaded.
+                  </>
+                )}
                 {Object.entries(sceneManifest.zone_errors).map(([zid, msg]) => (
                   <span key={zid} className="block text-amber-400/70">
-                    Zone {Number(zid) + 1} failed: {msg}
+                    Zone {Number(zid) + 1}: {msg}
                   </span>
                 ))}
               </p>

@@ -1,5 +1,5 @@
 """
-Room reconstruction pipeline: zone keyframes → N Meshy jobs → scene manifest.
+Room reconstruction pipeline: environment-first shell + optional zone detail meshes.
 """
 from __future__ import annotations
 
@@ -7,12 +7,13 @@ import asyncio
 import logging
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from core.config import QUALITY_PRESETS, QualityPreset, get_settings
 from core.models import Job, JobStatus, KeyframeInfo, SceneManifest, ZoneMeshInfo
 from core.pipeline import _extract_glb_metadata, _meshy_timeout_for_preset
 from jobs.job_manager import get_job_manager
+from services.meshy.architectural_scoring import architecture_scores_by_index
 from services.meshy.camera_pose import (
     build_walk_path,
     estimate_yaw_by_index,
@@ -24,19 +25,23 @@ from services.meshy.keyframe_selector import (
     frame_candidates_from_paths,
     laplacian_sharpness,
     list_frame_paths,
+    select_alternate_zone_keyframes,
     select_zone_keyframes,
 )
+from services.meshy.mesh_quality import mesh_passes_quality_gate
 from services.meshy.meshy_params import meshy_task_kwargs
 from services.meshy.person_filter import person_flags_by_index
-from services.meshy.room_shell import create_room_shell
-from services.meshy.scene_compose import compose_radius_from_bbox, compose_zone_transforms_for_ids
+from services.meshy.room_shell import create_room_shell, estimate_room_envelope
+from services.meshy.scene_compose import compose_zone_transforms_for_ids
 from services.meshy.storage_upload import publish_keyframes
 from services.meshy.zone_normalize import (
     aggregate_bbox,
     align_zones_to_floor_origin,
     dedupe_similar_zones,
+    glb_bbox,
     glb_vertex_count,
     normalize_zone_glbs,
+    zones_are_similar,
 )
 from services.video.extract_frames import extract_frames
 
@@ -67,6 +72,144 @@ async def _run_zone_meshy(
         return zone_id, task_id, result, None
     except Exception as e:
         return zone_id, None, None, str(e)
+
+
+def _zone_duplicate_of_existing(
+    job_dir: Path,
+    zone_id: int,
+    kept_zone_ids: List[int],
+) -> Optional[int]:
+    """Return zone id that zone_id duplicates, if any."""
+    path = job_dir / f"zone_{zone_id}.glb"
+    bbox = glb_bbox(path)
+    if not bbox:
+        return None
+    from services.meshy.zone_normalize import glb_content_hash, glb_vertex_count
+
+    verts = glb_vertex_count(path)
+    h = glb_content_hash(path)
+    for other in kept_zone_ids:
+        other_path = job_dir / f"zone_{other}.glb"
+        if not other_path.exists():
+            continue
+        other_bbox = glb_bbox(other_path)
+        if not other_bbox:
+            continue
+        if zones_are_similar(
+            bbox,
+            other_bbox,
+            verts,
+            glb_vertex_count(other_path),
+            hash_a=h,
+            hash_b=glb_content_hash(other_path),
+        ):
+            return other
+    return None
+
+
+async def _process_zone_with_retry(
+    client: MeshyClient,
+    job: Job,
+    job_manager,
+    zone_id: int,
+    initial_paths: List[Path],
+    frame_paths: List[Path],
+    preset_config,
+    path_to_index: Dict[Path, int],
+    yaw_by_index: dict,
+    sharpness_by_index: dict,
+    architecture_by_index: dict,
+    person_by_index: Optional[dict],
+    bucket: float,
+    sem: asyncio.Semaphore,
+    zone_urls_out: Dict[int, List[str]],
+) -> Tuple[Optional[Tuple[int, str, dict]], str, Set[int]]:
+    """
+    Run Meshy for a zone with retries on object-like or duplicate meshes.
+
+    Returns (zone_result or None, error_message, used_frame_indices).
+    """
+    max_retries = preset_config.zone_mesh_max_retries
+    used_indices: Set[int] = set()
+    paths = list(initial_paths)
+    last_error = ""
+
+    for attempt in range(max_retries + 1):
+        if attempt > 0:
+            paths = select_alternate_zone_keyframes(
+                frame_paths,
+                zone_id,
+                n_zones=preset_config.n_zones,
+                max_per_zone=preset_config.max_keyframes,
+                yaw_by_index=yaw_by_index,
+                sharpness_by_index=sharpness_by_index,
+                architecture_by_index=architecture_by_index,
+                person_by_index=person_by_index,
+                min_architecture=preset_config.min_architecture_score,
+                exclude_indices=used_indices,
+            )
+            if not paths:
+                break
+
+        used_indices.update(path_to_index.get(p, -1) for p in paths if p in path_to_index)
+        urls = publish_keyframes(job.job_id, paths, zone_id=zone_id)
+        zone_urls_out[zone_id] = urls
+
+        zone_center_yaw = (zone_id + 0.5) * bucket
+        frame_yaws = [
+            yaw_by_index.get(path_to_index[p], 0.0)
+            for p in paths
+            if p in path_to_index
+        ]
+
+        async with sem:
+            job.current_zone = zone_id
+            await job_manager.update_job(job)
+
+            async def on_poll(task: dict) -> None:
+                base = 0.35 + (zone_id / max(preset_config.n_zones, 1)) * 0.35
+                zone_span = 0.35 / max(preset_config.n_zones, 1)
+                progress = task.get("progress", 0)
+                job.progress = base + (progress / 100.0) * zone_span
+                await job_manager.update_job(job)
+
+            zid, task_id, result, err = await _run_zone_meshy(
+                client,
+                zone_id,
+                urls,
+                preset_config,
+                frame_yaws,
+                zone_center_yaw,
+                on_poll,
+            )
+
+        if err:
+            last_error = err
+            logger.warning("Zone %s Meshy attempt %d failed: %s", zone_id, attempt, err)
+            continue
+
+        if not task_id or not result:
+            last_error = "Empty Meshy result"
+            continue
+
+        glb_url = MeshyClient.best_glb_url(result)
+        if not glb_url:
+            last_error = "No GLB URL in Meshy result"
+            continue
+
+        job_dir = settings.MODELS_DIR / job.job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+        glb_path = job_dir / f"zone_{zone_id}.glb"
+        await client.download_file(glb_url, str(glb_path))
+
+        if not mesh_passes_quality_gate(glb_path):
+            last_error = "Mesh classified as dominant object (not room detail)"
+            logger.info("Zone %s rejected by quality gate (attempt %d)", zone_id, attempt)
+            continue
+
+        return (zone_id, task_id, result), "", used_indices
+
+    return None, last_error or "All retry attempts failed", used_indices
 
 
 async def process_room_job(job: Job) -> Job:
@@ -107,8 +250,10 @@ async def process_room_job(job: Job) -> Job:
         )
         validate_room_coverage(yaw_by_index, n_zones, used_uniform_fallback=used_uniform)
         coverage = measure_yaw_coverage(yaw_by_index, n_zones)
+        coverage_span = float(coverage["span_deg"])
 
         sharpness_by_index = {i: laplacian_sharpness(p) for i, p in enumerate(frame_paths)}
+        architecture_by_index = architecture_scores_by_index(frame_paths)
         person_by_index = None
         if preset_config.exclude_person_frames:
             person_by_index = person_flags_by_index(
@@ -123,19 +268,18 @@ async def process_room_job(job: Job) -> Job:
             max_per_zone=preset_config.max_keyframes,
             yaw_by_index=yaw_by_index,
             sharpness_by_index=sharpness_by_index,
+            architecture_by_index=architecture_by_index,
             person_by_index=person_by_index,
+            min_architecture=preset_config.min_architecture_score,
         )
         if not zones:
             raise ValueError("No zone keyframes selected — walk the full room in your video")
 
-        if len(zones) < 2:
-            raise ValueError(
-                f"Video needs a 360° walk — only {len(zones)} zone(s) found. "
-                "Pan slowly around the full room while recording."
-            )
-
         job.total_zones = n_zones
         walk_path = build_walk_path(frame_paths, yaw_by_index)
+        path_to_index = {p: i for i, p in enumerate(frame_paths)}
+        architecture_by_path = {p: architecture_by_index[i] for p, i in path_to_index.items()}
+        yaw_by_path = {p: yaw_by_index[i] for p, i in path_to_index.items()}
 
         all_keyframes: List[KeyframeInfo] = []
         zone_urls: Dict[int, List[str]] = {}
@@ -145,7 +289,6 @@ async def process_room_job(job: Job) -> Job:
             sharpness_by_index=sharpness_by_index,
         )
         path_to_candidate = {c.path: c for c in candidates}
-        path_to_index = {p: i for i, p in enumerate(frame_paths)}
 
         bucket = 360.0 / n_zones
         for zone_id, paths in sorted(zones.items()):
@@ -165,6 +308,32 @@ async def process_room_job(job: Job) -> Job:
         job.keyframes = all_keyframes
         await job_manager.update_job(job)
 
+        # Environment-first: build room shell before optional zone Meshy jobs
+        job.status = JobStatus.COMPOSING_SCENE
+        job.progress = 0.22
+        await job_manager.update_job(job)
+
+        flat_paths = list(frame_paths)
+        shell_path = None
+        if preset_config.room_shell_enabled:
+            shell_path = create_room_shell(
+                job.job_id,
+                settings.MODELS_DIR,
+                flat_paths,
+                coverage_span_deg=coverage_span,
+                orbit_radius_m=preset_config.room_orbit_radius_m,
+                default_height_m=preset_config.room_default_height_m,
+                n_zones=n_zones,
+                yaw_by_path=yaw_by_path,
+                architecture_by_path=architecture_by_path,
+            )
+
+        if preset_config.room_shell_required and not shell_path:
+            raise ValueError(
+                "Room shell could not be created — record a longer 360° walkthrough "
+                "(30+ seconds, full room visible)."
+            )
+
         client = MeshyClient(
             api_key=settings.MESHY_API_KEY,
             poll_interval_s=settings.MESHY_POLL_INTERVAL_S,
@@ -176,113 +345,101 @@ async def process_room_job(job: Job) -> Job:
         zone_errors: Dict[str, str] = {}
         sem = asyncio.Semaphore(settings.MESHY_MAX_PARALLEL_JOBS)
 
-        async def process_zone(zone_id: int, urls: List[str], paths: List[Path]) -> None:
-            zone_center_yaw = (zone_id + 0.5) * bucket
-            frame_yaws = [
-                yaw_by_index.get(path_to_index[p], 0.0)
-                for p in paths
-                if p in path_to_index
-            ]
-
-            async with sem:
-                job.current_zone = zone_id
-                await job_manager.update_job(job)
-
-                async def on_poll(task: dict) -> None:
-                    base = 0.15 + (zone_id / max(len(zone_urls), 1)) * 0.55
-                    zone_span = 0.55 / max(len(zone_urls), 1)
-                    progress = task.get("progress", 0)
-                    job.progress = base + (progress / 100.0) * zone_span
-                    await job_manager.update_job(job)
-
-                zid, task_id, result, err = await _run_zone_meshy(
-                    client,
-                    zone_id,
-                    urls,
-                    preset_config,
-                    frame_yaws,
-                    zone_center_yaw,
-                    on_poll,
-                )
-                if err:
-                    zone_errors[str(zid)] = err
-                    logger.warning("Zone %s Meshy failed: %s", zid, err)
-                elif task_id and result:
-                    zone_results[zid] = (task_id, result)
-
         job.status = JobStatus.SUBMITTING_RECONSTRUCTION
-        job.progress = 0.15
+        job.progress = 0.28
         await job_manager.update_job(job)
 
+        async def run_zone(zone_id: int, paths: List[Path]) -> None:
+            result, err, _ = await _process_zone_with_retry(
+                client,
+                job,
+                job_manager,
+                zone_id,
+                paths,
+                frame_paths,
+                preset_config,
+                path_to_index,
+                yaw_by_index,
+                sharpness_by_index,
+                architecture_by_index,
+                person_by_index,
+                bucket,
+                sem,
+                zone_urls,
+            )
+            if result:
+                zid, task_id, meshy_result = result
+                zone_results[zid] = (task_id, meshy_result)
+            elif err:
+                zone_errors[str(zone_id)] = err
+
         await asyncio.gather(*[
-            process_zone(zid, urls, zones[zid])
-            for zid, urls in zone_urls.items()
+            run_zone(zid, zones[zid])
+            for zid in sorted(zones.keys())
         ])
 
-        if len(zone_results) < 2:
+        if not shell_path and len(zone_results) < 2:
             detail = "; ".join(f"Zone {z}: {msg}" for z, msg in sorted(zone_errors.items()))
             raise ValueError(
-                f"Room reconstruction failed — only {len(zone_results)} zone(s) succeeded. {detail}"
+                f"Room reconstruction failed — no shell and only {len(zone_results)} zone(s). {detail}"
             )
 
         job.status = JobStatus.DOWNLOADING_MODEL
-        job.progress = 0.75
+        job.progress = 0.72
         await job_manager.update_job(job)
 
         job_dir = settings.MODELS_DIR / job.job_id
         job_dir.mkdir(parents=True, exist_ok=True)
 
-        for zone_id, (task_id, result) in sorted(zone_results.items()):
-            glb_url = MeshyClient.best_glb_url(result)
-            if not glb_url:
-                zone_errors[str(zone_id)] = "No GLB URL in Meshy result"
-                logger.warning("Zone %s: no GLB URL", zone_id)
-                continue
+        kept_zone_ids: List[int] = []
+        for zone_id in sorted(zone_results.keys()):
             glb_path = job_dir / f"zone_{zone_id}.glb"
-            await client.download_file(glb_url, str(glb_path))
-
-        scale_factors, zone_bboxes = normalize_zone_glbs(job_dir, list(zone_results.keys()))
-
-        zone_quality: Dict[int, float] = {}
-        for zid, paths in zones.items():
-            if zid not in zone_results:
+            if not glb_path.exists():
+                zone_errors[str(zone_id)] = "GLB file missing after download"
                 continue
-            scores = [
-                sharpness_by_index.get(path_to_index[p], 0.0)
-                for p in paths
-                if p in path_to_index
-            ]
-            zone_quality[zid] = sum(scores) / len(scores) if scores else 0.0
+            dup_of = _zone_duplicate_of_existing(job_dir, zone_id, kept_zone_ids)
+            if dup_of is not None:
+                zone_errors[str(zone_id)] = f"Duplicate of zone {dup_of} (near-identical mesh)"
+                glb_path.unlink(missing_ok=True)
+                continue
+            kept_zone_ids.append(zone_id)
 
-        kept_zone_ids, dedupe_errors = dedupe_similar_zones(
-            job_dir, list(zone_results.keys()), zone_quality,
+        if kept_zone_ids:
+            normalize_zone_glbs(job_dir, kept_zone_ids)
+            zone_quality: Dict[int, float] = {}
+            for zid, paths in zones.items():
+                if zid not in kept_zone_ids:
+                    continue
+                scores = [
+                    sharpness_by_index.get(path_to_index[p], 0.0)
+                    * architecture_by_index.get(path_to_index[p], 0.5)
+                    for p in paths
+                    if p in path_to_index
+                ]
+                zone_quality[zid] = sum(scores) / len(scores) if scores else 0.0
+
+            deduped_ids, dedupe_errors = dedupe_similar_zones(job_dir, kept_zone_ids, zone_quality)
+            zone_errors.update(dedupe_errors)
+            kept_zone_ids = deduped_ids
+            zone_results = {zid: zone_results[zid] for zid in kept_zone_ids if zid in zone_results}
+
+        zone_bboxes: Dict[int, dict] = {}
+        if kept_zone_ids:
+            aligned = align_zones_to_floor_origin(job_dir, kept_zone_ids)
+            zone_bboxes.update(aligned)
+
+        envelope = estimate_room_envelope(
+            coverage_span_deg=coverage_span,
+            orbit_radius_m=preset_config.room_orbit_radius_m,
+            default_height_m=preset_config.room_default_height_m,
         )
-        zone_errors.update(dedupe_errors)
+        agg_bbox = aggregate_bbox(list(zone_bboxes.values())) if zone_bboxes else {
+            "min": [-envelope["size_x"] / 2, 0, -envelope["size_z"] / 2],
+            "max": [envelope["size_x"] / 2, envelope["size_y"], envelope["size_z"] / 2],
+        }
 
-        if len(kept_zone_ids) < 2:
-            detail = "; ".join(f"Zone {z}: {msg}" for z, msg in sorted(zone_errors.items()))
-            raise ValueError(
-                f"Room reconstruction produced duplicate zone meshes — only {len(kept_zone_ids)} unique. "
-                f"Try Object preset for single items. {detail}"
-            )
-
-        zone_results = {zid: zone_results[zid] for zid in kept_zone_ids if zid in zone_results}
-        zone_bboxes = {zid: b for zid, b in zone_bboxes.items() if zid in kept_zone_ids}
-
-        aligned = align_zones_to_floor_origin(job_dir, kept_zone_ids)
-        zone_bboxes.update(aligned)
-
-        agg_bbox = aggregate_bbox(list(zone_bboxes.values()))
-        ref_height = None
-        if zone_bboxes:
-            heights = [
-                b["max"][1] - b["min"][1]
-                for b in zone_bboxes.values()
-                if b.get("min") and b.get("max")
-            ]
-            ref_height = sorted(heights)[len(heights) // 2] if heights else None
-
-        compose_radius = compose_radius_from_bbox(agg_bbox, ref_height=ref_height)
+        ref_height = envelope["size_y"]
+        compose_radius = preset_config.zone_compose_radius
         transforms = compose_zone_transforms_for_ids(
             kept_zone_ids,
             n_zones=n_zones,
@@ -302,59 +459,33 @@ async def process_room_job(job: Job) -> Job:
                 transform=transforms.get(zone_id, transforms.get(list(transforms.keys())[0])),
             ))
 
-        if len(manifest_zones) < 2:
-            detail = "; ".join(f"Zone {z}: {msg}" for z, msg in sorted(zone_errors.items()))
-            raise ValueError(
-                f"Room reconstruction produced only {len(manifest_zones)} zone mesh(es). {detail}"
-            )
-
-        shell_url = None
-        zones_with_geometry = sum(
-            1
-            for z in manifest_zones
-            if glb_vertex_count(job_dir / f"zone_{z.id}.glb") >= MIN_ZONE_VERTS_FOR_SHELL
-        )
-        if (
-            preset_config.room_shell_enabled
-            and len(manifest_zones) >= 3
-            and zones_with_geometry >= 3
-        ):
-            job.status = JobStatus.COMPOSING_SCENE
-            job.progress = 0.85
-            await job_manager.update_job(job)
-            flat_paths = [p for paths in zones.values() for p in paths]
-            yaw_by_path = {p: yaw_by_index.get(path_to_index[p], 0.0) for p in flat_paths}
-            shell_path = create_room_shell(
-                job.job_id,
-                settings.MODELS_DIR,
-                flat_paths,
-                aggregated_bbox=agg_bbox,
-                n_zones=n_zones,
-                yaw_by_path=yaw_by_path,
-            )
-            if shell_path:
-                shell_url = f"/api/jobs/{job.job_id}/shell"
-        elif preset_config.room_shell_enabled and len(manifest_zones) >= 3:
-            logger.info(
-                "Room shell skipped for job %s — only %d/%d zones have sufficient geometry",
-                job.job_id,
-                zones_with_geometry,
-                len(manifest_zones),
-            )
+        shell_url = f"/api/jobs/{job.job_id}/shell" if shell_path and shell_path.exists() else None
+        primary_geometry = "shell" if shell_url else "zones"
 
         manifest = SceneManifest(
-            composition_mode="zone_mesh",
+            composition_mode="room_shell" if shell_url else "zone_mesh",
+            primary_geometry=primary_geometry,
             zones=manifest_zones,
             shell_url=shell_url,
             walk_path=walk_path,
             zone_errors=zone_errors or None,
             zone_count=len(manifest_zones),
-            coverage_span_deg=float(coverage["span_deg"]),
+            coverage_span_deg=coverage_span,
             normalization_ref_height=ref_height,
         )
         job.scene_manifest = manifest
 
-        if manifest_zones:
+        if shell_path and shell_path.exists():
+            compat = settings.MODELS_DIR / f"{job.job_id}.glb"
+            import shutil
+            shutil.copy2(shell_path, compat)
+            job.model_filename = f"{job.job_id}.glb"
+            job.model_url = f"/api/jobs/{job.job_id}/model"
+            meta = _extract_glb_metadata(compat)
+            if meta:
+                meta.bounding_box = agg_bbox
+                job.model_metadata = meta
+        elif manifest_zones:
             primary = job_dir / f"zone_{manifest_zones[0].id}.glb"
             compat = settings.MODELS_DIR / f"{job.job_id}.glb"
             if primary.exists():
@@ -363,11 +494,9 @@ async def process_room_job(job: Job) -> Job:
             job.model_filename = f"{job.job_id}.glb"
             job.model_url = f"/api/jobs/{job.job_id}/model"
             job.meshy_task_id = manifest_zones[0].meshy_task_id
-
             meta = _extract_glb_metadata(compat if compat.exists() else primary)
-            if meta:
-                if agg_bbox:
-                    meta.bounding_box = agg_bbox
+            if meta and agg_bbox:
+                meta.bounding_box = agg_bbox
                 job.model_metadata = meta
 
         job.status = JobStatus.COMPLETED
@@ -377,11 +506,11 @@ async def process_room_job(job: Job) -> Job:
         await job_manager.update_job(job)
 
         logger.info(
-            "Room job %s completed in %ss (%d/%d zones, %d errors)",
+            "Room job %s completed in %ss (shell=%s, %d zone meshes, %d errors)",
             job.job_id,
             job.processing_time_seconds,
+            bool(shell_url),
             len(manifest_zones),
-            n_zones,
             len(zone_errors),
         )
         return job

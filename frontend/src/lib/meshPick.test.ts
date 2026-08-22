@@ -115,12 +115,13 @@ describe('pickMeshSurface on parented mesh', () => {
 });
 
 describe('pickMeshMeasure dense mesh guard', () => {
-  it('skips nearest-vertex snap when mesh vertex count exceeds budget', () => {
+  it('skips nearest-vertex scan when mesh vertex count exceeds budget', () => {
     const engine = new NullEngine();
     const scene = new Scene(engine);
     const mesh = MeshBuilder.CreateBox('dense', { size: 2 }, scene);
     mesh.isPickable = true;
     vi.spyOn(mesh, 'getTotalVertices').mockReturnValue(MAX_VERTS_FOR_NEAREST_SNAP + 10);
+    vi.spyOn(mesh, 'getClosestFacetAtCoordinates').mockReturnValue(null);
 
     const camera = new UniversalCamera('cam', new Vector3(0, 0, -6), scene);
     scene.activeCamera = camera;
@@ -139,6 +140,38 @@ describe('pickMeshMeasure dense mesh guard', () => {
     expect(result).not.toBeNull();
     expect(nearestSpy).not.toHaveBeenCalled();
     expect(result!.isSnapped).toBe(false);
+
+    pickSpy.mockRestore();
+    nearestSpy.mockRestore();
+    scene.dispose();
+    engine.dispose();
+  });
+
+  it('snaps via facet lookup when pick faceId is missing on dense mesh', () => {
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+    const mesh = MeshBuilder.CreateBox('dense', { size: 2 }, scene);
+    mesh.isPickable = true;
+    vi.spyOn(mesh, 'getTotalVertices').mockReturnValue(MAX_VERTS_FOR_NEAREST_SNAP + 10);
+    vi.spyOn(mesh, 'getClosestFacetAtCoordinates').mockReturnValue(0);
+
+    const camera = new UniversalCamera('cam', new Vector3(0, 0, -6), scene);
+    scene.activeCamera = camera;
+    scene.render();
+
+    const nearestSpy = vi.spyOn(meshPick, 'snapToNearestVertex');
+    const pickSpy = vi.spyOn(scene, 'pickWithRay').mockReturnValue({
+      hit: true,
+      pickedPoint: new Vector3(0.5, 0.5, 1),
+      pickedMesh: mesh,
+      faceId: -1,
+    } as unknown as ReturnType<typeof scene.pickWithRay>);
+
+    const result = meshPick.pickMeshMeasure(scene, 256, 256);
+
+    expect(result).not.toBeNull();
+    expect(nearestSpy).not.toHaveBeenCalled();
+    expect(result!.isSnapped).toBe(true);
 
     pickSpy.mockRestore();
     nearestSpy.mockRestore();

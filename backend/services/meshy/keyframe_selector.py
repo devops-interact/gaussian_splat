@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Optional, Sequence, Union
 
+from services.meshy.architectural_scoring import (
+    combined_frame_score,
+    is_diverse_enough,
+)
 from services.meshy.person_filter import filter_person_frames
 
 MESHY_MAX_IMAGES = 4
@@ -120,6 +124,44 @@ def _minimum_index_spacing(selected: Sequence[FrameCandidate], candidate: FrameC
     return min(abs(candidate.index - existing.index) for existing in selected)
 
 
+def _rank_score(
+    frame: FrameCandidate,
+    *,
+    architecture_by_index: Optional[Mapping[int, float]] = None,
+    min_architecture: float = 0.0,
+) -> float:
+    sharp = frame.sharpness if frame.sharpness is not None else 0.0
+    arch = architecture_by_index.get(frame.index, 0.5) if architecture_by_index else 1.0
+    return combined_frame_score(sharp, arch, min_architecture=min_architecture)
+
+
+def _best_in_pool(
+    pool: Sequence[FrameCandidate],
+    *,
+    architecture_by_index: Optional[Mapping[int, float]] = None,
+    min_architecture: float = 0.0,
+    exclude: Optional[set[int]] = None,
+    diversity_refs: Optional[Sequence[Path]] = None,
+) -> Optional[FrameCandidate]:
+    if not pool:
+        return None
+    ranked = sorted(
+        pool,
+        key=lambda f: -_rank_score(
+            f,
+            architecture_by_index=architecture_by_index,
+            min_architecture=min_architecture,
+        ),
+    )
+    for candidate in ranked:
+        if exclude and candidate.index in exclude:
+            continue
+        if diversity_refs and not is_diverse_enough(candidate.path, diversity_refs):
+            continue
+        return candidate
+    return ranked[0] if ranked else None
+
+
 def _yaw_in_sector(yaw_deg: float, start: float, end: float) -> bool:
     y = yaw_deg % 360.0
     if start <= end:
@@ -134,6 +176,10 @@ def _select_angular_diverse_keyframes(
     max_count: int,
     *,
     person_by_index: Optional[Mapping[int, bool]] = None,
+    architecture_by_index: Optional[Mapping[int, float]] = None,
+    min_architecture: float = 0.0,
+    diversity_refs: Optional[Sequence[Path]] = None,
+    exclude_indices: Optional[set[int]] = None,
 ) -> list[FrameCandidate]:
     """Pick sharpest frame per angular sub-sector within a zone bucket."""
     if max_count <= 0 or not zone_frames:
@@ -161,9 +207,32 @@ def _select_angular_diverse_keyframes(
             ]
             min_dist = min(d for d, _ in distances)
             near = [f for d, f in distances if d <= min_dist + 1.0]
-            pool = [max(near, key=lambda f: f.sharpness if f.sharpness is not None else 0.0)]
+            pool = [
+                _best_in_pool(
+                    near,
+                    architecture_by_index=architecture_by_index,
+                    min_architecture=min_architecture,
+                    exclude=exclude_indices,
+                    diversity_refs=diversity_refs,
+                ) or near[0]
+            ]
         if pool:
-            best = max(pool, key=lambda f: f.sharpness if f.sharpness is not None else 0.0)
+            best = _best_in_pool(
+                pool,
+                architecture_by_index=architecture_by_index,
+                min_architecture=min_architecture,
+                exclude=exclude_indices,
+                diversity_refs=diversity_refs,
+            )
+            if best is None:
+                best = max(
+                    pool,
+                    key=lambda f: _rank_score(
+                        f,
+                        architecture_by_index=architecture_by_index,
+                        min_architecture=min_architecture,
+                    ),
+                )
             if best not in selected:
                 selected.append(best)
 
@@ -171,9 +240,17 @@ def _select_angular_diverse_keyframes(
         remaining = [f for f in zone_frames if f not in selected]
         ranked = sorted(
             remaining,
-            key=lambda f: -(f.sharpness if f.sharpness is not None else 0.0),
+            key=lambda f: -_rank_score(
+                f,
+                architecture_by_index=architecture_by_index,
+                min_architecture=min_architecture,
+            ),
         )
         for candidate in ranked:
+            if exclude_indices and candidate.index in exclude_indices:
+                continue
+            if diversity_refs and not is_diverse_enough(candidate.path, diversity_refs):
+                continue
             selected.append(candidate)
             if len(selected) >= max_count:
                 break
@@ -192,6 +269,8 @@ def _select_diverse_keyframes(
     *,
     min_index_gap: int = 1,
     person_by_index: Optional[Mapping[int, bool]] = None,
+    architecture_by_index: Optional[Mapping[int, float]] = None,
+    min_architecture: float = 0.0,
 ) -> list[FrameCandidate]:
     if max_count <= 0 or not pool:
         return []
@@ -201,7 +280,11 @@ def _select_diverse_keyframes(
     ranked = sorted(
         pool,
         key=lambda frame: (
-            -(frame.sharpness if frame.sharpness is not None else 0.0),
+            -_rank_score(
+                frame,
+                architecture_by_index=architecture_by_index,
+                min_architecture=min_architecture,
+            ),
             frame.index,
         ),
     )
@@ -264,7 +347,9 @@ def select_zone_keyframes(
     timestamps_sec: Optional[Sequence[float]] = None,
     yaw_by_index: Optional[Mapping[int, float]] = None,
     sharpness_by_index: Optional[Mapping[int, float]] = None,
+    architecture_by_index: Optional[Mapping[int, float]] = None,
     person_by_index: Optional[Mapping[int, bool]] = None,
+    min_architecture: float = 0.0,
     min_index_gap: int = 1,
     min_frames_per_zone: int = 1,
 ) -> dict[int, list[Path]]:
@@ -288,7 +373,9 @@ def select_zone_keyframes(
     zones = assign_zones_by_yaw(candidates, n_zones=n_zones)
 
     selected_by_zone: dict[int, list[Path]] = {}
-    for zone_id, zone_frames in zones.items():
+    primary_refs: list[Path] = []
+    for zone_id in sorted(zones.keys()):
+        zone_frames = zones[zone_id]
         if len(zone_frames) < min_frames_per_zone:
             continue
         selected = _select_angular_diverse_keyframes(
@@ -297,8 +384,49 @@ def select_zone_keyframes(
             n_zones,
             max_per_zone,
             person_by_index=person_by_index,
+            architecture_by_index=architecture_by_index,
+            min_architecture=min_architecture,
+            diversity_refs=primary_refs,
         )
         if selected:
             selected_by_zone[zone_id] = [frame.path for frame in selected]
+            primary_refs.append(selected[0].path)
 
     return selected_by_zone
+
+
+def select_alternate_zone_keyframes(
+    frames: Sequence[Union[Path, str]],
+    zone_id: int,
+    *,
+    n_zones: int = DEFAULT_ZONE_COUNT,
+    max_per_zone: int = MESHY_MAX_IMAGES,
+    yaw_by_index: Optional[Mapping[int, float]] = None,
+    sharpness_by_index: Optional[Mapping[int, float]] = None,
+    architecture_by_index: Optional[Mapping[int, float]] = None,
+    person_by_index: Optional[Mapping[int, bool]] = None,
+    min_architecture: float = 0.0,
+    exclude_indices: Optional[set[int]] = None,
+) -> list[Path]:
+    """Pick alternate keyframes for a zone, excluding previously used frame indices."""
+    candidates = frame_candidates_from_paths(
+        frames,
+        yaw_by_index=yaw_by_index,
+        sharpness_by_index=sharpness_by_index,
+    )
+    zones = assign_zones_by_yaw(candidates, n_zones=n_zones)
+    zone_frames = zones.get(zone_id, [])
+    if not zone_frames:
+        return []
+
+    selected = _select_angular_diverse_keyframes(
+        zone_frames,
+        zone_id,
+        n_zones,
+        max_per_zone,
+        person_by_index=person_by_index,
+        architecture_by_index=architecture_by_index,
+        min_architecture=min_architecture,
+        exclude_indices=exclude_indices or set(),
+    )
+    return [frame.path for frame in selected]

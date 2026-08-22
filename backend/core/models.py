@@ -66,6 +66,7 @@ class ZoneMeshInfo(BaseModel):
 
 class SceneManifest(BaseModel):
     composition_mode: str = "single_object"
+    primary_geometry: str = "zones"
     zones: List[ZoneMeshInfo] = Field(default_factory=list)
     shell_url: Optional[str] = None
     walk_path: Optional[List[List[float]]] = None

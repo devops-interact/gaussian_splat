@@ -250,6 +250,7 @@ async def get_job_status(job_id: str, request: Request):
                 for z in sm.zones
             ],
             "shell_url": sm.shell_url,
+            "primary_geometry": sm.primary_geometry,
             "walk_path": sm.walk_path,
             "zone_errors": sm.zone_errors,
             "zone_count": sm.zone_count,

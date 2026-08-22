@@ -138,7 +138,8 @@ def test_angular_sector_prefers_sharper_frame() -> None:
         FrameCandidate(path=Path("a.jpg"), index=0, yaw_deg=44.0, sharpness=1.0),
         FrameCandidate(path=Path("b.jpg"), index=1, yaw_deg=46.0, sharpness=10.0),
     ]
-    selected = _select_angular_diverse_keyframes(zone_frames, 0, 4, 1)
+    arch = {0: 0.5, 1: 0.5}
+    selected = _select_angular_diverse_keyframes(zone_frames, 0, 4, 1, architecture_by_index=arch)
     assert len(selected) == 1
     assert selected[0].index == 1
 

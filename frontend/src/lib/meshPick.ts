@@ -121,6 +121,26 @@ export function pickMeshSurface(
   return { hit: false, point: null, mesh: null };
 }
 
+function snapHitToVertex(mesh: AbstractMesh, faceId: number, worldPoint: Vector3): Vector3 | null {
+  if (faceId >= 0) {
+    const corner = snapToTriangleCorner(mesh, faceId, worldPoint);
+    if (corner) return corner;
+  }
+
+  // Dense GLBs often omit faceId from the pick result; facet lookup is O(log n).
+  const facetId = mesh.getClosestFacetAtCoordinates(worldPoint.x, worldPoint.y, worldPoint.z);
+  if (facetId !== null && facetId >= 0) {
+    const corner = snapToTriangleCorner(mesh, facetId, worldPoint);
+    if (corner) return corner;
+  }
+
+  if (meshVertexCount(mesh) <= MAX_VERTS_FOR_NEAREST_SNAP) {
+    return snapToNearestVertex(mesh, worldPoint);
+  }
+
+  return null;
+}
+
 export function pickMeshMeasure(
   scene: Scene,
   x: number,
@@ -132,14 +152,7 @@ export function pickMeshMeasure(
   const hit = scene.pickWithRay(ray, (mesh) => isMeasurableMesh(mesh), false);
   if (!hit?.hit || !hit.pickedPoint || !hit.pickedMesh) return null;
 
-  const faceId = hit.faceId;
-  let snapped: Vector3 | null = null;
-  if (faceId >= 0) {
-    snapped = snapToTriangleCorner(hit.pickedMesh, faceId, hit.pickedPoint);
-  }
-  if (!snapped && meshVertexCount(hit.pickedMesh) <= MAX_VERTS_FOR_NEAREST_SNAP) {
-    snapped = snapToNearestVertex(hit.pickedMesh, hit.pickedPoint);
-  }
+  const snapped = snapHitToVertex(hit.pickedMesh, hit.faceId, hit.pickedPoint);
 
   if (!snapped) {
     return {

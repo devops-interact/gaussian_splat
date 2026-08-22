@@ -11,7 +11,6 @@ import type {
   ModelMetadata,
   ViewerMode,
 } from '../types';
-import { MEASURE_PREVIEW_MOVE_EPS } from '../constants';
 import { MeasurePreviewGizmo } from '../measure/MeasurePreviewGizmo';
 import { MeasureOverlay } from '../measure/MeasureOverlay';
 import { buildMeasurePickHint } from '../measure/measureHint';
@@ -166,8 +165,6 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
       return `A→B: ${raw.toFixed(2)} u`;
     };
 
-    const lastPreviewWorld = new Vector3();
-    let hasLastPreviewWorld = false;
     let pendingMouse: MouseEvent | null = null;
     let rafId = 0;
     let pointerInside = true;
@@ -180,18 +177,9 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
         const previousWorld = visible.length > 0 ? visible[visible.length - 1].position : null;
         const segmentText = buildSegmentText(pick, previousWorld);
 
-        if (pick && hasLastPreviewWorld && Vector3.Distance(lastPreviewWorld, pick.position) < MEASURE_PREVIEW_MOVE_EPS) {
-          onPickHint(
-            buildMeasurePickHint(pickCtx.measurePhase, pickCtx.calibPoints.length, pickCtx.measurePoints.length, pick, segmentText),
-          );
-          return;
-        }
         if (pick) {
-          lastPreviewWorld.copyFrom(pick.position);
-          hasLastPreviewWorld = true;
           gizmo.update(pick, camera.position, previousWorld);
         } else {
-          hasLastPreviewWorld = false;
           gizmo.hide();
         }
         onPickHint(
@@ -200,7 +188,6 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
       } catch {
         gizmo.hide();
         onPickHint(MEASURE_PICK_HINT_IDLE);
-        hasLastPreviewWorld = false;
       }
     };
 
@@ -221,7 +208,6 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
     const onLeave = () => {
       pointerInside = false;
       pendingMouse = null;
-      hasLastPreviewWorld = false;
       gizmo.hide();
       onPickHint(MEASURE_PICK_HINT_IDLE);
     };

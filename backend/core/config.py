@@ -56,8 +56,14 @@ class MeshyPresetConfig(BaseModel):
     multi_view_thumbnails: bool = False
     # Room composition (preset room only)
     n_zones: int = 4
-    composition_mode: Literal["single_object", "zone_mesh"] = "single_object"
+    composition_mode: Literal["single_object", "zone_mesh", "room_shell"] = "single_object"
     room_shell_enabled: bool = False
+    room_shell_required: bool = False
+    zone_mesh_max_retries: int = 2
+    min_architecture_score: float = 0.15
+    room_orbit_radius_m: float = 2.5
+    room_default_height_m: float = 2.7
+    zone_compose_radius: float = 0.0
     # Keyframe filtering — exclude frames with detected people (walkthrough operator)
     exclude_person_frames: bool = True
     person_hog_hit_threshold: float = 0.0
@@ -84,7 +90,7 @@ QUALITY_PRESETS: Dict[QualityPreset, MeshyPresetConfig] = {
     ),
     QualityPreset.ROOM: MeshyPresetConfig(
         name="Room — full space",
-        description="Reconstructs walls/floor by zones (~35–45 min). Recommended for walkthrough videos.",
+        description="Textured room envelope from walkthrough video (~35–45 min). Optional detail meshes for furniture.",
         fps=2.0,
         estimated_minutes=40,
         ai_model="meshy-7",
@@ -101,6 +107,10 @@ QUALITY_PRESETS: Dict[QualityPreset, MeshyPresetConfig] = {
         n_zones=4,
         composition_mode="zone_mesh",
         room_shell_enabled=True,
+        room_shell_required=True,
+        zone_mesh_max_retries=2,
+        min_architecture_score=0.15,
+        zone_compose_radius=0.0,
         multi_view_thumbnails=True,
         exclude_person_frames=True,
     ),

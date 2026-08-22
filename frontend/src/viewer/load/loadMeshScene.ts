@@ -234,8 +234,9 @@ export async function importComposedScene(
       const { allMeshes: shellMeshes } = await importGlbBuffer(scene, shellBuf, 'room_shell');
       for (const gm of shellMeshes) {
         gm.parent = shellNode;
-        gm.isPickable = false;
-        gm.visibility = 0.12;
+        // Shell is the primary visible surface — must be pickable for measurement.
+        gm.isPickable = true;
+        gm.visibility = 0.35;
         if (gm.getTotalVertices() > 0) gm.name = 'room_shell';
       }
     } catch (e) {

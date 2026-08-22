@@ -58,10 +58,16 @@ export default function Viewer3D({
 
   const visibleMeasurePoints = measurePhase === 'calibrate' ? calibPoints : measurePoints;
 
-  const isRoom = sceneManifest?.composition_mode === 'zone_mesh';
-  const compositionLabel = isRoom
-    ? `Room · ${sceneManifest?.zones?.length ?? 0} zones`
-    : 'Single object';
+  const isRoom = sceneManifest?.composition_mode === 'zone_mesh'
+    || sceneManifest?.composition_mode === 'room_shell'
+    || !!sceneManifest?.shell_url;
+  const zoneCount = sceneManifest?.zones?.length ?? 0;
+  const hasShell = !!sceneManifest?.shell_url;
+  const compositionLabel = hasShell
+    ? `Room shell${zoneCount > 0 ? ` · ${zoneCount} detail mesh${zoneCount === 1 ? '' : 'es'}` : ''}`
+    : isRoom
+      ? `Room · ${zoneCount} zones`
+      : 'Single object';
 
   const {
     viewerRef,
@@ -91,6 +97,12 @@ export default function Viewer3D({
       setVisibleZones(new Set(zoneMeshes.map((z) => z.zoneId)));
     }
   }, [zoneMeshes]);
+
+  useEffect(() => {
+    if (sceneManifest?.shell_url || sceneManifest?.primary_geometry === 'shell') {
+      setInspection((prev) => ({ ...prev, showShell: true }));
+    }
+  }, [sceneManifest?.shell_url, sceneManifest?.primary_geometry]);
 
   useEffect(() => {
     const ctx = viewerRef.current;

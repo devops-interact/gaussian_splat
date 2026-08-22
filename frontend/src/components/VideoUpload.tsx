@@ -249,6 +249,7 @@ export default function VideoUpload({
               <ul className="list-disc list-inside space-y-0.5 text-gray-500">
                 <li>30+ seconds, slow 360° pan from room center</li>
                 <li>Walls and floor visible throughout</li>
+                <li>Builds a textured room envelope (walls/floor) plus optional furniture detail meshes</li>
                 <li>Keep yourself out of frame — the scanner ignores people and focuses on the space</li>
                 <li>Not for single objects or outdoor equipment — use Object preset</li>
               </ul>

@@ -53,6 +53,7 @@ export interface SceneManifestResponse {
   composition_mode: string;
   zones: ZoneMeshInfo[];
   shell_url?: string | null;
+  primary_geometry?: string | null;
   walk_path?: number[][] | null;
   zone_errors?: Record<string, string> | null;
   zone_count?: number | null;
