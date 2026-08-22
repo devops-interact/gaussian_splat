@@ -141,3 +141,21 @@ def test_angular_sector_prefers_sharper_frame() -> None:
     selected = _select_angular_diverse_keyframes(zone_frames, 0, 4, 1)
     assert len(selected) == 1
     assert selected[0].index == 1
+
+
+def test_select_keyframes_excludes_person_when_alternatives_exist(tmp_path: Path) -> None:
+    frames = _paths(8, tmp_path)
+    sharpness = {index: float(index) for index in range(len(frames))}
+    person_by_index = {0: True, 1: True, 2: False, 3: False, 4: False, 5: False, 6: False, 7: False}
+
+    selected = select_keyframes(
+        frames,
+        max_count=4,
+        sharpness_by_index=sharpness,
+        person_by_index=person_by_index,
+        min_index_gap=1,
+    )
+
+    for path in selected:
+        idx = int(path.stem.split("_")[1])
+        assert person_by_index[idx] is False

@@ -19,6 +19,7 @@ from services.meshy.keyframe_selector import (
     select_keyframes,
 )
 from services.meshy.meshy_params import meshy_task_kwargs
+from services.meshy.person_filter import person_flags_by_index
 from services.meshy.storage_upload import publish_keyframes
 
 logger = logging.getLogger(__name__)
@@ -118,6 +119,7 @@ def _build_keyframe_metadata(
     image_urls: List[str],
     yaw_by_index: dict,
     sharpness_by_index: dict,
+    person_by_index: Optional[dict] = None,
 ) -> List[KeyframeInfo]:
     candidates = frame_candidates_from_paths(
         keyframe_paths,
@@ -128,12 +130,14 @@ def _build_keyframe_metadata(
     result: List[KeyframeInfo] = []
     for i, path in enumerate(keyframe_paths):
         c = path_to_c.get(path)
+        idx = c.index if c else i
         result.append(KeyframeInfo(
             url=image_urls[i] if i < len(image_urls) else "",
-            index=c.index if c else i,
+            index=idx,
             zone_id=None,
             yaw_deg=c.yaw_deg if c else yaw_by_index.get(i),
             sharpness=c.sharpness if c else sharpness_by_index.get(i),
+            person_detected=bool(person_by_index.get(idx, False)) if person_by_index else False,
         ))
     return result
 
@@ -172,15 +176,23 @@ async def process_single_object_job(job: Job) -> Job:
         frame_paths, fps=preset_config.fps, allow_uniform_fallback=True,
     )
     sharpness_by_index = {i: laplacian_sharpness(p) for i, p in enumerate(frame_paths)}
+    person_by_index = None
+    if preset_config.exclude_person_frames:
+        person_by_index = person_flags_by_index(
+            frame_paths,
+            hit_threshold=preset_config.person_hog_hit_threshold,
+            min_confidence=preset_config.person_min_confidence,
+        )
     keyframes = select_keyframes(
         frame_paths,
         max_count=preset_config.max_keyframes,
         yaw_by_index=yaw_by_index,
         sharpness_by_index=sharpness_by_index,
+        person_by_index=person_by_index,
     )
     image_urls = publish_keyframes(job.job_id, keyframes)
     job.keyframes = _build_keyframe_metadata(
-        job.job_id, keyframes, image_urls, yaw_by_index, sharpness_by_index
+        job.job_id, keyframes, image_urls, yaw_by_index, sharpness_by_index, person_by_index,
     )
 
     job.status = JobStatus.SUBMITTING_RECONSTRUCTION

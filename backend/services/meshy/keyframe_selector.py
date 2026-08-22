@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Optional, Sequence, Union
 
+from services.meshy.person_filter import filter_person_frames
+
 MESHY_MAX_IMAGES = 4
 DEFAULT_ZONE_COUNT = 4
 
@@ -130,10 +132,14 @@ def _select_angular_diverse_keyframes(
     zone_id: int,
     n_zones: int,
     max_count: int,
+    *,
+    person_by_index: Optional[Mapping[int, bool]] = None,
 ) -> list[FrameCandidate]:
     """Pick sharpest frame per angular sub-sector within a zone bucket."""
     if max_count <= 0 or not zone_frames:
         return []
+
+    zone_frames, _ = filter_person_frames(zone_frames, person_by_index)
 
     bucket = 360.0 / n_zones
     z_min = zone_id * bucket
@@ -185,9 +191,12 @@ def _select_diverse_keyframes(
     max_count: int,
     *,
     min_index_gap: int = 1,
+    person_by_index: Optional[Mapping[int, bool]] = None,
 ) -> list[FrameCandidate]:
     if max_count <= 0 or not pool:
         return []
+
+    pool, _ = filter_person_frames(pool, person_by_index)
 
     ranked = sorted(
         pool,
@@ -223,6 +232,7 @@ def select_keyframes(
     timestamps_sec: Optional[Sequence[float]] = None,
     yaw_by_index: Optional[Mapping[int, float]] = None,
     sharpness_by_index: Optional[Mapping[int, float]] = None,
+    person_by_index: Optional[Mapping[int, bool]] = None,
     min_index_gap: Optional[int] = None,
 ) -> list[Path]:
     """Pick up to `max_count` keyframes spread across the full walkthrough."""
@@ -240,7 +250,9 @@ def select_keyframes(
     if gap is None:
         gap = max(1, total // max(max_count * 2, 1))
 
-    selected = _select_diverse_keyframes(candidates, max_count, min_index_gap=gap)
+    selected = _select_diverse_keyframes(
+        candidates, max_count, min_index_gap=gap, person_by_index=person_by_index,
+    )
     return [frame.path for frame in selected]
 
 
@@ -252,6 +264,7 @@ def select_zone_keyframes(
     timestamps_sec: Optional[Sequence[float]] = None,
     yaw_by_index: Optional[Mapping[int, float]] = None,
     sharpness_by_index: Optional[Mapping[int, float]] = None,
+    person_by_index: Optional[Mapping[int, bool]] = None,
     min_index_gap: int = 1,
     min_frames_per_zone: int = 1,
 ) -> dict[int, list[Path]]:
@@ -283,6 +296,7 @@ def select_zone_keyframes(
             zone_id,
             n_zones,
             max_per_zone,
+            person_by_index=person_by_index,
         )
         if selected:
             selected_by_zone[zone_id] = [frame.path for frame in selected]

@@ -60,27 +60,32 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
   measurePickCtxRef.current = { measurePhase, calibPoints, measurePoints, calibration };
 
   const overlayRef = useRef<MeasureOverlay | null>(null);
+  const overlaySceneRef = useRef<unknown>(null);
 
-  // Overlay: create once when scene is ready; update on point changes; dispose on unmount only.
+  // Create overlay once per utility layer scene; dispose only when scene tears down.
   useEffect(() => {
     const ctx = viewerRef.current;
     if (!ctx || loadPhase !== 'ready') return;
 
-    if (!overlayRef.current) {
+    const utilityScene = ctx.utilityLayer.utilityLayerScene;
+    if (overlaySceneRef.current !== utilityScene) {
+      overlayRef.current?.dispose();
       overlayRef.current = new MeasureOverlay(ctx.utilityLayer);
+      overlaySceneRef.current = utilityScene;
     }
 
     return () => {
       overlayRef.current?.dispose();
       overlayRef.current = null;
+      overlaySceneRef.current = null;
     };
   }, [loadPhase, viewerRef]);
 
   useEffect(() => {
-    if (!overlayRef.current) return;
+    if (!overlayRef.current || loadPhase !== 'ready') return;
     overlayRef.current.setWorldUnit(worldUnitRef.current ?? 0.024);
     overlayRef.current.update(visibleMeasurePoints);
-  }, [visibleMeasurePoints, worldUnitRef]);
+  }, [visibleMeasurePoints, worldUnitRef, loadPhase]);
 
   useEffect(() => {
     if (mode !== 'measure') {
@@ -246,8 +251,6 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
     };
   }, [
     mode,
-    measurePhase,
-    calibration,
     loadPhase,
     pickDebugEnabled,
     viewerRef,

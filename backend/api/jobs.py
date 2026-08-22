@@ -231,6 +231,7 @@ async def get_job_status(job_id: str, request: Request):
                 "zone_id": k.zone_id,
                 "yaw_deg": k.yaw_deg,
                 "sharpness": k.sharpness,
+                "person_detected": k.person_detected,
             }
             for k in job.keyframes
         ]

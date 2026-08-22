@@ -49,6 +49,7 @@ class KeyframeInfo(BaseModel):
     zone_id: Optional[int] = None
     yaw_deg: Optional[float] = None
     sharpness: Optional[float] = None
+    person_detected: bool = False
 
 
 class ZoneMeshInfo(BaseModel):

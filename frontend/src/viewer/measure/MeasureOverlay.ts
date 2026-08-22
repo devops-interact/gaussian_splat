@@ -22,40 +22,44 @@ export class MeasureOverlay {
   }
 
   update(points: MeasurePoint[]): void {
-    const scene = this.utilityLayer.utilityLayerScene;
-    while (this.spheres.length < points.length) {
-      const i = this.spheres.length;
-      const color = i === 0 ? MEASURE_PLACED_A : MEASURE_PLACED_B;
-      const mat = makeOverlayMaterial(scene, color, 1);
-      const sphere = MeshBuilder.CreateSphere(`measurePt${i}`, { diameter: 1, segments: 12 }, scene);
-      sphere.material = mat;
-      sphere.isPickable = false;
-      this.spheres.push(sphere);
-      this.mats.push(mat);
-    }
-    for (let i = 0; i < this.spheres.length; i++) {
-      const sphere = this.spheres[i];
-      if (i < points.length) {
-        sphere.scaling.setAll(this.worldUnit);
-        sphere.position.copyFrom(points[i].position);
-        sphere.setEnabled(true);
-      } else {
-        sphere.setEnabled(false);
+    try {
+      const scene = this.utilityLayer.utilityLayerScene;
+      while (this.spheres.length < points.length) {
+        const i = this.spheres.length;
+        const color = i === 0 ? MEASURE_PLACED_A : MEASURE_PLACED_B;
+        const mat = makeOverlayMaterial(scene, color, 1);
+        const sphere = MeshBuilder.CreateSphere(`measurePt${i}`, { diameter: 1, segments: 12 }, scene);
+        sphere.material = mat;
+        sphere.isPickable = false;
+        this.spheres.push(sphere);
+        this.mats.push(mat);
       }
-    }
+      for (let i = 0; i < this.spheres.length; i++) {
+        const sphere = this.spheres[i];
+        if (i < points.length) {
+          sphere.scaling.setAll(this.worldUnit);
+          sphere.position.copyFrom(points[i].position);
+          sphere.setEnabled(true);
+        } else {
+          sphere.setEnabled(false);
+        }
+      }
 
-    if (points.length === 2) {
-      const pts = points.map((p) => p.position);
-      if (!this.line) {
-        this.line = MeshBuilder.CreateLines('measureLine', { points: pts, updatable: true }, scene);
-        this.line.color = MEASURE_PLACED_LINE;
-        this.line.isPickable = false;
-      } else {
-        MeshBuilder.CreateLines('measureLine', { points: pts, instance: this.line });
-        this.line.setEnabled(true);
+      if (points.length === 2) {
+        const pts = points.map((p) => p.position);
+        if (!this.line) {
+          this.line = MeshBuilder.CreateLines('measureLine', { points: pts, updatable: true }, scene);
+          this.line.color = MEASURE_PLACED_LINE;
+          this.line.isPickable = false;
+        } else {
+          MeshBuilder.CreateLines('measureLine', { points: pts, instance: this.line });
+          this.line.setEnabled(true);
+        }
+      } else if (this.line) {
+        this.line.setEnabled(false);
       }
-    } else if (this.line) {
-      this.line.setEnabled(false);
+    } catch (err) {
+      console.warn('[Babylon] MeasureOverlay update failed:', err);
     }
   }
 

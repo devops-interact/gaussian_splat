@@ -15,14 +15,23 @@ export interface MeshPickResult {
 
 const OVERLAY_MESH_NAMES = new Set(['viewerGrid', 'collision_proxy']);
 
+/** Skip full vertex scan on dense meshes (room GLBs can exceed 800k verts). */
+export const MAX_VERTS_FOR_NEAREST_SNAP = 50_000;
+
 function isMeasurableMesh(mesh: AbstractMesh): boolean {
   return mesh.isPickable && !OVERLAY_MESH_NAMES.has(mesh.name);
 }
 
 const NEAREST_VERTEX_MAX_DIST_RATIO = 0.05;
+const SCRATCH_VERTEX = new Vector3();
+
+function meshVertexCount(mesh: AbstractMesh): number {
+  return mesh.getTotalVertices?.() ?? 0;
+}
 
 /**
  * Find nearest vertex in world space (fallback when face indices are unavailable).
+ * Only safe on small meshes — guarded by MAX_VERTS_FOR_NEAREST_SNAP in pickMeshMeasure.
  */
 export function snapToNearestVertex(
   mesh: AbstractMesh,
@@ -42,18 +51,16 @@ export function snapToNearestVertex(
   let bestDistSq = maxDistSq;
 
   for (let i = 0; i < positions.length; i += 3) {
-    const world = Vector3.TransformCoordinates(
-      new Vector3(positions[i], positions[i + 1], positions[i + 2]),
-      wm,
-    );
+    SCRATCH_VERTEX.set(positions[i], positions[i + 1], positions[i + 2]);
+    const world = Vector3.TransformCoordinates(SCRATCH_VERTEX, wm);
     const d = Vector3.DistanceSquared(worldPoint, world);
     if (d < bestDistSq) {
       bestDistSq = d;
-      best = world;
+      best = world.clone();
     }
   }
 
-  return best?.clone() ?? null;
+  return best;
 }
 
 /**
@@ -130,7 +137,7 @@ export function pickMeshMeasure(
   if (faceId >= 0) {
     snapped = snapToTriangleCorner(hit.pickedMesh, faceId, hit.pickedPoint);
   }
-  if (!snapped) {
+  if (!snapped && meshVertexCount(hit.pickedMesh) <= MAX_VERTS_FOR_NEAREST_SNAP) {
     snapped = snapToNearestVertex(hit.pickedMesh, hit.pickedPoint);
   }
 

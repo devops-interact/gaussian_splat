@@ -27,6 +27,7 @@ from services.meshy.keyframe_selector import (
     select_zone_keyframes,
 )
 from services.meshy.meshy_params import meshy_task_kwargs
+from services.meshy.person_filter import person_flags_by_index
 from services.meshy.room_shell import create_room_shell
 from services.meshy.scene_compose import compose_radius_from_bbox, compose_zone_transforms_for_ids
 from services.meshy.storage_upload import publish_keyframes
@@ -108,6 +109,13 @@ async def process_room_job(job: Job) -> Job:
         coverage = measure_yaw_coverage(yaw_by_index, n_zones)
 
         sharpness_by_index = {i: laplacian_sharpness(p) for i, p in enumerate(frame_paths)}
+        person_by_index = None
+        if preset_config.exclude_person_frames:
+            person_by_index = person_flags_by_index(
+                frame_paths,
+                hit_threshold=preset_config.person_hog_hit_threshold,
+                min_confidence=preset_config.person_min_confidence,
+            )
 
         zones = select_zone_keyframes(
             frame_paths,
@@ -115,6 +123,7 @@ async def process_room_job(job: Job) -> Job:
             max_per_zone=preset_config.max_keyframes,
             yaw_by_index=yaw_by_index,
             sharpness_by_index=sharpness_by_index,
+            person_by_index=person_by_index,
         )
         if not zones:
             raise ValueError("No zone keyframes selected — walk the full room in your video")
@@ -144,12 +153,14 @@ async def process_room_job(job: Job) -> Job:
             zone_urls[zone_id] = urls
             for i, p in enumerate(paths):
                 c = path_to_candidate.get(p)
+                idx = c.index if c else path_to_index.get(p, i)
                 all_keyframes.append(KeyframeInfo(
                     url=urls[i] if i < len(urls) else "",
-                    index=c.index if c else i,
+                    index=idx,
                     zone_id=zone_id,
                     yaw_deg=c.yaw_deg if c else None,
                     sharpness=c.sharpness if c else None,
+                    person_detected=bool(person_by_index.get(idx, False)) if person_by_index else False,
                 ))
         job.keyframes = all_keyframes
         await job_manager.update_job(job)

@@ -39,6 +39,7 @@ export interface KeyframeInfo {
   zone_id?: number | null;
   yaw_deg?: number | null;
   sharpness?: number | null;
+  person_detected?: boolean;
 }
 
 export interface ZoneMeshInfo {

@@ -58,6 +58,10 @@ class MeshyPresetConfig(BaseModel):
     n_zones: int = 4
     composition_mode: Literal["single_object", "zone_mesh"] = "single_object"
     room_shell_enabled: bool = False
+    # Keyframe filtering — exclude frames with detected people (walkthrough operator)
+    exclude_person_frames: bool = True
+    person_hog_hit_threshold: float = 0.0
+    person_min_confidence: float = 0.5
 
 
 QUALITY_PRESETS: Dict[QualityPreset, MeshyPresetConfig] = {
@@ -76,6 +80,7 @@ QUALITY_PRESETS: Dict[QualityPreset, MeshyPresetConfig] = {
         decimation_mode=1,
         save_pre_remeshed_model=True,
         auto_size=True,
+        exclude_person_frames=True,
     ),
     QualityPreset.ROOM: MeshyPresetConfig(
         name="Room — full space",
@@ -97,6 +102,7 @@ QUALITY_PRESETS: Dict[QualityPreset, MeshyPresetConfig] = {
         composition_mode="zone_mesh",
         room_shell_enabled=True,
         multi_view_thumbnails=True,
+        exclude_person_frames=True,
     ),
 }
 
