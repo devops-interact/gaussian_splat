@@ -132,7 +132,7 @@ describe('pickMeshMeasure dense mesh guard', () => {
       pickedPoint: new Vector3(0, 0, 1),
       pickedMesh: mesh,
       faceId: -1,
-    } as ReturnType<typeof scene.pickWithRay>);
+    } as unknown as ReturnType<typeof scene.pickWithRay>);
 
     const result = meshPick.pickMeshMeasure(scene, 256, 256);
 
