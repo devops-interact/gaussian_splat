@@ -15,4 +15,4 @@ def test_wall_priority_puts_frontal_frame_first() -> None:
     )
     assert tex is not None
     assert tex[0] == "http://b"
-    assert len(tex) == 5  # wall + all geometry
+    assert len(tex) == 4

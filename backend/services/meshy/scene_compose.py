@@ -44,17 +44,28 @@ def compose_zone_transforms_for_ids(
     radius: float = 0.0,
 ) -> Dict[int, List[List[float]]]:
     """
-    Build transforms for succeeded zones at shared origin.
+    Build transforms for succeeded zones using each zone_id's angular sector.
 
-    Uses enumerate index (not raw zone id) so 2 succeeded zones get 180° spacing
-    regardless of which zone ids Meshy returned.
+    Yaw matches the Meshy keyframe bucket: (zone_id + 0.5) * (360 / n_zones).
     """
     if not zone_ids:
         return {}
-    count = n_zones if n_zones is not None else len(zone_ids)
-    bucket = 360.0 / max(count, 1)
-    transforms: Dict[int, List[List[float]]] = {}
-    for i, zid in enumerate(sorted(zone_ids)):
-        yaw = (i + 0.5) * bucket
-        transforms[zid] = zone_transform_from_yaw(yaw, radius)
-    return transforms
+    count = n_zones if n_zones is not None else max(zone_ids) + 1
+    return {zid: zone_transform_matrix(zid, count, radius) for zid in zone_ids}
+
+
+def compose_radius_from_bbox(
+    aggregated_bbox: dict | None,
+    *,
+    ref_height: float | None = None,
+    min_radius: float = 2.0,
+) -> float:
+    """Derive ring radius for zone placement from merged zone bounds."""
+    if aggregated_bbox and aggregated_bbox.get("min") and aggregated_bbox.get("max"):
+        mn, mx = aggregated_bbox["min"], aggregated_bbox["max"]
+        span_x = mx[0] - mn[0]
+        span_z = mx[2] - mn[2]
+        return max(max(span_x, span_z) / 2.0 * 0.85, min_radius)
+    if ref_height is not None and ref_height > 0:
+        return max(ref_height * 0.5, min_radius)
+    return min_radius

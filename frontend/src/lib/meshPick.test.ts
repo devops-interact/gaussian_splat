@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
+import { UniversalCamera } from '@babylonjs/core/Cameras/universalCamera';
 import { NullEngine } from '@babylonjs/core/Engines/nullEngine';
 import { Scene } from '@babylonjs/core/scene';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
-import { maxMeshPickDistance, snapToNearestVertex, snapToTriangleCorner } from './meshPick';
+import { maxMeshPickDistance, pickMeshSurface, snapToNearestVertex, snapToTriangleCorner } from './meshPick';
 
 describe('maxMeshPickDistance', () => {
   it('returns half diagonal with minimum floor', () => {
@@ -69,6 +70,37 @@ describe('snapToNearestVertex', () => {
     const snapped = snapToNearestVertex(mesh, nearCorner);
     expect(snapped).not.toBeNull();
     expect(Vector3.Distance(snapped!, nearCorner)).toBeLessThan(1.5);
+
+    scene.dispose();
+    engine.dispose();
+  });
+});
+
+describe('pickMeshSurface on parented mesh', () => {
+  it('hits a mesh under a rotated TransformNode', () => {
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+    const root = new TransformNode('zone_root', scene);
+    root.rotation.y = Math.PI / 6;
+    const mesh = MeshBuilder.CreateBox('zone_mesh', { size: 2 }, scene);
+    mesh.parent = root;
+    mesh.isPickable = true;
+    root.computeWorldMatrix(true);
+    mesh.computeWorldMatrix(true);
+    mesh.getBoundingInfo().update(mesh.getWorldMatrix());
+
+    const camera = new UniversalCamera('cam', new Vector3(0, 0, -6), scene);
+    camera.setTarget(Vector3.Zero());
+    scene.activeCamera = camera;
+    scene.render();
+
+    const w = engine.getRenderWidth() || 512;
+    const h = engine.getRenderHeight() || 512;
+    const result = pickMeshSurface(scene, w / 2, h / 2);
+
+    expect(result.hit).toBe(true);
+    expect(result.mesh?.name).toBe('zone_mesh');
+    expect(result.point).not.toBeNull();
 
     scene.dispose();
     engine.dispose();

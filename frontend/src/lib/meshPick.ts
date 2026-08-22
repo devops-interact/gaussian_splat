@@ -106,7 +106,7 @@ export function pickMeshSurface(
     return { hit: false, point: null, mesh: null };
   }
 
-  const hit = scene.pickWithRay(ray, (mesh) => isMeasurableMesh(mesh));
+  const hit = scene.pickWithRay(ray, (mesh) => isMeasurableMesh(mesh), false);
   if (hit?.hit && hit.pickedPoint && hit.pickedMesh) {
     return { hit: true, point: hit.pickedPoint.clone(), mesh: hit.pickedMesh };
   }
@@ -122,7 +122,7 @@ export function pickMeshMeasure(
   const ray = scene.createPickingRay(x, y, null, scene.activeCamera);
   if (!ray) return null;
 
-  const hit = scene.pickWithRay(ray, (mesh) => isMeasurableMesh(mesh));
+  const hit = scene.pickWithRay(ray, (mesh) => isMeasurableMesh(mesh), false);
   if (!hit?.hit || !hit.pickedPoint || !hit.pickedMesh) return null;
 
   const faceId = hit.faceId;

@@ -27,6 +27,12 @@ def test_zones_are_not_similar_different_size() -> None:
     assert not zones_are_similar(a, b, 1000, 1000)
 
 
+def test_zones_are_not_similar_different_centroids() -> None:
+    a = {"min": [0, 0, 0], "max": [2, 2, 2]}
+    b = {"min": [5, 0, 5], "max": [7, 2, 7]}
+    assert not zones_are_similar(a, b, 1000, 1000)
+
+
 def test_bbox_extent() -> None:
     bbox = {"min": [0, 0, 0], "max": [3, 2, 4]}
     assert bbox_extent(bbox) == (3.0, 2.0, 4.0)

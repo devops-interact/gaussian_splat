@@ -176,7 +176,7 @@ def align_zones_to_floor_origin(
     zone_ids: List[int],
 ) -> Dict[int, dict]:
     """
-    Translate each zone GLB so floor sits at Y=0 and XZ centroid is at origin.
+    Translate each zone GLB so floor sits at Y=0 (preserve XZ placement for ring composition).
 
     Returns updated bbox per zone.
     """
@@ -193,10 +193,8 @@ def align_zones_to_floor_origin(
                 continue
             bounds = scene.bounds
             mn, mx = bounds[0], bounds[1]
-            cx = (mn[0] + mx[0]) / 2.0
-            cz = (mn[2] + mx[2]) / 2.0
             dy = -mn[1]
-            translation = [-cx, dy, -cz]
+            translation = [0.0, dy, 0.0]
             for geom in scene.geometry.values():
                 geom.apply_translation(translation)
             scene.export(str(glb_path))
@@ -261,8 +259,5 @@ def normalize_zone_glbs(
                 bboxes[zone_id] = updated
         except Exception as e:
             logger.warning("Zone %s scale normalization failed: %s", zone_id, e)
-
-    aligned = align_zones_to_floor_origin(job_dir, zone_ids)
-    bboxes.update(aligned)
 
     return scale_factors, bboxes

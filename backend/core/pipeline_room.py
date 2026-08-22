@@ -28,10 +28,11 @@ from services.meshy.keyframe_selector import (
 )
 from services.meshy.meshy_params import meshy_task_kwargs
 from services.meshy.room_shell import create_room_shell
-from services.meshy.scene_compose import compose_zone_transforms_for_ids
+from services.meshy.scene_compose import compose_radius_from_bbox, compose_zone_transforms_for_ids
 from services.meshy.storage_upload import publish_keyframes
 from services.meshy.zone_normalize import (
     aggregate_bbox,
+    align_zones_to_floor_origin,
     dedupe_similar_zones,
     glb_vertex_count,
     normalize_zone_glbs,
@@ -257,6 +258,9 @@ async def process_room_job(job: Job) -> Job:
         zone_results = {zid: zone_results[zid] for zid in kept_zone_ids if zid in zone_results}
         zone_bboxes = {zid: b for zid, b in zone_bboxes.items() if zid in kept_zone_ids}
 
+        aligned = align_zones_to_floor_origin(job_dir, kept_zone_ids)
+        zone_bboxes.update(aligned)
+
         agg_bbox = aggregate_bbox(list(zone_bboxes.values()))
         ref_height = None
         if zone_bboxes:
@@ -267,11 +271,11 @@ async def process_room_job(job: Job) -> Job:
             ]
             ref_height = sorted(heights)[len(heights) // 2] if heights else None
 
-        compose_n_zones = len(kept_zone_ids)
+        compose_radius = compose_radius_from_bbox(agg_bbox, ref_height=ref_height)
         transforms = compose_zone_transforms_for_ids(
             kept_zone_ids,
-            n_zones=compose_n_zones,
-            radius=0.0,
+            n_zones=n_zones,
+            radius=compose_radius,
         )
 
         manifest_zones: List[ZoneMeshInfo] = []

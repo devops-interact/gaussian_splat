@@ -58,6 +58,11 @@ def test_partial_zone_recovery_completes_with_two_zones(tmp_path) -> None:
             3: {"min": [0, 0, 0], "max": [1, 2, 1]},
         })),
         patch("core.pipeline_room.dedupe_similar_zones", return_value=([0, 1, 3], {"2": "Duplicate of zone 0"})),
+        patch("core.pipeline_room.align_zones_to_floor_origin", return_value={
+            0: {"min": [0, 0, 0], "max": [1, 2, 1]},
+            1: {"min": [0, 0, 0], "max": [1, 2, 1]},
+            3: {"min": [0, 0, 0], "max": [1, 2, 1]},
+        }),
         patch("core.pipeline_room.aggregate_bbox", return_value=None),
         patch("core.pipeline_room.create_room_shell", return_value=None),
         patch("core.pipeline_room._extract_glb_metadata", return_value=None),

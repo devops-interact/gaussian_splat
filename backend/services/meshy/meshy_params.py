@@ -35,8 +35,8 @@ def texture_urls_for_preset(
         )
 
     wall_url = geometry_urls[wall_idx]
-    # Wall-facing keyframe first, then all geometry views for Meshy texture guidance.
-    return [wall_url, *geometry_urls]
+    extras = [u for u in geometry_urls if u != wall_url][:3]
+    return [wall_url, *extras]
 
 
 def meshy_task_kwargs(

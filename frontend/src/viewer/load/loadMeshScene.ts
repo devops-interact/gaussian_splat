@@ -193,8 +193,11 @@ export async function importComposedScene(
       if (mesh.getTotalVertices() > 0) {
         mesh.isPickable = true;
         allGeometry.push(mesh);
+        mesh.computeWorldMatrix(true);
+        mesh.getBoundingInfo().update(mesh.getWorldMatrix());
       }
     }
+    zoneNode.computeWorldMatrix(true);
 
     if (geometryMeshes.length === 0) {
       emptyZoneIds.push(zone.id);
@@ -209,6 +212,8 @@ export async function importComposedScene(
     });
     loaded += 1;
   }
+
+  roomRoot.computeWorldMatrix(true);
 
   if (loaded === 0) {
     throw new Error('Scene manifest has no loadable zone meshes');

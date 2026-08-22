@@ -217,6 +217,10 @@ export function useMeshViewer({
           } else {
             onZoneLoadWarningRef.current?.(null);
           }
+          for (const mesh of geometryMeshes) {
+            mesh.computeWorldMatrix(true);
+            mesh.getBoundingInfo().update(mesh.getWorldMatrix());
+          }
         } else {
           onZoneLoadWarningRef.current?.(null);
           const imported = await importGlbBuffer(scene, buffer!);
