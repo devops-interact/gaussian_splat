@@ -26,6 +26,7 @@ import {
   glbModelUrl,
   importComposedScene,
   importGlbBuffer,
+  isRoomManifest,
   modelMetadataFromJobResponse,
 } from '../load/loadMeshScene';
 import { addSceneOverlays, alignGridToFloor } from '../overlays/sceneOverlays';
@@ -83,7 +84,7 @@ export function useMeshViewer({
   const [zoneMeshes, setZoneMeshes] = useState<import('../load/loadMeshScene').ZoneMeshHandle[]>([]);
 
   useEffect(() => {
-    const hasScene = (sceneManifest?.zones?.length ?? 0) > 0;
+    const hasScene = isRoomManifest(sceneManifest);
     if (!canvasRef.current || (!modelUrl && !hasScene)) return;
 
     let disposed = false;
@@ -147,7 +148,7 @@ export function useMeshViewer({
 
     (async () => {
       try {
-        const isComposed = (sceneManifest?.zones?.length ?? 0) > 0;
+        const isComposed = isRoomManifest(sceneManifest);
         let buffer: ArrayBuffer | null = null;
 
         if (!isComposed) {

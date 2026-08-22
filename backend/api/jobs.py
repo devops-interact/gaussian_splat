@@ -97,6 +97,9 @@ async def upload_video(
             width=validation_result.video_info.width if validation_result.video_info else None,
             height=validation_result.video_info.height if validation_result.video_info else None,
             fps=validation_result.video_info.fps if validation_result.video_info else None,
+            orientation=validation_result.video_info.orientation if validation_result.video_info else None,
+            aspect_ratio=validation_result.video_info.aspect_ratio if validation_result.video_info else None,
+            is_portrait=validation_result.video_info.is_portrait if validation_result.video_info else False,
             errors=validation_result.errors,
             warnings=upload_warnings,
         )
@@ -206,6 +209,9 @@ async def get_job_status(job_id: str, request: Request):
             "duration": job.validation.duration,
             "resolution": f"{job.validation.width}x{job.validation.height}" if job.validation.width else None,
             "fps": job.validation.fps,
+            "orientation": job.validation.orientation,
+            "aspect_ratio": job.validation.aspect_ratio,
+            "is_portrait": job.validation.is_portrait,
             "warnings": job.validation.warnings,
         }
 

@@ -27,6 +27,9 @@ class VideoValidation(BaseModel):
     width: Optional[int] = None
     height: Optional[int] = None
     fps: Optional[float] = None
+    orientation: Optional[str] = None
+    aspect_ratio: Optional[str] = None
+    is_portrait: bool = False
     errors: List[str] = []
     warnings: List[str] = []
 

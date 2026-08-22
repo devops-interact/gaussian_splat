@@ -44,6 +44,7 @@ from services.meshy.zone_normalize import (
     zones_are_similar,
 )
 from services.video.extract_frames import extract_frames
+from services.video.orientation import probe_video_orientation
 
 logger = logging.getLogger(__name__)
 
@@ -235,6 +236,19 @@ async def process_room_job(job: Job) -> Job:
         frames_dir = settings.FRAMES_DIR / job.job_id
         await extract_frames(video_path, frames_dir, preset_config.fps)
 
+        orient = probe_video_orientation(video_path)
+        is_portrait = orient.is_portrait if orient else bool(
+            job.validation and job.validation.is_portrait
+        )
+        if orient:
+            logger.info(
+                "Video orientation for job %s: %s %s (rotation=%d°)",
+                job.job_id,
+                orient.label,
+                orient.aspect_label,
+                orient.rotation_deg,
+            )
+
         job.status = JobStatus.SELECTING_KEYFRAMES
         job.progress = 0.12
         await job_manager.update_job(job)
@@ -247,19 +261,21 @@ async def process_room_job(job: Job) -> Job:
             frame_paths,
             fps=preset_config.fps,
             allow_uniform_fallback=False,
+            is_portrait=is_portrait,
         )
         validate_room_coverage(yaw_by_index, n_zones, used_uniform_fallback=used_uniform)
         coverage = measure_yaw_coverage(yaw_by_index, n_zones)
         coverage_span = float(coverage["span_deg"])
 
         sharpness_by_index = {i: laplacian_sharpness(p) for i, p in enumerate(frame_paths)}
-        architecture_by_index = architecture_scores_by_index(frame_paths)
+        architecture_by_index = architecture_scores_by_index(frame_paths, is_portrait=is_portrait)
         person_by_index = None
         if preset_config.exclude_person_frames:
             person_by_index = person_flags_by_index(
                 frame_paths,
                 hit_threshold=preset_config.person_hog_hit_threshold,
                 min_confidence=preset_config.person_min_confidence,
+                is_portrait=is_portrait,
             )
 
         zones = select_zone_keyframes(

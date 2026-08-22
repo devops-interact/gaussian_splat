@@ -25,6 +25,7 @@ def estimate_yaw_by_index(
     fps: float = 1.5,
     allow_uniform_fallback: bool = False,
     calibrate_undercount: bool = True,
+    is_portrait: bool = False,
 ) -> tuple[dict[int, float], bool]:
     """
     Estimate per-frame cumulative yaw in degrees (unwrapped, may exceed 360).
@@ -61,7 +62,7 @@ def estimate_yaw_by_index(
             yaws[i] = cumulative
             continue
 
-        delta = _estimate_frame_rotation_deg(prev_gray, gray, cv2)
+        delta = _estimate_frame_rotation_deg(prev_gray, gray, cv2, is_portrait=is_portrait)
         if delta is not None:
             cumulative += delta
         yaws[i] = cumulative
@@ -131,19 +132,26 @@ def calibrate_yaw_undercount(
     return {k: float(v) * scale for k, v in yaw_by_index.items()}
 
 
-def _estimate_frame_rotation_deg(prev_gray, gray, cv2) -> Optional[float]:
+def _horizontal_fov_deg(is_portrait: bool) -> float:
+    from services.video.orientation import LANDSCAPE_FOV_DEG, PORTRAIT_FOV_DEG
+
+    return PORTRAIT_FOV_DEG if is_portrait else LANDSCAPE_FOV_DEG
+
+
+def _estimate_frame_rotation_deg(prev_gray, gray, cv2, *, is_portrait: bool = False) -> Optional[float]:
     """Estimate inter-frame yaw rotation (degrees) via feature flow + affine fit."""
     import numpy as np  # type: ignore
 
     prev = _resize_for_tracking(prev_gray, cv2)
     curr = _resize_for_tracking(gray, cv2)
     h, w = prev.shape
+    fov = _horizontal_fov_deg(is_portrait)
 
     features = cv2.goodFeaturesToTrack(
         prev, maxCorners=400, qualityLevel=0.01, minDistance=6, blockSize=7,
     )
     if features is None or len(features) < 12:
-        return _rotation_from_horizontal_flow(prev, curr, cv2, np)
+        return _rotation_from_horizontal_flow(prev, curr, cv2, np, fov_deg=fov)
 
     lk_params = dict(
         winSize=(21, 21),
@@ -156,7 +164,7 @@ def _estimate_frame_rotation_deg(prev_gray, gray, cv2) -> Optional[float]:
 
     mask = status.reshape(-1) == 1
     if mask.sum() < 12:
-        return _rotation_from_horizontal_flow(prev, curr, cv2, np)
+        return _rotation_from_horizontal_flow(prev, curr, cv2, np, fov_deg=fov)
 
     old = features[mask].reshape(-1, 2)
     new = next_pts[mask].reshape(-1, 2)
@@ -168,10 +176,17 @@ def _estimate_frame_rotation_deg(prev_gray, gray, cv2) -> Optional[float]:
         angle = math.degrees(math.atan2(M[1, 0], M[0, 0]))
         return angle
 
-    return _rotation_from_horizontal_flow(prev, curr, cv2, np, width=w)
+    return _rotation_from_horizontal_flow(prev, curr, cv2, np, width=w, fov_deg=fov)
 
 
-def _rotation_from_horizontal_flow(prev_gray, gray, cv2, np, width: Optional[int] = None) -> Optional[float]:
+def _rotation_from_horizontal_flow(
+    prev_gray,
+    gray,
+    cv2,
+    np,
+    width: Optional[int] = None,
+    fov_deg: float = 70.0,
+) -> Optional[float]:
     """Fallback: median horizontal flow scaled to approximate FOV."""
     w = width or prev_gray.shape[1]
     features = cv2.goodFeaturesToTrack(prev_gray, maxCorners=200, qualityLevel=0.01, minDistance=8)
@@ -190,8 +205,7 @@ def _rotation_from_horizontal_flow(prev_gray, gray, cv2, np, width: Optional[int
     old = features[mask].reshape(-1, 2)
     new = next_pts[mask].reshape(-1, 2)
     dx = float(np.median(new[:, 0] - old[:, 0]))
-    # ~70° horizontal FOV typical for phone video
-    return dx / max(w, 1) * 70.0
+    return dx / max(w, 1) * fov_deg
 
 
 def _resize_for_tracking(gray, cv2, target_width: int = 960):

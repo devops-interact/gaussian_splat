@@ -56,11 +56,12 @@ def _center_edge_penalty(gray) -> float:
     return max(0.0, 1.0 - density * 2.5)
 
 
-def _floor_uniformity_score(gray) -> float:
+def _floor_uniformity_score(gray, *, is_portrait: bool = False) -> float:
     import cv2  # type: ignore
 
     h, w = gray.shape[:2]
-    floor_band = gray[int(h * 0.75) :, :]
+    floor_start = int(h * (0.80 if is_portrait else 0.75))
+    floor_band = gray[floor_start:, :]
     if floor_band.size == 0:
         return 0.0
     lap = cv2.Laplacian(floor_band, cv2.CV_64F)
@@ -73,7 +74,7 @@ def _floor_uniformity_score(gray) -> float:
     return min(variance / 400.0, 1.0)
 
 
-def architecture_score(image_path: Path) -> float:
+def architecture_score(image_path: Path, *, is_portrait: bool = False) -> float:
     """
     Return 0–1 score: higher means more wall/floor, less dominant center object.
     """
@@ -84,7 +85,7 @@ def architecture_score(image_path: Path) -> float:
 
         line_score = _line_density_score(gray)
         center_score = _center_edge_penalty(gray)
-        floor_score = _floor_uniformity_score(gray)
+        floor_score = _floor_uniformity_score(gray, is_portrait=is_portrait)
 
         combined = line_score * 0.4 + center_score * 0.3 + floor_score * 0.3
         return max(0.05, min(1.0, combined))
@@ -93,8 +94,12 @@ def architecture_score(image_path: Path) -> float:
         return 0.5
 
 
-def architecture_scores_by_index(frame_paths: Sequence[Path]) -> dict[int, float]:
-    return {i: architecture_score(p) for i, p in enumerate(frame_paths)}
+def architecture_scores_by_index(
+    frame_paths: Sequence[Path],
+    *,
+    is_portrait: bool = False,
+) -> dict[int, float]:
+    return {i: architecture_score(p, is_portrait=is_portrait) for i, p in enumerate(frame_paths)}
 
 
 def combined_frame_score(

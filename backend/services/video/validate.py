@@ -4,10 +4,12 @@ Video validation service - validates videos before processing
 import logging
 import subprocess
 import json
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple, Optional
+from typing import Optional
 from dataclasses import dataclass
 from core.config import get_settings
+from services.video.orientation import orientation_from_dimensions, rotation_from_stream
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -22,6 +24,12 @@ class VideoInfo:
     fps: float
     codec: str
     file_size: int  # bytes
+    rotation_deg: int = 0
+    display_width: int = 0
+    display_height: int = 0
+    orientation: str = "landscape"
+    aspect_ratio: str = "unknown"
+    is_portrait: bool = False
 
 
 @dataclass
@@ -77,13 +85,24 @@ def get_video_info(video_path: Path) -> Optional[VideoInfo]:
         else:
             fps = float(fps_str)
         
+        width = int(video_stream.get("width", 0))
+        height = int(video_stream.get("height", 0))
+        rotation = rotation_from_stream(video_stream)
+        orient = orientation_from_dimensions(width, height, rotation)
+
         return VideoInfo(
             duration=float(format_info.get("duration", 0)),
-            width=int(video_stream.get("width", 0)),
-            height=int(video_stream.get("height", 0)),
+            width=width,
+            height=height,
             fps=fps,
             codec=video_stream.get("codec_name", "unknown"),
-            file_size=int(format_info.get("size", 0))
+            file_size=int(format_info.get("size", 0)),
+            rotation_deg=orient.rotation_deg,
+            display_width=orient.display_width,
+            display_height=orient.display_height,
+            orientation=orient.label,
+            aspect_ratio=orient.aspect_label,
+            is_portrait=orient.is_portrait,
         )
         
     except subprocess.TimeoutExpired:

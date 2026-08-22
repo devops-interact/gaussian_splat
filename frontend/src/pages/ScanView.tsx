@@ -15,6 +15,7 @@ import { downloadModel, getJobStatus, getSceneManifest } from '@/api/jobs';
 import { getScan } from '@/api/scans';
 import { JobStatus as JobStatusEnum } from '@/types/job';
 import { getApiBaseUrl } from '@/lib/apiBase';
+import { isRoomManifest } from '@/viewer/load/loadMeshScene';
 
 export default function ScanView() {
   const { projectId, scanId } = useParams<{ projectId: string; scanId: string }>();
@@ -74,18 +75,18 @@ export default function ScanView() {
 
   // Hydrate viewer for completed jobs on page reload
   useEffect(() => {
-    if (!jobId || modelUrl || sceneManifest?.zones?.length) return;
+    if (!jobId || modelUrl || isRoomManifest(sceneManifest)) return;
     let cancelled = false;
     getJobStatus(jobId)
       .then(async (response) => {
         if (cancelled) return;
-        if (response.status === JobStatusEnum.COMPLETED && (response.model_url || response.scene_manifest?.zones?.length)) {
+        if (response.status === JobStatusEnum.COMPLETED && (response.model_url || isRoomManifest(response.scene_manifest))) {
           const manifest = await resolveSceneManifest(
             response.scene_manifest,
             response.total_zones,
           );
           if (cancelled) return;
-          const isRoomScene = (manifest?.zones?.length ?? 0) > 0;
+          const isRoomScene = isRoomManifest(manifest);
           if (!isRoomScene && response.model_url) setModelUrl(response.model_url);
           else setModelUrl('');
           setObjUrl(response.model_url_obj ?? null);
@@ -101,7 +102,7 @@ export default function ScanView() {
     return () => {
       cancelled = true;
     };
-  }, [jobId, modelUrl, sceneManifest?.zones?.length, resolveSceneManifest]);
+  }, [jobId, modelUrl, sceneManifest, resolveSceneManifest]);
 
   useEffect(() => {
     if (!downloadOpen) return;
@@ -127,7 +128,7 @@ export default function ScanView() {
         statusExtras?.scene_manifest,
         statusExtras?.total_zones,
       );
-      const isRoomScene = (manifest?.zones?.length ?? 0) > 0;
+      const isRoomScene = isRoomManifest(manifest);
       if (isRoomScene) {
         setModelUrl('');
       } else {
@@ -307,7 +308,7 @@ export default function ScanView() {
 
       <div className="flex flex-col lg:flex-row gap-4 lg:items-start">
         <div className="w-full lg:w-2/3 flex-shrink-0">
-          {modelUrl || sceneManifest?.zones?.length ? (
+          {modelUrl || isRoomManifest(sceneManifest) ? (
             <div className="rounded-xl overflow-hidden border border-white/[0.26] bg-neutral-950 h-[400px] sm:h-[520px] lg:h-[calc(100vh-160px)] shadow-2xl shadow-white/[0.03]">
               <Viewer3D
                 modelUrl={modelUrl}
@@ -371,7 +372,7 @@ export default function ScanView() {
               jobInfo={{
                 qualityPreset: jobQualityPreset ?? undefined,
                 elapsedTime,
-                isProcessing: !!jobId && modelUrl === null && !sceneManifest?.zones?.length,
+                isProcessing: !!jobId && modelUrl === null && !isRoomManifest(sceneManifest),
                 meshyTaskId: meshyTaskId ?? prefetchedJobModelMetadata?.meshy_task_id,
                 thumbnailUrl: prefetchedJobModelMetadata?.thumbnail_url,
                 processingTimeSeconds: processingTimeSeconds ?? undefined,

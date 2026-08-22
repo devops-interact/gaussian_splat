@@ -44,6 +44,10 @@ def classify_zone_mesh(glb_path: Path) -> MeshClass:
     if thin_depth < 0.35 and footprint > height * 0.5:
         return "architectural"
 
+    # Tall humanoid — standing figure hallucinated by Meshy
+    if slenderness >= 2.2 and footprint_ratio < 0.85 and footprint < height * 0.9:
+        return "object"
+
     # Compact cubic blob — chair, table, person
     if slenderness > 0.7 and slenderness < 2.5:
         aspect_xz = min(ex, ez) / max(ex, ez)
@@ -56,10 +60,35 @@ def classify_zone_mesh(glb_path: Path) -> MeshClass:
     return "unknown"
 
 
+def _is_compact_unknown(ext: tuple[float, float, float]) -> bool:
+    """Reject small compact unknown blobs that are likely furniture/person meshes."""
+    ex, ey, ez = ext
+    footprint = max(ex, ez)
+    height = ey
+    if footprint >= 1.5:
+        return False
+    slenderness = height / max(footprint, 1e-6)
+    footprint_ratio = footprint / max(height, 1e-6)
+    if slenderness >= 2.0 and footprint_ratio < 0.9:
+        return True
+    if 0.7 <= slenderness <= 2.5 and footprint_ratio < 1.05 and footprint < 1.2:
+        return True
+    return False
+
+
 def mesh_passes_quality_gate(glb_path: Path) -> bool:
     """Zone detail meshes must not be classified as dominant objects."""
     kind = classify_zone_mesh(glb_path)
     if kind == "object":
         logger.info("Mesh quality gate rejected object-like mesh: %s", glb_path)
         return False
+
+    if kind == "unknown":
+        bbox = glb_bbox(glb_path)
+        if bbox:
+            ext = bbox_extent(bbox)
+            if _is_compact_unknown(ext):
+                logger.info("Mesh quality gate rejected compact unknown mesh: %s", glb_path)
+                return False
+
     return True

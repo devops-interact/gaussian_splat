@@ -15,6 +15,9 @@ export interface ValidationInfo {
   duration?: number;
   resolution?: string;
   fps?: number;
+  orientation?: string;
+  aspect_ratio?: string;
+  is_portrait?: boolean;
   warnings?: string[];
 }
 

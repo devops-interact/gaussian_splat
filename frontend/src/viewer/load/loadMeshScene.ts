@@ -141,6 +141,39 @@ export interface ZoneMeshHandle {
   geometryMeshes: AbstractMesh[];
 }
 
+export const SHELL_VISIBILITY = 1.0;
+export const ZONE_DETAIL_VISIBILITY = 0.5;
+
+export function isRoomManifest(
+  manifest: import('@/types/job').SceneManifestResponse | null | undefined,
+): boolean {
+  if (!manifest) return false;
+  return (manifest.zones?.length ?? 0) > 0 || !!manifest.shell_url;
+}
+
+async function loadRoomShell(
+  scene: Scene,
+  roomRoot: import('@babylonjs/core').TransformNode,
+  shellUrl: string,
+  apiBase: string,
+): Promise<AbstractMesh[]> {
+  const shellBuf = await fetchModelBuffer(glbModelUrl(shellUrl, apiBase));
+  const shellNode = new (await import('@babylonjs/core')).TransformNode('room_shell_root', scene);
+  shellNode.parent = roomRoot;
+  const { allMeshes: shellMeshes } = await importGlbBuffer(scene, shellBuf, 'room_shell');
+  const shellGeometry: AbstractMesh[] = [];
+  for (const gm of shellMeshes) {
+    gm.parent = shellNode;
+    gm.isPickable = true;
+    gm.visibility = SHELL_VISIBILITY;
+    if (gm.getTotalVertices() > 0) {
+      gm.name = 'room_shell';
+      shellGeometry.push(gm);
+    }
+  }
+  return shellGeometry;
+}
+
 function applyTransformToNode(
   node: import('@babylonjs/core').TransformNode,
   transform: number[][] | undefined,
@@ -192,6 +225,7 @@ export async function importComposedScene(
       mesh.parent = zoneNode;
       if (mesh.getTotalVertices() > 0) {
         mesh.isPickable = true;
+        mesh.visibility = ZONE_DETAIL_VISIBILITY;
         allGeometry.push(mesh);
         mesh.computeWorldMatrix(true);
         mesh.getBoundingInfo().update(mesh.getWorldMatrix());
@@ -215,8 +249,17 @@ export async function importComposedScene(
 
   roomRoot.computeWorldMatrix(true);
 
-  if (loaded === 0) {
-    throw new Error('Scene manifest has no loadable zone meshes');
+  let shellGeometry: AbstractMesh[] = [];
+  if (manifest.shell_url) {
+    try {
+      shellGeometry = await loadRoomShell(scene, roomRoot, manifest.shell_url, apiBase);
+    } catch (e) {
+      console.warn('[Babylon] Room shell load failed:', e);
+    }
+  }
+
+  if (loaded === 0 && shellGeometry.length === 0) {
+    throw new Error('Scene manifest has no loadable geometry (shell or zones)');
   }
 
   if (emptyZoneIds.length > 0) {
@@ -225,28 +268,11 @@ export async function importComposedScene(
     );
   }
 
-  if (manifest.shell_url && allGeometry.length > 0) {
-    try {
-      const shellUrl = glbModelUrl(manifest.shell_url, apiBase);
-      const shellBuf = await fetchModelBuffer(shellUrl);
-      const shellNode = new TransformNode('room_shell_root', scene);
-      shellNode.parent = roomRoot;
-      const { allMeshes: shellMeshes } = await importGlbBuffer(scene, shellBuf, 'room_shell');
-      for (const gm of shellMeshes) {
-        gm.parent = shellNode;
-        // Shell is the primary visible surface — must be pickable for measurement.
-        gm.isPickable = true;
-        gm.visibility = 0.35;
-        if (gm.getTotalVertices() > 0) gm.name = 'room_shell';
-      }
-    } catch (e) {
-      console.warn('[Babylon] Room shell load failed:', e);
-    }
-  }
+  const geometryMeshes = shellGeometry.length > 0 ? [...shellGeometry, ...allGeometry] : allGeometry;
 
   return {
     rootMesh: roomRoot as unknown as AbstractMesh,
-    geometryMeshes: allGeometry,
+    geometryMeshes,
     zoneMeshes,
     emptyZoneIds,
   };

@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 
 _HOG = None
 _CENTER_CROP_RATIO = 0.70
+_PORTRAIT_CENTER_CROP_RATIO = 0.60
 
 
 def _hog_detector():
@@ -76,8 +77,10 @@ def person_flags_by_index(
     *,
     hit_threshold: float = 0.0,
     min_confidence: float = 0.5,
+    is_portrait: bool = False,
 ) -> dict[int, bool]:
     """Map frame index → True when a person is detected in that frame."""
+    crop_ratio = _PORTRAIT_CENTER_CROP_RATIO if is_portrait else _CENTER_CROP_RATIO
     flags: dict[int, bool] = {}
     for index, path in enumerate(frame_paths):
         try:
@@ -85,6 +88,7 @@ def person_flags_by_index(
                 path,
                 hit_threshold=hit_threshold,
                 min_confidence=min_confidence,
+                center_crop_ratio=crop_ratio,
             )
         except Exception as exc:
             logger.warning("Person detection failed for frame %s: %s", path, exc)
