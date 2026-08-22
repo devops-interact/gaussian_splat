@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from pathlib import Path
 from typing import Mapping, Optional, Sequence
 
@@ -21,9 +22,9 @@ def estimate_yaw_by_index(
     allow_uniform_fallback: bool = False,
 ) -> tuple[dict[int, float], bool]:
     """
-    Estimate per-frame yaw in degrees [0, 360).
+    Estimate per-frame cumulative yaw in degrees (unwrapped, may exceed 360).
 
-    Uses Lucas-Kanade optical flow on consecutive frames when OpenCV is available.
+    Uses affine partial rotation between consecutive frames when OpenCV is available.
     Returns (yaw_by_index, used_uniform_fallback).
     """
     if len(frame_paths) <= 1:
@@ -31,7 +32,6 @@ def estimate_yaw_by_index(
 
     try:
         import cv2  # type: ignore
-        import numpy as np  # type: ignore
     except ImportError:
         if allow_uniform_fallback:
             logger.warning("OpenCV unavailable — using uniform yaw estimate")
@@ -50,50 +50,32 @@ def estimate_yaw_by_index(
             return _uniform_yaw(len(frame_paths)), True
         raise ValueError("Could not read first frame for yaw estimation")
 
-    h, w = prev_gray.shape
-    features = cv2.goodFeaturesToTrack(prev_gray, maxCorners=200, qualityLevel=0.01, minDistance=8)
-    if features is None:
-        if allow_uniform_fallback:
-            return _uniform_yaw(len(frame_paths)), True
-        raise ValueError("Not enough visual features in video frames for yaw estimation")
-
-    lk_params = dict(
-        winSize=(21, 21),
-        maxLevel=3,
-        criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01),
-    )
-
     for i in range(1, len(frame_paths)):
         gray = _read_gray(frame_paths[i], cv2)
         if gray is None:
-            yaws[i] = cumulative % 360.0
+            yaws[i] = cumulative
             continue
 
-        next_pts, status, _ = cv2.calcOpticalFlowPyrLK(prev_gray, gray, features, None, **lk_params)
-        if next_pts is None or status is None:
-            yaws[i] = cumulative % 360.0
-            prev_gray = gray
-            continue
-
-        mask = status.reshape(-1) == 1
-        if mask.sum() < 10:
-            yaws[i] = cumulative % 360.0
-            prev_gray = gray
-            features = cv2.goodFeaturesToTrack(prev_gray, maxCorners=200, qualityLevel=0.01, minDistance=8)
-            if features is None:
-                break
-            continue
-
-        old = features[mask].reshape(-1, 2)
-        new = next_pts[mask].reshape(-1, 2)
-        dx = float(np.median(new[:, 0] - old[:, 0]))
-        cumulative += dx / max(w, 1) * 45.0
-        yaws[i] = cumulative % 360.0
-
+        delta = _estimate_frame_rotation_deg(prev_gray, gray, cv2)
+        if delta is not None:
+            cumulative += delta
+        yaws[i] = cumulative
         prev_gray = gray
-        features = cv2.goodFeaturesToTrack(prev_gray, maxCorners=200, qualityLevel=0.01, minDistance=8)
-        if features is None:
-            break
+
+    total_rotation = _total_rotation_deg(yaws)
+    logger.info(
+        "Yaw estimation: %d frames, total rotation %.1f°, range %.1f°–%.1f°",
+        len(yaws),
+        total_rotation,
+        min(yaws.values()),
+        max(yaws.values()),
+    )
+
+    if total_rotation < 30.0 and len(frame_paths) >= 12:
+        logger.warning(
+            "Low rotation detected (%.1f°) — video may be mostly static or pan too slow",
+            total_rotation,
+        )
 
     if len(yaws) < len(frame_paths):
         if allow_uniform_fallback:
@@ -110,6 +92,78 @@ def estimate_yaw_by_index(
     return yaws, False
 
 
+def _estimate_frame_rotation_deg(prev_gray, gray, cv2) -> Optional[float]:
+    """Estimate inter-frame yaw rotation (degrees) via feature flow + affine fit."""
+    import numpy as np  # type: ignore
+
+    prev = _resize_for_tracking(prev_gray, cv2)
+    curr = _resize_for_tracking(gray, cv2)
+    h, w = prev.shape
+
+    features = cv2.goodFeaturesToTrack(
+        prev, maxCorners=400, qualityLevel=0.01, minDistance=6, blockSize=7,
+    )
+    if features is None or len(features) < 12:
+        return _rotation_from_horizontal_flow(prev, curr, cv2, np)
+
+    lk_params = dict(
+        winSize=(21, 21),
+        maxLevel=3,
+        criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01),
+    )
+    next_pts, status, _ = cv2.calcOpticalFlowPyrLK(prev, curr, features, None, **lk_params)
+    if next_pts is None or status is None:
+        return None
+
+    mask = status.reshape(-1) == 1
+    if mask.sum() < 12:
+        return _rotation_from_horizontal_flow(prev, curr, cv2, np)
+
+    old = features[mask].reshape(-1, 2)
+    new = next_pts[mask].reshape(-1, 2)
+
+    M, inliers = cv2.estimateAffinePartial2D(
+        old, new, method=cv2.RANSAC, ransacReprojThreshold=4.0, maxIters=2000,
+    )
+    if M is not None:
+        angle = math.degrees(math.atan2(M[1, 0], M[0, 0]))
+        if abs(angle) < 45.0:
+            return angle
+
+    return _rotation_from_horizontal_flow(prev, curr, cv2, np, width=w)
+
+
+def _rotation_from_horizontal_flow(prev_gray, gray, cv2, np, width: Optional[int] = None) -> Optional[float]:
+    """Fallback: median horizontal flow scaled to approximate FOV."""
+    w = width or prev_gray.shape[1]
+    features = cv2.goodFeaturesToTrack(prev_gray, maxCorners=200, qualityLevel=0.01, minDistance=8)
+    if features is None:
+        return None
+    next_pts, status, _ = cv2.calcOpticalFlowPyrLK(
+        prev_gray, gray, features, None,
+        winSize=(21, 21), maxLevel=3,
+        criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01),
+    )
+    if next_pts is None or status is None:
+        return None
+    mask = status.reshape(-1) == 1
+    if mask.sum() < 8:
+        return None
+    old = features[mask].reshape(-1, 2)
+    new = next_pts[mask].reshape(-1, 2)
+    dx = float(np.median(new[:, 0] - old[:, 0]))
+    # ~70° horizontal FOV typical for phone video
+    return dx / max(w, 1) * 70.0
+
+
+def _resize_for_tracking(gray, cv2, target_width: int = 960):
+    h, w = gray.shape
+    if w <= target_width:
+        return gray
+    scale = target_width / w
+    return cv2.resize(gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+
+
 def measure_yaw_coverage(
     yaw_by_index: Mapping[int, float],
     n_zones: int,
@@ -119,21 +173,25 @@ def measure_yaw_coverage(
         return {
             "zones_populated": 0,
             "span_deg": 0.0,
+            "total_rotation_deg": 0.0,
             "used_uniform_fallback": False,
         }
 
-    yaws = [float(y) % 360.0 for y in yaw_by_index.values()]
-    span_deg = _angular_span_deg(yaws)
+    yaws_norm = [float(y) % 360.0 for y in yaw_by_index.values()]
+    span_wrapped = _angular_span_deg(yaws_norm)
+    total_rotation = min(360.0, _total_rotation_deg(yaw_by_index))
+    span_deg = max(span_wrapped, total_rotation)
 
     zones_seen: set[int] = set()
     bucket = 360.0 / max(n_zones, 1)
-    for yaw in yaws:
+    for yaw in yaws_norm:
         zone_id = int(yaw // bucket) % n_zones
         zones_seen.add(zone_id)
 
     return {
         "zones_populated": len(zones_seen),
         "span_deg": span_deg,
+        "total_rotation_deg": total_rotation,
         "used_uniform_fallback": False,
     }
 
@@ -144,10 +202,12 @@ def validate_room_coverage(
     *,
     used_uniform_fallback: bool,
     min_span_deg: float = COVERAGE_MIN_SPAN_DEG,
+    min_zones: int = 3,
 ) -> None:
     """Fail fast before Meshy when walkthrough coverage is insufficient."""
     coverage = measure_yaw_coverage(yaw_by_index, n_zones)
     span_deg = float(coverage["span_deg"])
+    zones_populated = int(coverage["zones_populated"])
 
     if used_uniform_fallback:
         raise ValueError(
@@ -155,11 +215,14 @@ def validate_room_coverage(
             + COVERAGE_ACTIONABLE_MSG
         )
 
-    if span_deg < min_span_deg:
-        raise ValueError(
-            f"Insufficient 360° coverage ({span_deg:.0f}° of ~360° detected). "
-            + COVERAGE_ACTIONABLE_MSG
-        )
+    if span_deg >= min_span_deg or zones_populated >= min_zones:
+        return
+
+    raise ValueError(
+        f"Insufficient 360° coverage ({span_deg:.0f}° rotation, "
+        f"{zones_populated}/{n_zones} zones detected). "
+        + COVERAGE_ACTIONABLE_MSG
+    )
 
 
 def build_walk_path(
@@ -173,13 +236,23 @@ def build_walk_path(
     path: list[list[float]] = []
     n = len(frame_paths)
     for i in range(n):
-        yaw_rad = (yaw_by_index.get(i, 0.0) / 180.0) * 3.14159265
+        yaw_rad = (yaw_by_index.get(i, 0.0) % 360.0 / 180.0) * math.pi
         path.append([
-            radius * __import__("math").sin(yaw_rad),
+            radius * math.sin(yaw_rad),
             height,
-            radius * __import__("math").cos(yaw_rad),
+            radius * math.cos(yaw_rad),
         ])
     return path
+
+
+def _total_rotation_deg(yaw_by_index: Mapping[int, float]) -> float:
+    if len(yaw_by_index) < 2:
+        return 0.0
+    indices = sorted(yaw_by_index.keys())
+    total = 0.0
+    for i in range(1, len(indices)):
+        total += abs(float(yaw_by_index[indices[i]]) - float(yaw_by_index[indices[i - 1]]))
+    return total
 
 
 def _angular_span_deg(yaws: Sequence[float]) -> float:

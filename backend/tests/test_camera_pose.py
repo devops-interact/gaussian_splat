@@ -41,6 +41,25 @@ def test_validate_room_coverage_accepts_good_span() -> None:
     validate_room_coverage(yaw, 4, used_uniform_fallback=False)
 
 
+def test_validate_room_coverage_accepts_when_zones_populated() -> None:
+    yaw = {0: 10.0, 1: 100.0, 2: 200.0}
+    validate_room_coverage(yaw, 4, used_uniform_fallback=False)
+
+
+def test_total_rotation_on_unwrapped_yaws() -> None:
+    from services.meshy.camera_pose import _total_rotation_deg
+
+    yaw = {0: 0.0, 1: 90.0, 2: 180.0, 3: 270.0, 4: 360.0}
+    assert _total_rotation_deg(yaw) == pytest.approx(360.0)
+
+
+def test_measure_yaw_coverage_uses_total_rotation() -> None:
+    yaw_by_index = {0: 0.0, 1: 120.0, 2: 240.0, 3: 380.0}
+    coverage = measure_yaw_coverage(yaw_by_index, n_zones=4)
+    assert float(coverage["total_rotation_deg"]) == pytest.approx(360.0, abs=1.0)
+    assert float(coverage["span_deg"]) >= 200.0
+
+
 def test_uniform_yaw_for_tests_only() -> None:
     yaws = _uniform_yaw(5)
     assert len(yaws) == 5

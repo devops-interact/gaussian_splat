@@ -91,9 +91,8 @@ QUALITY_PRESETS: Dict[QualityPreset, MeshyPresetConfig] = {
     QualityPreset.ROOM: MeshyPresetConfig(
         name="Room — full space",
         description="Reconstructs walls/floor by zones (~35–45 min). Recommended for walkthrough videos.",
-        fps=1.0,
+        fps=1.5,
         estimated_minutes=40,
-        ai_model="meshy-7",
         enable_pbr=True,
         texture_resolution="4k",
         target_polycount=80_000,
