@@ -10,6 +10,7 @@ from core.config import get_settings, QUALITY_PRESETS, QualityPreset, MeshyPrese
 from core.models import Job, JobStatus, ModelMetadata, KeyframeInfo
 from jobs.job_manager import get_job_manager
 from services.video.extract_frames import extract_frames
+from services.video.orientation import probe_video_orientation
 from services.meshy.client import MeshyClient, MeshyError
 from services.meshy.camera_pose import estimate_yaw_by_index
 from services.meshy.keyframe_selector import (
@@ -162,7 +163,15 @@ async def process_single_object_job(job: Job) -> Job:
 
     video_path = settings.UPLOADS_DIR / job.video_filename
     frames_dir = settings.FRAMES_DIR / job.job_id
-    await extract_frames(video_path, frames_dir, preset_config.fps)
+
+    orient = probe_video_orientation(video_path)
+    rotation_deg = orient.rotation_deg if orient else 0
+    await extract_frames(
+        video_path,
+        frames_dir,
+        preset_config.fps,
+        rotation_deg=rotation_deg,
+    )
 
     job.status = JobStatus.SELECTING_KEYFRAMES
     job.progress = 0.25

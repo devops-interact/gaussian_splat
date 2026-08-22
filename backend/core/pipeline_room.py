@@ -234,9 +234,9 @@ async def process_room_job(job: Job) -> Job:
 
         video_path = settings.UPLOADS_DIR / job.video_filename
         frames_dir = settings.FRAMES_DIR / job.job_id
-        await extract_frames(video_path, frames_dir, preset_config.fps)
 
         orient = probe_video_orientation(video_path)
+        rotation_deg = orient.rotation_deg if orient else 0
         is_portrait = orient.is_portrait if orient else bool(
             job.validation and job.validation.is_portrait
         )
@@ -248,6 +248,13 @@ async def process_room_job(job: Job) -> Job:
                 orient.aspect_label,
                 orient.rotation_deg,
             )
+
+        await extract_frames(
+            video_path,
+            frames_dir,
+            preset_config.fps,
+            rotation_deg=rotation_deg,
+        )
 
         job.status = JobStatus.SELECTING_KEYFRAMES
         job.progress = 0.12

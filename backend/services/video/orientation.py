@@ -100,6 +100,32 @@ def _rotation_from_stream(stream: dict) -> int:
     return 0
 
 
+def transpose_filter_for_rotation(rotation_deg: int) -> Optional[str]:
+    """
+    Map container rotation metadata to an FFmpeg transpose/hflip chain.
+
+    Matches iPhone/MOV rotate tag conventions used by ffprobe.
+    """
+    rotation = _normalize_rotation(rotation_deg)
+    if rotation == 90:
+        return "transpose=1"
+    if rotation == 180:
+        return "hflip,vflip"
+    if rotation == 270:
+        return "transpose=2"
+    return None
+
+
+def build_extract_vf_filter(fps: float, rotation_deg: int = 0) -> str:
+    """Build -vf filter chain for frame extraction (no autorotate — not in Debian FFmpeg)."""
+    parts = [f"fps={fps}"]
+    transpose = transpose_filter_for_rotation(rotation_deg)
+    if transpose:
+        parts.append(transpose)
+    parts.append("scale='min(1920,iw)':-2")
+    return ",".join(parts)
+
+
 def probe_video_orientation(video_path: Path) -> Optional[VideoOrientation]:
     """Read stored dimensions and rotation metadata via ffprobe."""
     try:
