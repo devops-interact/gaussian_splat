@@ -32,6 +32,12 @@ function formatPresetTime(minutes: number): string {
   return `~${minutes} min est.`;
 }
 
+const MAX_UPLOAD_BYTES = 500 * 1024 * 1024;
+
+function formatFileSize(bytes: number): string {
+  return `${(bytes / 1024 / 1024).toFixed(0)}MB`;
+}
+
 export default function VideoUpload({
   onUploadSuccess,
   jobStarted = false,
@@ -82,6 +88,12 @@ export default function VideoUpload({
       return;
     }
 
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setError(`File too large (${formatFileSize(file.size)}). Maximum size is 500MB.`);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
     setError(null);
     setWarnings([]);
     if (!jobStarted) setVideoInfo(null);
@@ -105,8 +117,14 @@ export default function VideoUpload({
       if (typeof detail === 'object' && detail.errors) {
         setError(detail.errors.join('; '));
         if (detail.warnings) setWarnings(detail.warnings);
-      } else if (err.code === 'ERR_NETWORK') {
-        setError('Network error: Cannot connect to server. Check if the backend is running.');
+      } else if (err.code === 'ERR_NETWORK' || !err.response) {
+        if (file.size > MAX_UPLOAD_BYTES) {
+          setError(`File too large (${formatFileSize(file.size)}). Maximum size is 500MB.`);
+        } else {
+          setError(
+            'Network error: Cannot connect to server. Check if the backend is running, or try again in a private window.',
+          );
+        }
       } else if (err.response?.status === 413) {
         setError('File too large. Maximum size is 500MB.');
       } else if (err.response?.status >= 500) {

@@ -40,6 +40,7 @@ export interface UseMeshViewerOptions {
   prefetchedJobModelMetadata?: ModelMetadataResponse | null;
   sceneManifest?: SceneManifestResponse | null;
   onModelMetadata?: (meta: ModelMetadata) => void;
+  onZoneLoadWarning?: (message: string | null) => void;
 }
 
 export interface UseMeshViewerResult {
@@ -62,6 +63,7 @@ export function useMeshViewer({
   prefetchedJobModelMetadata = null,
   sceneManifest = null,
   onModelMetadata,
+  onZoneLoadWarning,
 }: UseMeshViewerOptions): UseMeshViewerResult {
   const viewerRef = useRef<BabylonViewerCtx | null>(null);
   const initialPoseRef = useRef<StoredCameraPose | null>(null);
@@ -71,6 +73,8 @@ export function useMeshViewer({
   const walkSpeedRef = useRef(3);
   const onMetadataRef = useRef(onModelMetadata);
   onMetadataRef.current = onModelMetadata;
+  const onZoneLoadWarningRef = useRef(onZoneLoadWarning);
+  onZoneLoadWarningRef.current = onZoneLoadWarning;
 
   const [loadPhase, setLoadPhase] = useState<LoadPhase>('idle');
   const [loadProgress, setLoadProgress] = useState(0);
@@ -206,7 +210,15 @@ export function useMeshViewer({
           rootMesh = composed.rootMesh;
           geometryMeshes = composed.geometryMeshes;
           zoneMeshes = composed.zoneMeshes;
+          if (composed.emptyZoneIds.length > 0) {
+            onZoneLoadWarningRef.current?.(
+              `${composed.emptyZoneIds.length} zone(s) have no visible geometry (zone ${composed.emptyZoneIds.join(', ')}).`,
+            );
+          } else {
+            onZoneLoadWarningRef.current?.(null);
+          }
         } else {
+          onZoneLoadWarningRef.current?.(null);
           const imported = await importGlbBuffer(scene, buffer!);
           rootMesh = imported.rootMesh;
           geometryMeshes = imported.geometryMeshes;

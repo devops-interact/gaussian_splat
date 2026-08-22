@@ -34,6 +34,7 @@ export default function ScanView() {
   const [processingTimeSeconds, setProcessingTimeSeconds] = useState<number | null>(null);
   const [meshyTaskId, setMeshyTaskId] = useState<string | null>(null);
   const [elapsedTime, setElapsedTime] = useState<string>('--');
+  const [viewerZoneWarning, setViewerZoneWarning] = useState<string | null>(null);
   const [downloading, setDownloading] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
   const downloadRef = useRef<HTMLDivElement>(null);
@@ -229,6 +230,9 @@ export default function ScanView() {
                   : `Single object · ${jobQualityPreset}`}
               </span>
             )}
+            {viewerZoneWarning && (
+              <p className="text-amber-400/90 text-xs mt-2">{viewerZoneWarning}</p>
+            )}
             {sceneManifest?.zone_errors && Object.keys(sceneManifest.zone_errors).length > 0 && (
               <p className="text-amber-400/90 text-xs mt-2">
                 Partial reconstruction: {sceneManifest.zone_count ?? sceneManifest.zones?.length} zones loaded.
@@ -297,6 +301,7 @@ export default function ScanView() {
                 prefetchedJobModelMetadata={prefetchedJobModelMetadata}
                 sceneManifest={sceneManifest}
                 onModelMetadata={handleModelMetadata}
+                onZoneLoadWarning={setViewerZoneWarning}
               />
             </div>
           ) : (

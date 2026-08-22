@@ -33,11 +33,14 @@ from services.meshy.storage_upload import publish_keyframes
 from services.meshy.zone_normalize import (
     aggregate_bbox,
     dedupe_similar_zones,
+    glb_vertex_count,
     normalize_zone_glbs,
 )
 from services.video.extract_frames import extract_frames
 
 logger = logging.getLogger(__name__)
+
+MIN_ZONE_VERTS_FOR_SHELL = 500
 settings = get_settings()
 
 
@@ -108,6 +111,7 @@ async def process_room_job(job: Job) -> Job:
         zones = select_zone_keyframes(
             frame_paths,
             n_zones=n_zones,
+            max_per_zone=preset_config.max_keyframes,
             yaw_by_index=yaw_by_index,
             sharpness_by_index=sharpness_by_index,
         )
@@ -290,7 +294,16 @@ async def process_room_job(job: Job) -> Job:
             )
 
         shell_url = None
-        if preset_config.room_shell_enabled and len(manifest_zones) >= 3:
+        zones_with_geometry = sum(
+            1
+            for z in manifest_zones
+            if glb_vertex_count(job_dir / f"zone_{z.id}.glb") >= MIN_ZONE_VERTS_FOR_SHELL
+        )
+        if (
+            preset_config.room_shell_enabled
+            and len(manifest_zones) >= 3
+            and zones_with_geometry >= 3
+        ):
             job.status = JobStatus.COMPOSING_SCENE
             job.progress = 0.85
             await job_manager.update_job(job)
@@ -306,6 +319,13 @@ async def process_room_job(job: Job) -> Job:
             )
             if shell_path:
                 shell_url = f"/api/jobs/{job.job_id}/shell"
+        elif preset_config.room_shell_enabled and len(manifest_zones) >= 3:
+            logger.info(
+                "Room shell skipped for job %s — only %d/%d zones have sufficient geometry",
+                job.job_id,
+                zones_with_geometry,
+                len(manifest_zones),
+            )
 
         manifest = SceneManifest(
             composition_mode="zone_mesh",

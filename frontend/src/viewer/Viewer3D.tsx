@@ -33,6 +33,7 @@ export default function Viewer3D({
   prefetchedJobModelMetadata = null,
   sceneManifest = null,
   onModelMetadata,
+  onZoneLoadWarning,
 }: Viewer3DProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [mode, setMode] = useState<ViewerMode>('orbit');
@@ -80,6 +81,7 @@ export default function Viewer3D({
     prefetchedJobModelMetadata,
     sceneManifest,
     onModelMetadata,
+    onZoneLoadWarning,
   });
 
   const isLoading = loadPhase !== 'ready' && loadPhase !== 'error' && loadPhase !== 'idle';

@@ -160,11 +160,17 @@ export async function importComposedScene(
   scene: Scene,
   manifest: import('@/types/job').SceneManifestResponse,
   apiBase: string,
-): Promise<{ rootMesh: AbstractMesh; geometryMeshes: AbstractMesh[]; zoneMeshes: ZoneMeshHandle[] }> {
+): Promise<{
+  rootMesh: AbstractMesh;
+  geometryMeshes: AbstractMesh[];
+  zoneMeshes: ZoneMeshHandle[];
+  emptyZoneIds: number[];
+}> {
   const { TransformNode } = await import('@babylonjs/core');
   const roomRoot = new TransformNode('room_root', scene);
   const allGeometry: AbstractMesh[] = [];
   const zoneMeshes: ZoneMeshHandle[] = [];
+  const emptyZoneIds: number[] = [];
   let loaded = 0;
 
   for (const zone of manifest.zones) {
@@ -190,6 +196,12 @@ export async function importComposedScene(
       }
     }
 
+    if (geometryMeshes.length === 0) {
+      emptyZoneIds.push(zone.id);
+      console.warn(`[Babylon] Zone ${zone.id} loaded with no visible geometry`);
+      continue;
+    }
+
     zoneMeshes.push({
       zoneId: zone.id,
       rootMesh: zoneNode as unknown as AbstractMesh,
@@ -202,7 +214,13 @@ export async function importComposedScene(
     throw new Error('Scene manifest has no loadable zone meshes');
   }
 
-  if (manifest.shell_url) {
+  if (emptyZoneIds.length > 0) {
+    console.warn(
+      `[Babylon] ${emptyZoneIds.length} zone(s) had no visible geometry: ${emptyZoneIds.join(', ')}`,
+    );
+  }
+
+  if (manifest.shell_url && allGeometry.length > 0) {
     try {
       const shellUrl = glbModelUrl(manifest.shell_url, apiBase);
       const shellBuf = await fetchModelBuffer(shellUrl);
@@ -212,7 +230,7 @@ export async function importComposedScene(
       for (const gm of shellMeshes) {
         gm.parent = shellNode;
         gm.isPickable = false;
-        gm.visibility = 0.35;
+        gm.visibility = 0.12;
         if (gm.getTotalVertices() > 0) gm.name = 'room_shell';
       }
     } catch (e) {
@@ -224,5 +242,6 @@ export async function importComposedScene(
     rootMesh: roomRoot as unknown as AbstractMesh,
     geometryMeshes: allGeometry,
     zoneMeshes,
+    emptyZoneIds,
   };
 }

@@ -26,7 +26,7 @@ export default function KeyframeStrip({ keyframes, embedded }: KeyframeStripProp
     <div className="space-y-2">
       <div className="flex items-center gap-2 text-xs text-gray-400">
         <Image className="w-3.5 h-3.5" />
-        <span>Keyframes sent to Meshy ({sorted.length})</span>
+        <span>Extracted Keyframes ({sorted.length})</span>
       </div>
       <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
         {sorted.map((kf, i) => (

@@ -8,6 +8,7 @@ from services.meshy.keyframe_selector import (
     frame_candidates_from_paths,
     select_keyframes,
     select_zone_keyframes,
+    _select_angular_diverse_keyframes,
 )
 
 
@@ -130,3 +131,13 @@ def test_select_zone_keyframes_rejects_invalid_zone_count(tmp_path: Path) -> Non
     frames = _paths(2, tmp_path)
     with pytest.raises(ValueError):
         select_zone_keyframes(frames, n_zones=0)
+
+
+def test_angular_sector_prefers_sharper_frame() -> None:
+    zone_frames = [
+        FrameCandidate(path=Path("a.jpg"), index=0, yaw_deg=44.0, sharpness=1.0),
+        FrameCandidate(path=Path("b.jpg"), index=1, yaw_deg=46.0, sharpness=10.0),
+    ]
+    selected = _select_angular_diverse_keyframes(zone_frames, 0, 4, 1)
+    assert len(selected) == 1
+    assert selected[0].index == 1

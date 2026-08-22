@@ -9,6 +9,7 @@ export interface Viewer3DProps {
   prefetchedJobModelMetadata?: ModelMetadataResponse | null;
   sceneManifest?: SceneManifestResponse | null;
   onModelMetadata?: (meta: ModelMetadata) => void;
+  onZoneLoadWarning?: (message: string | null) => void;
 }
 
 export interface ModelMetadata {

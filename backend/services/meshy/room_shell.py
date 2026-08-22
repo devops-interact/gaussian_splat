@@ -86,15 +86,18 @@ def create_room_shell(
             for yaw in wall_yaws
         ]
         valid = [im for im in textures if im is not None]
-        if valid:
-            material = trimesh.visual.material.PBRMaterial(
-                baseColorTexture=valid[0],
-                metallicFactor=0.0,
-                roughnessFactor=0.9,
-            )
-            box.visual = trimesh.visual.TextureVisuals(material=material)
+        if not valid:
+            logger.info("Room shell skipped — no keyframe textures available")
+            return None
+        material = trimesh.visual.material.PBRMaterial(
+            baseColorTexture=valid[0],
+            metallicFactor=0.0,
+            roughnessFactor=0.9,
+        )
+        box.visual = trimesh.visual.TextureVisuals(material=material)
     except Exception as e:
-        logger.debug("Shell texturing skipped: %s", e)
+        logger.info("Room shell skipped — texturing failed: %s", e)
+        return None
 
     out_dir = models_dir / job_id
     out_dir.mkdir(parents=True, exist_ok=True)

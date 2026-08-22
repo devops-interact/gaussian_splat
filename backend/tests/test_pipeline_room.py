@@ -84,3 +84,50 @@ def test_partial_zone_recovery_completes_with_two_zones(tmp_path) -> None:
     assert len(result.scene_manifest.zones) == 3
     assert result.scene_manifest.zone_errors is not None
     assert "2" in result.scene_manifest.zone_errors
+
+
+def test_room_preset_uses_four_keyframes_per_zone() -> None:
+    from core.config import QUALITY_PRESETS, QualityPreset
+
+    room = QUALITY_PRESETS[QualityPreset.ROOM]
+    assert room.fps == 2.0
+    assert room.max_keyframes == 4
+
+
+def test_process_room_job_passes_max_per_zone_from_preset(tmp_path) -> None:
+    job = _make_job()
+    frames = [tmp_path / f"frame_{i:03d}.jpg" for i in range(8)]
+    for p in frames:
+        p.write_bytes(b"fake")
+
+    yaw_by_index = {i: float(i * 45) for i in range(8)}
+    zones = {0: frames[:2], 1: frames[2:4], 2: frames[4:6], 3: frames[6:8]}
+
+    mock_manager = MagicMock()
+    mock_manager.update_job = AsyncMock()
+    select_mock = MagicMock(return_value=zones)
+
+    with (
+        patch("core.pipeline_room.get_job_manager", return_value=mock_manager),
+        patch("core.pipeline_room.settings") as mock_settings,
+        patch("core.pipeline_room.extract_frames", new_callable=AsyncMock),
+        patch("core.pipeline_room.list_frame_paths", return_value=frames),
+        patch("core.pipeline_room.estimate_yaw_by_index", return_value=(yaw_by_index, False)),
+        patch("core.pipeline_room.validate_room_coverage"),
+        patch("core.pipeline_room.measure_yaw_coverage", return_value={"span_deg": 350.0, "zones_populated": 4}),
+        patch("core.pipeline_room.laplacian_sharpness", return_value=1.0),
+        patch("core.pipeline_room.select_zone_keyframes", select_mock),
+        patch("core.pipeline_room.publish_keyframes", side_effect=RuntimeError("stop-after-select")),
+    ):
+        mock_settings.MESHY_API_KEY = "test-key"
+        mock_settings.UPLOADS_DIR = tmp_path
+        mock_settings.FRAMES_DIR = tmp_path / "frames"
+        mock_settings.MODELS_DIR = tmp_path / "models"
+        mock_settings.MESHY_MAX_PARALLEL_JOBS = 2
+        mock_settings.MESHY_POLL_INTERVAL_S = 1
+
+        result = asyncio.run(process_room_job(job))
+
+    select_mock.assert_called_once()
+    assert select_mock.call_args.kwargs["max_per_zone"] == 4
+    assert result.status == JobStatus.ERROR

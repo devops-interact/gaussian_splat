@@ -149,10 +149,13 @@ def _select_angular_diverse_keyframes(
         ]
         if not pool:
             center = (s_start + s_end) / 2.0
-            pool = sorted(
-                zone_frames,
-                key=lambda f: _angular_distance(f.yaw_deg or 0.0, center),
-            )[:1]
+            distances = [
+                (_angular_distance(f.yaw_deg or 0.0, center), f)
+                for f in zone_frames
+            ]
+            min_dist = min(d for d, _ in distances)
+            near = [f for d, f in distances if d <= min_dist + 1.0]
+            pool = [max(near, key=lambda f: f.sharpness if f.sharpness is not None else 0.0)]
         if pool:
             best = max(pool, key=lambda f: f.sharpness if f.sharpness is not None else 0.0)
             if best not in selected:

@@ -26,7 +26,7 @@ export const DEFAULT_INSPECTION: InspectionState = {
   },
   showGrid: true,
   showAxes: true,
-  showShell: true,
+  showShell: false,
 };
 
 export function applyInspectionState(ctx: BabylonViewerCtx, state: InspectionState): void {
