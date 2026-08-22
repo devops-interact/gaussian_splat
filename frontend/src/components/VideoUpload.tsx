@@ -24,6 +24,9 @@ interface UploadResult {
     duration: number;
     resolution: string;
     fps: number;
+    orientation?: string;
+    aspect_ratio?: string;
+    is_portrait?: boolean;
   };
 }
 
@@ -180,7 +183,9 @@ export default function VideoUpload({
       <div className="flex items-center p-3 rounded-lg bg-white/[0.06] border border-white/48 text-neutral-300 text-sm">
         <FileVideo className="w-4 h-4 mr-2 shrink-0 text-white/80" />
         <span>
-          Video: {videoInfo.duration.toFixed(1)}s • {videoInfo.resolution} • {videoInfo.fps.toFixed(1)} fps
+          Video: {videoInfo.duration.toFixed(1)}s • {videoInfo.resolution}
+          {videoInfo.aspect_ratio ? ` (${videoInfo.aspect_ratio})` : ''} • {videoInfo.fps.toFixed(1)} fps
+          {videoInfo.orientation ? ` • ${videoInfo.orientation}` : ''}
         </span>
       </div>
     );
@@ -249,6 +254,7 @@ export default function VideoUpload({
               <ul className="list-disc list-inside space-y-0.5 text-gray-500">
                 <li>30+ seconds, slow 360° pan from room center</li>
                 <li>Walls and floor visible throughout</li>
+                <li>Works in horizontal and vertical — keep the phone steady while panning 360°</li>
                 <li>Builds a textured room envelope (walls/floor) plus optional furniture detail meshes</li>
                 <li>Keep yourself out of frame — the scanner ignores people and focuses on the space</li>
                 <li>Not for single objects or outdoor equipment — use Object preset</li>

@@ -74,6 +74,14 @@ def test_calibrate_yaw_skips_short_clips() -> None:
     assert calibrate_yaw_undercount(yaw, n_frames=10, extraction_fps=1.5) == yaw
 
 
+def test_horizontal_fov_differs_by_orientation() -> None:
+    from services.meshy.camera_pose import _horizontal_fov_deg
+
+    assert _horizontal_fov_deg(False) > _horizontal_fov_deg(True)
+    assert _horizontal_fov_deg(False) == pytest.approx(70.0)
+    assert _horizontal_fov_deg(True) == pytest.approx(52.0)
+
+
 def test_uniform_yaw_for_tests_only() -> None:
     yaws = _uniform_yaw(5)
     assert len(yaws) == 5

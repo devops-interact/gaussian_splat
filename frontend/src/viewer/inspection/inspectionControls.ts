@@ -2,6 +2,7 @@ import type { AbstractMesh } from '@babylonjs/core';
 import type { BabylonViewerCtx } from '../types';
 import type { LightingState } from '../lighting/sceneLighting';
 import { applyLighting } from '../lighting/sceneLighting';
+import { ZONE_DETAIL_VISIBILITY } from '../load/loadMeshScene';
 
 export interface InspectionState {
   wireframe: boolean;
@@ -12,6 +13,7 @@ export interface InspectionState {
   showGrid: boolean;
   showAxes: boolean;
   showShell: boolean;
+  showZoneDetail: boolean;
 }
 
 export const DEFAULT_INSPECTION: InspectionState = {
@@ -27,6 +29,7 @@ export const DEFAULT_INSPECTION: InspectionState = {
   showGrid: true,
   showAxes: true,
   showShell: true,
+  showZoneDetail: true,
 };
 
 export function applyInspectionState(ctx: BabylonViewerCtx, state: InspectionState): void {
@@ -47,6 +50,15 @@ export function applyInspectionState(ctx: BabylonViewerCtx, state: InspectionSta
 
   const shell = scene.getMeshByName('room_shell');
   if (shell) shell.setEnabled(state.showShell);
+
+  for (const { geometryMeshes } of ctx.zoneMeshes) {
+    for (const mesh of geometryMeshes) {
+      mesh.setEnabled(state.showZoneDetail);
+      if (state.showZoneDetail) {
+        mesh.visibility = ZONE_DETAIL_VISIBILITY;
+      }
+    }
+  }
 
   const grid = scene.getMeshByName('viewerGrid');
   if (grid) grid.setEnabled(state.showGrid);

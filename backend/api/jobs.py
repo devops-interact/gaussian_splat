@@ -158,10 +158,14 @@ async def upload_video(
             response["warnings"] = upload_warnings
 
         if validation_result.video_info:
+            vi = validation_result.video_info
             response["video_info"] = {
-                "duration": validation_result.video_info.duration,
-                "resolution": f"{validation_result.video_info.width}x{validation_result.video_info.height}",
-                "fps": validation_result.video_info.fps,
+                "duration": vi.duration,
+                "resolution": f"{vi.width}x{vi.height}",
+                "fps": vi.fps,
+                "orientation": vi.orientation,
+                "aspect_ratio": vi.aspect_ratio,
+                "is_portrait": vi.is_portrait,
             }
 
         return response

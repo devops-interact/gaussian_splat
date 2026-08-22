@@ -56,6 +56,13 @@ export function InspectionPanel({
             <Toggle label="Floor grid" checked={state.showGrid} onChange={(v) => patch({ showGrid: v })} />
             <Toggle label="Axes" checked={state.showAxes} onChange={(v) => patch({ showAxes: v })} />
             <Toggle label="Room shell" checked={state.showShell} onChange={(v) => patch({ showShell: v })} />
+            {zoneMeshes.length > 0 && (
+              <Toggle
+                label="Furniture detail"
+                checked={state.showZoneDetail}
+                onChange={(v) => patch({ showZoneDetail: v })}
+              />
+            )}
           </Section>
 
           <Section title="Lighting">
