@@ -19,7 +19,7 @@ const OVERLAY_MESH_NAMES = new Set(['viewerGrid', 'collision_proxy']);
 export const MAX_VERTS_FOR_NEAREST_SNAP = 50_000;
 
 function isMeasurableMesh(mesh: AbstractMesh): boolean {
-  return mesh.isPickable && !OVERLAY_MESH_NAMES.has(mesh.name);
+  return mesh.isEnabled() && mesh.isPickable && !OVERLAY_MESH_NAMES.has(mesh.name);
 }
 
 const NEAREST_VERTEX_MAX_DIST_RATIO = 0.05;

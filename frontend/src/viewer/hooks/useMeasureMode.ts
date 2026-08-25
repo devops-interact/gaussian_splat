@@ -8,7 +8,6 @@ import type {
   LoadPhase,
   MeasurePhase,
   MeasurePoint,
-  ModelMetadata,
   ViewerMode,
 } from '../types';
 import { MeasurePreviewGizmo } from '../measure/MeasurePreviewGizmo';
@@ -26,14 +25,13 @@ export interface UseMeasureModeOptions {
   measurePoints: MeasurePoint[];
   calibration: CalibrationState | null;
   visibleMeasurePoints: MeasurePoint[];
-  metadataRef: RefObject<ModelMetadata | null>;
-  sceneScaleRef: RefObject<number>;
   worldUnitRef: RefObject<number>;
-  pickDebugEnabled: boolean;
   onPickHint: (hint: string) => void;
   onAddPoint: (point: Vector3) => void;
   onUndoPoint: () => void;
 }
+
+const CLICK_DRAG_MAX_PX_SQ = 5 * 5;
 
 export function useMeasureMode(opts: UseMeasureModeOptions): void {
   const {
@@ -46,10 +44,7 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
     measurePoints,
     calibration,
     visibleMeasurePoints,
-    metadataRef,
-    sceneScaleRef,
     worldUnitRef,
-    pickDebugEnabled,
     onPickHint,
     onAddPoint,
     onUndoPoint,
@@ -61,7 +56,6 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
   const overlayRef = useRef<MeasureOverlay | null>(null);
   const overlaySceneRef = useRef<unknown>(null);
 
-  // Create overlay once per utility layer scene; dispose only when scene tears down.
   useEffect(() => {
     const ctx = viewerRef.current;
     if (!ctx || loadPhase !== 'ready') return;
@@ -122,19 +116,27 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
     };
 
     const gizmo = new MeasurePreviewGizmo(utilityLayer, worldUnitRef.current ?? 0.024);
-    const CLICK_DRAG_MAX_PX_SQ = 5 * 5;
     const downPos = { x: 0, y: 0 };
+    let pointerDownOnCanvas = false;
+
     const onPointerDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      pointerDownOnCanvas = true;
       downPos.x = e.clientX;
       downPos.y = e.clientY;
     };
+
     const draggedSincePointerDown = (e: MouseEvent): boolean => {
+      if (!pointerDownOnCanvas) return false;
       const dx = e.clientX - downPos.x;
       const dy = e.clientY - downPos.y;
       return dx * dx + dy * dy > CLICK_DRAG_MAX_PX_SQ;
     };
 
-    const onClick = (e: MouseEvent) => {
+    const onPointerUp = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      if (!pointerDownOnCanvas) return;
+      pointerDownOnCanvas = false;
       if (draggedSincePointerDown(e)) return;
       try {
         const pick = pickWorldFromEvent(e);
@@ -146,7 +148,6 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
 
     const onContextMenu = (e: MouseEvent) => {
       e.preventDefault();
-      if (draggedSincePointerDown(e)) return;
       onUndoPoint();
     };
 
@@ -207,17 +208,20 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
 
     const onLeave = () => {
       pointerInside = false;
+      pointerDownOnCanvas = false;
       pendingMouse = null;
       gizmo.hide();
       onPickHint(MEASURE_PICK_HINT_IDLE);
     };
 
-    const onEnter = () => {
+    const onEnter = (e: MouseEvent) => {
       pointerInside = true;
+      downPos.x = e.clientX;
+      downPos.y = e.clientY;
     };
 
     canvas.addEventListener('pointerdown', onPointerDown);
-    canvas.addEventListener('click', onClick);
+    canvas.addEventListener('pointerup', onPointerUp);
     canvas.addEventListener('contextmenu', onContextMenu);
     canvas.addEventListener('mousemove', onMove);
     canvas.addEventListener('pointerleave', onLeave);
@@ -227,7 +231,7 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
     return () => {
       if (rafId) cancelAnimationFrame(rafId);
       canvas.removeEventListener('pointerdown', onPointerDown);
-      canvas.removeEventListener('click', onClick);
+      canvas.removeEventListener('pointerup', onPointerUp);
       canvas.removeEventListener('contextmenu', onContextMenu);
       canvas.removeEventListener('mousemove', onMove);
       canvas.removeEventListener('pointerleave', onLeave);
@@ -238,11 +242,8 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
   }, [
     mode,
     loadPhase,
-    pickDebugEnabled,
     viewerRef,
     canvasRef,
-    metadataRef,
-    sceneScaleRef,
     worldUnitRef,
     onPickHint,
     onAddPoint,

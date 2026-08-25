@@ -16,12 +16,14 @@ export interface ViewerToolbarProps {
   showHelp: boolean;
   webXrAvailable: boolean;
   webXrBusy: boolean;
+  hasWalkPath?: boolean;
   onModeChange: (mode: ViewerMode) => void;
   onSnapshot: () => void;
   onReset: () => void;
   onToggleAutoRotate: () => void;
   onEnterVR: () => void;
   onToggleHelp: () => void;
+  onWalkPathStart?: () => void;
   inspectionSlot?: React.ReactNode;
   compositionLabel?: string;
 }
@@ -32,12 +34,14 @@ export function ViewerToolbar({
   showHelp,
   webXrAvailable,
   webXrBusy,
+  hasWalkPath = false,
   onModeChange,
   onSnapshot,
   onReset,
   onToggleAutoRotate,
   onEnterVR,
   onToggleHelp,
+  onWalkPathStart,
   inspectionSlot,
   compositionLabel,
 }: ViewerToolbarProps) {
@@ -59,6 +63,13 @@ export function ViewerToolbar({
       <div className="absolute top-3 right-3 z-10 flex flex-col gap-1.5">
         <ToolbarButton icon={<MousePointer className="w-3.5 h-3.5" />} label="Orbit" active={mode === 'orbit'} onClick={() => onModeChange('orbit')} />
         <ToolbarButton icon={<Footprints className="w-3.5 h-3.5" />} label="Walk" active={mode === 'walkthrough'} onClick={() => onModeChange('walkthrough')} />
+        {hasWalkPath && onWalkPathStart && (
+          <ToolbarButton
+            icon={<Footprints className="w-3.5 h-3.5" />}
+            label="Walk path"
+            onClick={onWalkPathStart}
+          />
+        )}
         <ToolbarButton icon={<Ruler className="w-3.5 h-3.5" />} label="Measure" active={mode === 'measure'} onClick={() => onModeChange('measure')} />
         {inspectionSlot}
         <div className="border-t border-white/[0.18] my-1" />
@@ -88,8 +99,8 @@ export function ViewerToolbar({
               <button type="button" onClick={onToggleHelp} className="text-white/40 hover:text-white"><X className="w-3 h-3" /></button>
             </div>
             <HelpItem icon={<MousePointer className="w-3 h-3" />} title="Orbit">Left-drag: orbit. Right-drag / Ctrl+left-drag: pan. Scroll: zoom.</HelpItem>
-            <HelpItem icon={<Footprints className="w-3 h-3" />} title="Walk-Through">WASD move with collision proxy. Mouse look.</HelpItem>
-            <HelpItem icon={<Ruler className="w-3 h-3" />} title="Measure">Calibrate with two known points, then measure on mesh surfaces.</HelpItem>
+            <HelpItem icon={<Footprints className="w-3 h-3" />} title="Walk-Through">WASD move with collision proxy. Mouse look.{hasWalkPath ? ' Walk path snaps camera to recorded tour positions.' : ''}</HelpItem>
+            <HelpItem icon={<Ruler className="w-3 h-3" />} title="Measure">Calibrate with two known points, then measure on mesh surfaces. Right-drag pan and scroll zoom while measuring.</HelpItem>
             <HelpItem icon={<Glasses className="w-3 h-3" />} title="Inspect">Wireframe, textures, PBR, exposure, grid, zones.</HelpItem>
             <HelpItem icon={<Glasses className="w-3 h-3" />} title="WebXR">Enter VR when a headset is available.</HelpItem>
           </div>
@@ -121,13 +132,15 @@ function HelpItem({ icon, title, children }: { icon: React.ReactNode; title: str
   );
 }
 
-export function ViewerModeHint({ mode }: { mode: ViewerMode }) {
+export function ViewerModeHint({ mode, hasWalkPath = false }: { mode: ViewerMode; hasWalkPath?: boolean }) {
   return (
     <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2 pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity duration-500 z-10">
       <div className="glass-panel text-white/50 text-[10px] px-3 py-1.5">
         {mode === 'orbit' && 'Left: Orbit  |  Shift+Drag / Right: Pan  |  Scroll: Zoom'}
-        {mode === 'walkthrough' && 'WASD: Move  |  Mouse: Look  |  Space/Shift: Up/Down'}
-        {mode === 'measure' && 'Click mesh surface · Esc/right-click undo'}
+        {mode === 'walkthrough' && (hasWalkPath
+          ? 'WASD: Move  |  Mouse: Look  |  Walk path start applied'
+          : 'WASD: Move  |  Mouse: Look  |  Space/Shift: Up/Down')}
+        {mode === 'measure' && 'Left-click: Place point  |  Right-drag: Pan  |  Scroll: Zoom  |  Esc/Right-click: Undo'}
       </div>
     </div>
   );

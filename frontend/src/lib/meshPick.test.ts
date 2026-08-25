@@ -9,6 +9,7 @@ import * as meshPick from './meshPick';
 import {
   MAX_VERTS_FOR_NEAREST_SNAP,
   maxMeshPickDistance,
+  pickMeshMeasure,
   pickMeshSurface,
   snapToNearestVertex,
   snapToTriangleCorner,
@@ -108,6 +109,56 @@ describe('pickMeshSurface on parented mesh', () => {
     expect(result.hit).toBe(true);
     expect(result.mesh?.name).toBe('zone_mesh');
     expect(result.point).not.toBeNull();
+
+    scene.dispose();
+    engine.dispose();
+  });
+
+  it('returns null for disabled mesh', () => {
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+    const mesh = MeshBuilder.CreateBox('zone_mesh', { size: 2 }, scene);
+    mesh.isPickable = true;
+    mesh.setEnabled(false);
+
+    const camera = new UniversalCamera('cam', new Vector3(0, 0, -6), scene);
+    scene.activeCamera = camera;
+    scene.render();
+
+    const w = engine.getRenderWidth() || 512;
+    const h = engine.getRenderHeight() || 512;
+    const result = pickMeshSurface(scene, w / 2, h / 2);
+
+    expect(result.hit).toBe(false);
+
+    scene.dispose();
+    engine.dispose();
+  });
+});
+
+describe('pickMeshMeasure on room shell', () => {
+  it('hits shell mesh parented under room_root', () => {
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+    const roomRoot = new TransformNode('room_root', scene);
+    const shell = MeshBuilder.CreateBox('room_shell', { size: 2 }, scene);
+    shell.parent = roomRoot;
+    shell.isPickable = true;
+    roomRoot.computeWorldMatrix(true);
+    shell.computeWorldMatrix(true);
+    shell.getBoundingInfo().update(shell.getWorldMatrix());
+
+    const camera = new UniversalCamera('cam', new Vector3(0, 0, -6), scene);
+    camera.setTarget(Vector3.Zero());
+    scene.activeCamera = camera;
+    scene.render();
+
+    const w = engine.getRenderWidth() || 512;
+    const h = engine.getRenderHeight() || 512;
+    const result = pickMeshMeasure(scene, w / 2, h / 2);
+
+    expect(result).not.toBeNull();
+    expect(result!.mesh?.name).toBe('room_shell');
 
     scene.dispose();
     engine.dispose();

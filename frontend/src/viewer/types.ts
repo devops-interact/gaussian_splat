@@ -1,4 +1,4 @@
-import type { AbstractMesh, ArcRotateCamera, Engine, Scene, UniversalCamera } from '@babylonjs/core';
+import type { AbstractMesh, ArcRotateCamera, Engine, Scene, UniversalCamera, Vector3 } from '@babylonjs/core';
 import type { UtilityLayerRenderer } from '@babylonjs/core/Rendering/utilityLayerRenderer';
 import type { FramingBehavior } from '@babylonjs/core/Behaviors/Cameras/framingBehavior';
 import type { ModelMetadataResponse, SceneManifestResponse } from '@/types/job';
@@ -50,6 +50,12 @@ export interface CalibrationState {
   scaleFactor: number;
 }
 
+export interface RoomBounds {
+  min: Vector3;
+  max: Vector3;
+  diagonal: number;
+}
+
 export interface BabylonViewerCtx {
   engine: Engine;
   scene: Scene;
@@ -57,10 +63,13 @@ export interface BabylonViewerCtx {
   walkCamera: UniversalCamera;
   rootMesh: AbstractMesh | null;
   geometryMeshes: AbstractMesh[];
+  shellMeshes: AbstractMesh[];
   zoneMeshes: import('./load/loadMeshScene').ZoneMeshHandle[];
   collisionMesh: AbstractMesh | null;
   utilityLayer: UtilityLayerRenderer;
   framingBehavior: FramingBehavior;
   floorY: number;
   effectiveDiagonal: number;
+  roomBounds: RoomBounds;
+  walkPath: Vector3[] | null;
 }

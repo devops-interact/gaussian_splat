@@ -10,7 +10,6 @@ import {
   applyInitialCameraPose,
   attachFramingBehavior,
   bboxCentroid,
-  bboxFromMesh,
   defaultBboxCameraPosition,
   frameCameraOnMesh,
 } from '../camera/framing';
@@ -21,7 +20,8 @@ import {
 } from '../camera/setupCameras';
 import { parseViewerSceneScale, modelFetchAbortSignal } from '../constants';
 import {
-  createCollisionProxy,
+  computeRoomBounds,
+  createCollisionProxyFromBounds,
   fetchModelBuffer,
   glbModelUrl,
   importComposedScene,
@@ -32,6 +32,7 @@ import {
 import { addSceneOverlays, alignGridToFloor } from '../overlays/sceneOverlays';
 import { setupSceneLighting } from '../lighting/sceneLighting';
 import { showInspectorIfRequested, resetInspectorFlag } from '../dev/inspector';
+import { parseWalkPath } from '../walk/walkPath';
 import type { BabylonViewerCtx, LoadPhase, ModelMetadata, StoredCameraPose } from '../types';
 
 export interface UseMeshViewerOptions {
@@ -138,12 +139,19 @@ export function useMeshViewer({
       walkCamera,
       rootMesh: null,
       geometryMeshes: [],
+      shellMeshes: [],
       zoneMeshes: [],
       collisionMesh: null,
       utilityLayer,
       framingBehavior,
       floorY: 0,
       effectiveDiagonal: 2,
+      roomBounds: {
+        min: new Vector3(-1, -1, -1),
+        max: new Vector3(1, 1, 1),
+        diagonal: 2,
+      },
+      walkPath: null,
     };
 
     (async () => {
@@ -204,12 +212,14 @@ export function useMeshViewer({
 
         let rootMesh;
         let geometryMeshes;
+        let shellMeshes: import('@babylonjs/core').AbstractMesh[] = [];
         let zoneMeshes: import('../load/loadMeshScene').ZoneMeshHandle[] = [];
 
         if (isComposed && sceneManifest) {
           const composed = await importComposedScene(scene, sceneManifest, apiBase);
           rootMesh = composed.rootMesh;
           geometryMeshes = composed.geometryMeshes;
+          shellMeshes = composed.shellMeshes;
           zoneMeshes = composed.zoneMeshes;
           if (composed.emptyZoneIds.length > 0) {
             onZoneLoadWarningRef.current?.(
@@ -227,20 +237,29 @@ export function useMeshViewer({
           const imported = await importGlbBuffer(scene, buffer!);
           rootMesh = imported.rootMesh;
           geometryMeshes = imported.geometryMeshes;
+          shellMeshes = [];
         }
         if (disposed) return;
 
         if (sceneScale !== 1) rootMesh.scaling.setAll(sceneScale);
         rootMesh.computeWorldMatrix(true);
 
-        const boundsMesh =
-          geometryMeshes.length > 0 ? geometryMeshes[0] : rootMesh;
-        const collisionMesh = createCollisionProxy(scene, boundsMesh);
+        const boundsMeshes = [...geometryMeshes, ...shellMeshes];
+        const roomBounds = computeRoomBounds(boundsMeshes.length > 0 ? boundsMeshes : [rootMesh]);
+        const collisionMesh = createCollisionProxyFromBounds(scene, roomBounds);
 
-        const meshBbox = bboxFromMesh(boundsMesh);
-        const effectiveDiagonal = meshBbox.diagonal;
+        const meshBbox = {
+          min: [roomBounds.min.x, roomBounds.min.y, roomBounds.min.z] as [number, number, number],
+          max: [roomBounds.max.x, roomBounds.max.y, roomBounds.max.z] as [number, number, number],
+          diagonal: roomBounds.diagonal,
+        };
+        const effectiveDiagonal = roomBounds.diagonal;
         const floorY = meshBbox.min[1];
         alignGridToFloor(scene, floorY);
+
+        const walkPath = isComposed && sceneManifest
+          ? parseWalkPath(sceneManifest.walk_path, sceneScale)
+          : null;
 
         const ellipsoidH = Math.max(0.15, effectiveDiagonal * 0.04);
         walkCamera.ellipsoid = new Vector3(ellipsoidH * 0.28, ellipsoidH, ellipsoidH * 0.28);
@@ -274,12 +293,15 @@ export function useMeshViewer({
           walkCamera,
           rootMesh,
           geometryMeshes,
+          shellMeshes,
           zoneMeshes,
           collisionMesh,
           utilityLayer,
           framingBehavior,
           floorY,
           effectiveDiagonal,
+          roomBounds,
+          walkPath: walkPath && walkPath.length > 0 ? walkPath : null,
         };
         setZoneMeshes(zoneMeshes);
 

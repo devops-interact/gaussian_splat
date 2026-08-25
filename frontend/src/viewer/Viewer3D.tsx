@@ -1,31 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Tools, Vector3 } from '@babylonjs/core';
+import { Tools } from '@babylonjs/core';
 import { Download } from 'lucide-react';
-import type { Viewer3DProps, ModelMetadata, ViewerMode, MeasurePhase, CalibrationState, MeasurePoint } from './types';
+import type { Viewer3DProps, ModelMetadata } from './types';
 import { useMeshViewer } from './hooks/useMeshViewer';
-import { useCameraMode, useResetView } from './hooks/useCameraMode';
-import { useWalkthroughMode } from './hooks/useWalkthroughMode';
-import { useMeasureMode } from './hooks/useMeasureMode';
-import { useMeasureActions } from './hooks/useMeasureActions';
-import { MEASURE_PICK_HINT_IDLE } from './measure/colors';
+import { useViewerController } from './controller/useViewerController';
 import { isWebXRAvailable, tryCreateWebXRExperience, type WebXRHandle } from './xr/webXRExperience';
 import { downloadModel } from '@/api/jobs';
 import { MeasurePanel } from './ui/MeasurePanel';
 import { ViewerToolbar, ViewerModeHint } from './ui/ViewerToolbar';
 import { InspectionPanel } from './ui/InspectionPanel';
-import { applyInspectionState, DEFAULT_INSPECTION, type InspectionState } from './inspection/inspectionControls';
-import { loadViewerSettings, saveViewerSettings } from '@/lib/viewerSettings';
 
 export type { ModelMetadata };
-
-function buildInitialInspection(): InspectionState {
-  const saved = loadViewerSettings();
-  return {
-    ...DEFAULT_INSPECTION,
-    lighting: saved.lighting,
-    exposure: saved.exposure,
-  };
-}
 
 export default function Viewer3D({
   modelUrl,
@@ -36,27 +21,12 @@ export default function Viewer3D({
   onZoneLoadWarning,
 }: Viewer3DProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [mode, setMode] = useState<ViewerMode>('orbit');
   const [showHelp, setShowHelp] = useState(false);
   const [showInspection, setShowInspection] = useState(false);
-  const [inspection, setInspection] = useState<InspectionState>(buildInitialInspection);
-  const [visibleZones, setVisibleZones] = useState<Set<number>>(() => new Set());
-  const [autoRotate, setAutoRotate] = useState(false);
   const [webXrAvailable, setWebXrAvailable] = useState(false);
   const [webXrBusy, setWebXrBusy] = useState(false);
-  const xrRef = useRef<WebXRHandle | null>(null);
-  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const [measurePhase, setMeasurePhase] = useState<MeasurePhase>('calibrate');
-  const [calibration, setCalibration] = useState<CalibrationState | null>(null);
-  const [calibPoints, setCalibPoints] = useState<MeasurePoint[]>([]);
-  const [meterInput, setMeterInput] = useState('1.0');
-  const [measurePoints, setMeasurePoints] = useState<MeasurePoint[]>([]);
-  const [measuredDistance, setMeasuredDistance] = useState<number | null>(null);
-  const [measurePickHint, setMeasurePickHint] = useState(MEASURE_PICK_HINT_IDLE);
   const [downloadBusy, setDownloadBusy] = useState(false);
-
-  const visibleMeasurePoints = measurePhase === 'calibrate' ? calibPoints : measurePoints;
+  const xrRef = useRef<WebXRHandle | null>(null);
 
   const isRoom = sceneManifest?.composition_mode === 'zone_mesh'
     || sceneManifest?.composition_mode === 'room_shell'
@@ -90,147 +60,22 @@ export default function Viewer3D({
     onZoneLoadWarning,
   });
 
-  const isLoading = loadPhase !== 'ready' && loadPhase !== 'error' && loadPhase !== 'idle';
-
-  useEffect(() => {
-    if (zoneMeshes.length > 0) {
-      setVisibleZones(new Set(zoneMeshes.map((z) => z.zoneId)));
-    }
-  }, [zoneMeshes]);
-
-  useEffect(() => {
-    const hasZones = (sceneManifest?.zones?.length ?? 0) > 0;
-    if (sceneManifest?.shell_url) {
-      setInspection((prev) => ({
-        ...prev,
-        showShell: !hasZones,
-        showZoneDetail: true,
-      }));
-    }
-  }, [sceneManifest?.shell_url, sceneManifest?.zones?.length]);
-
-  useEffect(() => {
-    const ctx = viewerRef.current;
-    if (ctx && loadPhase === 'ready') {
-      applyInspectionState(ctx, inspection);
-    }
-  }, [inspection, loadPhase, viewerRef]);
-
-  const handleInspectionChange = useCallback((next: InspectionState) => {
-    setInspection(next);
-    if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
-    persistTimerRef.current = setTimeout(() => {
-      const saved = loadViewerSettings();
-      saveViewerSettings({ ...saved, lighting: next.lighting, exposure: next.exposure });
-    }, 400);
-  }, []);
-
-  const handleZoneToggle = useCallback((zoneId: number) => {
-    setVisibleZones((prev) => {
-      const next = new Set(prev);
-      if (next.has(zoneId)) next.delete(zoneId);
-      else next.add(zoneId);
-      const ctx = viewerRef.current;
-      if (ctx) {
-        const zm = ctx.zoneMeshes.find((z) => z.zoneId === zoneId);
-        if (zm) {
-          const visible = next.has(zoneId);
-          zm.rootMesh.setEnabled(visible);
-          for (const gm of zm.geometryMeshes) gm.setEnabled(visible);
-        }
-      }
-      return next;
-    });
-  }, [viewerRef]);
-
-  useCameraMode(viewerRef, canvasRef, mode, loadPhase, autoRotate);
-  useWalkthroughMode(viewerRef, canvasRef, mode, loadPhase);
-
-  const resetView = useResetView(viewerRef, canvasRef, initialPoseRef);
-
-  const {
-    handleAddMeasurePoint: addPointRaw,
-    handleUndoLastPoint,
-    handleConfirmCalibration,
-    handleResetCalibration,
-    handleClearMeasure,
-  } = useMeasureActions(
-    measurePhase,
-    calibPoints,
-    meterInput,
-    setCalibPoints,
-    setMeasurePoints,
-    setCalibration,
-    setMeasurePhase,
-    setMeasuredDistance,
-    setMeterInput,
-  );
-
-  const handleAddMeasurePoint = useCallback(
-    (point: Vector3) => {
-      if (measurePhase === 'measure') {
-        setMeasurePoints((prev) => {
-          const next = prev.length >= 2 ? [{ position: point.clone() }] : [...prev, { position: point.clone() }];
-          if (next.length === 2 && calibration) {
-            const rawDist = Vector3.Distance(next[0].position, next[1].position);
-            setMeasuredDistance(rawDist * calibration.scaleFactor);
-          } else {
-            setMeasuredDistance(null);
-          }
-          return next;
-        });
-      } else {
-        addPointRaw(point);
-      }
-    },
-    [measurePhase, calibration, addPointRaw],
-  );
-
-  useMeasureMode({
+  const controller = useViewerController({
     viewerRef,
     canvasRef,
-    mode,
+    initialPoseRef,
     loadPhase,
-    measurePhase,
-    calibPoints,
-    measurePoints,
-    calibration,
-    visibleMeasurePoints,
-    metadataRef,
+    zoneMeshes,
+    sceneManifest,
     sceneScaleRef,
     worldUnitRef,
-    pickDebugEnabled: false,
-    onPickHint: setMeasurePickHint,
-    onAddPoint: handleAddMeasurePoint,
-    onUndoPoint: handleUndoLastPoint,
   });
+
+  const isLoading = loadPhase !== 'ready' && loadPhase !== 'error' && loadPhase !== 'idle';
 
   useEffect(() => {
     void isWebXRAvailable().then(setWebXrAvailable);
   }, []);
-
-  useEffect(() => {
-    if (mode !== 'measure') setMeasurePickHint(MEASURE_PICK_HINT_IDLE);
-  }, [mode]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    try {
-      if (mode === 'measure') canvas.style.cursor = 'crosshair';
-      else canvas.style.cursor = 'grab';
-    } catch { /* ignore */ }
-  }, [mode, loadPhase]);
-
-  useEffect(() => {
-    if (mode !== 'measure') handleResetCalibration();
-  }, [mode, handleResetCalibration]);
-
-  const handleReset = useCallback(() => {
-    setMode('orbit');
-    handleResetCalibration();
-    resetView();
-  }, [handleResetCalibration, resetView]);
 
   const handleSnapshot = useCallback(() => {
     const glCanvas = canvasRef.current;
@@ -254,7 +99,9 @@ export default function Viewer3D({
         lines.push(`Faces: ${meta.faceCount.toLocaleString()}`);
         lines.push(`Size: ${(meta.fileSize / 1e6).toFixed(1)} MB`);
       }
-      if (measuredDistance !== null) lines.push(`Measurement: ${measuredDistance.toFixed(3)} m`);
+      if (controller.measure.measuredDistance !== null) {
+        lines.push(`Measurement: ${controller.measure.measuredDistance.toFixed(3)} m`);
+      }
       const a = document.createElement('a');
       a.href = offscreen.toDataURL('image/png');
       a.download = `room-mesh-snapshot-${Date.now()}.png`;
@@ -264,7 +111,7 @@ export default function Viewer3D({
     } catch (err) {
       console.warn('Snapshot failed:', err);
     }
-  }, [measuredDistance, metadataRef, viewerRef]);
+  }, [controller.measure.measuredDistance, metadataRef, viewerRef]);
 
   const handleDownloadGlb = useCallback(async () => {
     if (!jobId && !modelUrl) return;
@@ -324,27 +171,29 @@ export default function Viewer3D({
       {loadPhase === 'ready' && !error && (
         <>
           <ViewerToolbar
-            mode={mode}
-            autoRotate={autoRotate}
+            mode={controller.mode}
+            autoRotate={controller.autoRotate}
             showHelp={showHelp}
             webXrAvailable={webXrAvailable}
             webXrBusy={webXrBusy}
-            onModeChange={setMode}
+            hasWalkPath={controller.hasWalkPath}
+            onModeChange={controller.setMode}
             onSnapshot={handleSnapshot}
-            onReset={handleReset}
-            onToggleAutoRotate={() => setAutoRotate((v) => !v)}
+            onReset={controller.handleReset}
+            onToggleAutoRotate={() => controller.setAutoRotate((v) => !v)}
             onEnterVR={() => void handleEnterVR()}
             onToggleHelp={() => setShowHelp((v) => !v)}
+            onWalkPathStart={controller.handleWalkPathStart}
             compositionLabel={compositionLabel}
             inspectionSlot={
               <InspectionPanel
-                state={inspection}
-                onChange={handleInspectionChange}
+                state={controller.inspection}
+                onChange={controller.handleInspectionChange}
                 open={showInspection}
                 onToggle={() => setShowInspection((v) => !v)}
                 zoneMeshes={zoneMeshes}
-                visibleZones={visibleZones}
-                onZoneToggle={handleZoneToggle}
+                visibleZones={controller.visibleZones}
+                onZoneToggle={controller.handleZoneToggle}
                 compositionLabel={compositionLabel}
               />
             }
@@ -361,24 +210,24 @@ export default function Viewer3D({
             </button>
           </div>
 
-          {mode === 'measure' && (
+          {controller.mode === 'measure' && (
             <MeasurePanel
-              measurePhase={measurePhase}
-              calibPoints={calibPoints}
-              measurePoints={measurePoints}
-              measuredDistance={measuredDistance}
-              meterInput={meterInput}
-              setMeterInput={setMeterInput}
-              calibration={calibration}
-              measurePickHint={measurePickHint}
-              onUndo={handleUndoLastPoint}
-              onConfirmCalibration={handleConfirmCalibration}
-              onClearMeasure={handleClearMeasure}
-              onResetCalibration={handleResetCalibration}
+              measurePhase={controller.measure.measurePhase}
+              calibPoints={controller.measure.calibPoints}
+              measurePoints={controller.measure.measurePoints}
+              measuredDistance={controller.measure.measuredDistance}
+              meterInput={controller.measure.meterInput}
+              setMeterInput={controller.measure.setMeterInput}
+              calibration={controller.measure.calibration}
+              measurePickHint={controller.measure.measurePickHint}
+              onUndo={controller.measure.handleUndoLastPoint}
+              onConfirmCalibration={controller.measure.handleConfirmCalibration}
+              onClearMeasure={controller.measure.handleClearMeasure}
+              onResetCalibration={controller.measure.handleResetCalibration}
             />
           )}
 
-          <ViewerModeHint mode={mode} />
+          <ViewerModeHint mode={controller.mode} hasWalkPath={controller.hasWalkPath} />
         </>
       )}
     </div>

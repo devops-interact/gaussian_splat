@@ -73,11 +73,38 @@ function hierarchyBounds(source: AbstractMesh): { min: Vector3; max: Vector3 } {
   return source.getHierarchyBoundingVectors(true);
 }
 
-/**
- * Create a simplified collision hull for walkthrough mode (uses full hierarchy bounds).
- */
-export function createCollisionProxy(scene: Scene, source: AbstractMesh): AbstractMesh {
-  const bounds = hierarchyBounds(source);
+export function computeRoomBounds(meshes: AbstractMesh[]): import('../types').RoomBounds {
+  if (meshes.length === 0) {
+    return {
+      min: new Vector3(-1, -1, -1),
+      max: new Vector3(1, 1, 1),
+      diagonal: 2,
+    };
+  }
+
+  let min = new Vector3(Number.MAX_VALUE, Number.MAX_VALUE, Number.MAX_VALUE);
+  let max = new Vector3(-Number.MAX_VALUE, -Number.MAX_VALUE, -Number.MAX_VALUE);
+
+  for (const mesh of meshes) {
+    mesh.computeWorldMatrix(true);
+    const bounds = mesh.getHierarchyBoundingVectors(true);
+    min = Vector3.Minimize(min, bounds.min);
+    max = Vector3.Maximize(max, bounds.max);
+  }
+
+  const size = max.subtract(min);
+  return {
+    min: min.clone(),
+    max: max.clone(),
+    diagonal: Math.max(size.length(), 0.1),
+  };
+}
+
+/** Create a collision hull from explicit world bounds (full room envelope). */
+export function createCollisionProxyFromBounds(
+  scene: Scene,
+  bounds: { min: Vector3; max: Vector3 },
+): AbstractMesh {
   const size = bounds.max.subtract(bounds.min);
   const center = bounds.min.add(size.scale(0.5));
 
@@ -95,6 +122,14 @@ export function createCollisionProxy(scene: Scene, source: AbstractMesh): Abstra
   box.isPickable = false;
   box.checkCollisions = true;
   return box;
+}
+
+/**
+ * Create a simplified collision hull for walkthrough mode (uses full hierarchy bounds).
+ */
+export function createCollisionProxy(scene: Scene, source: AbstractMesh): AbstractMesh {
+  const bounds = hierarchyBounds(source);
+  return createCollisionProxyFromBounds(scene, bounds);
 }
 
 /** Backend sends row-major 4x4; Babylon Matrix.FromArray expects column-major. */
@@ -199,6 +234,7 @@ export async function importComposedScene(
 ): Promise<{
   rootMesh: AbstractMesh;
   geometryMeshes: AbstractMesh[];
+  shellMeshes: AbstractMesh[];
   zoneMeshes: ZoneMeshHandle[];
   emptyZoneIds: number[];
 }> {
@@ -276,6 +312,7 @@ export async function importComposedScene(
   return {
     rootMesh: roomRoot as unknown as AbstractMesh,
     geometryMeshes,
+    shellMeshes: shellGeometry,
     zoneMeshes,
     emptyZoneIds,
   };

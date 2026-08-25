@@ -1,10 +1,27 @@
 import { Vector3 } from '@babylonjs/core';
+import type { ArcRotateCameraPointersInput } from '@babylonjs/core/Cameras/Inputs/arcRotateCameraPointersInput';
 import { useEffect, useRef } from 'react';
 import type { RefObject } from 'react';
+import type { SceneManifestResponse } from '@/types/job';
 import type { BabylonViewerCtx, LoadPhase, StoredCameraPose, ViewerMode } from '../types';
 import { restoreCameraPose } from '../camera/poseStorage';
 import { resetViewWithFraming } from '../camera/framing';
 import { AUTO_ROTATE_ALPHA_SPEED } from '../constants';
+import { getWalkStartPoseFromRaw } from '../walk/walkPath';
+
+function configureMeasureOrbitInputs(orbitCamera: import('@babylonjs/core').ArcRotateCamera): void {
+  const pointers = orbitCamera.inputs.attached.pointers as ArcRotateCameraPointersInput | null;
+  if (pointers) {
+    pointers.buttons = [2];
+  }
+}
+
+function restoreOrbitInputs(orbitCamera: import('@babylonjs/core').ArcRotateCamera): void {
+  const pointers = orbitCamera.inputs.attached.pointers as ArcRotateCameraPointersInput | null;
+  if (pointers) {
+    pointers.buttons = [0, 1, 2];
+  }
+}
 
 export function useCameraMode(
   viewerRef: RefObject<BabylonViewerCtx | null>,
@@ -23,10 +40,12 @@ export function useCameraMode(
     const { scene, orbitCamera, walkCamera } = ctx;
 
     if (mode === 'orbit') {
+      restoreOrbitInputs(orbitCamera);
       scene.activeCamera = orbitCamera;
       orbitCamera.attachControl(canvas, false);
       walkCamera.detachControl();
     } else if (mode === 'walkthrough') {
+      restoreOrbitInputs(orbitCamera);
       walkCamera.position.copyFrom(orbitCamera.position);
       const tgt = orbitCamera.getTarget();
       walkCamera.setTarget(tgt);
@@ -38,9 +57,9 @@ export function useCameraMode(
       orbitCamera.detachControl();
       walkCamera.attachControl(canvas, false);
     } else {
-      // measure — orbit stays active camera but controls detached for picking
+      configureMeasureOrbitInputs(orbitCamera);
       scene.activeCamera = orbitCamera;
-      orbitCamera.detachControl();
+      orbitCamera.attachControl(canvas, false);
       walkCamera.detachControl();
     }
   }, [mode, loadPhase, viewerRef, canvasRef]);
@@ -93,8 +112,25 @@ export function useResetView(
     walkCamera.position.copyFrom(orbitCamera.position);
     walkCamera.setTarget(orbitCamera.getTarget());
     walkCamera.upVector.copyFrom(orbitCamera.upVector);
+    restoreOrbitInputs(orbitCamera);
     scene.activeCamera = orbitCamera;
     orbitCamera.attachControl(canvas, false);
     walkCamera.detachControl();
   };
+}
+
+/** Place walk camera at walk_path start when entering walkthrough in room scenes. */
+export function applyWalkPathStart(
+  ctx: BabylonViewerCtx,
+  sceneManifest: SceneManifestResponse | null,
+  sceneScale: number,
+): boolean {
+  if (!sceneManifest?.walk_path?.length || !ctx.walkPath?.length) return false;
+
+  const pose = getWalkStartPoseFromRaw(sceneManifest.walk_path, ctx.roomBounds, sceneScale);
+  if (!pose) return false;
+
+  ctx.walkCamera.position.copyFrom(pose.position);
+  ctx.walkCamera.setTarget(pose.target);
+  return true;
 }
