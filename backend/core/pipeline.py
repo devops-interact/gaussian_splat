@@ -10,7 +10,7 @@ from core.config import get_settings, QUALITY_PRESETS, QualityPreset, MeshyPrese
 from core.models import Job, JobStatus, ModelMetadata, KeyframeInfo
 from jobs.job_manager import get_job_manager
 from services.video.extract_frames import extract_frames
-from services.video.orientation import probe_video_orientation
+from services.video.orientation import resolve_pipeline_orientation
 from services.meshy.client import MeshyClient, MeshyError
 from services.meshy.camera_pose import estimate_yaw_by_index
 from services.meshy.keyframe_selector import (
@@ -204,13 +204,25 @@ async def process_single_object_job(job: Job) -> Job:
     video_path = settings.UPLOADS_DIR / job.video_filename
     frames_dir = settings.FRAMES_DIR / job.job_id
 
-    orient = probe_video_orientation(video_path)
-    rotation_deg = orient.rotation_deg if orient else 0
+    orient = resolve_pipeline_orientation(video_path, job.validation)
+    rotation_deg = orient.rotation_deg
+    is_portrait = orient.is_portrait
+    logger.info(
+        "Video orientation for job %s: %s %s (rotation=%d°, display=%dx%d)",
+        job.job_id,
+        orient.label,
+        orient.aspect_label,
+        orient.rotation_deg,
+        orient.display_width,
+        orient.display_height,
+    )
+
     await extract_frames(
         video_path,
         frames_dir,
         preset_config.fps,
         rotation_deg=rotation_deg,
+        expected_portrait=is_portrait,
     )
 
     job.status = JobStatus.SELECTING_KEYFRAMES
@@ -222,7 +234,7 @@ async def process_single_object_job(job: Job) -> Job:
         raise ValueError(f"No frames found in {frames_dir}")
 
     yaw_by_index, _ = estimate_yaw_by_index(
-        frame_paths, fps=preset_config.fps, allow_uniform_fallback=True,
+        frame_paths, fps=preset_config.fps, allow_uniform_fallback=True, is_portrait=is_portrait,
     )
     sharpness_by_index = {i: laplacian_sharpness(p) for i, p in enumerate(frame_paths)}
     person_by_index = None
@@ -231,6 +243,7 @@ async def process_single_object_job(job: Job) -> Job:
             frame_paths,
             hit_threshold=preset_config.person_hog_hit_threshold,
             min_confidence=preset_config.person_min_confidence,
+            is_portrait=is_portrait,
         )
     keyframes = select_keyframes(
         frame_paths,

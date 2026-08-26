@@ -33,6 +33,7 @@ export class MeasurePreviewGizmo {
   private readonly ghost: Mesh;
   private readonly hLine: LinesMesh;
   private readonly vLine: LinesMesh;
+  private readonly triLine: LinesMesh;
   private readonly dash: LinesMesh;
   private readonly snappedMat;
   private readonly unsnappedMat;
@@ -40,6 +41,7 @@ export class MeasurePreviewGizmo {
   private readonly effectiveDiagonal: number;
   private readonly linePts: [Vector3, Vector3] = [new Vector3(), new Vector3()];
   private readonly dashPts: [Vector3, Vector3] = [new Vector3(), new Vector3()];
+  private readonly triPts: Vector3[] = [new Vector3(), new Vector3(), new Vector3(), new Vector3()];
   private disposed = false;
 
   constructor(utilityLayer: UtilityLayerRenderer, opts: MeasurePreviewGizmoOptions) {
@@ -60,6 +62,13 @@ export class MeasurePreviewGizmo {
 
     this.hLine = MeshBuilder.CreateLines('measureH', { points: [new Vector3(), new Vector3()], updatable: true }, scene);
     this.vLine = MeshBuilder.CreateLines('measureV', { points: [new Vector3(), new Vector3()], updatable: true }, scene);
+    this.triLine = MeshBuilder.CreateLines(
+      'measureTri',
+      { points: [new Vector3(), new Vector3(), new Vector3(), new Vector3()], updatable: true },
+      scene,
+    );
+    this.triLine.color = MEASURE_PREVIEW_YELLOW_LINES;
+    this.triLine.alpha = 0.85;
     this.dash = MeshBuilder.CreateDashedLines(
       'measureDash',
       { points: [new Vector3(), new Vector3(0, worldUnit, 0)], dashSize: worldUnit * 1.9, gapSize: worldUnit * 1.25, updatable: true },
@@ -68,7 +77,7 @@ export class MeasurePreviewGizmo {
     this.dash.color = MEASURE_PREVIEW_CONNECTOR;
     this.dash.alpha = 0.55;
 
-    for (const mesh of [this.ring, this.dot, this.ghost, this.hLine, this.vLine, this.dash]) {
+    for (const mesh of [this.ring, this.dot, this.ghost, this.hLine, this.vLine, this.triLine, this.dash]) {
       mesh.isPickable = false;
       mesh.renderingGroupId = OVERLAY_RENDER_GROUP;
       mesh.setEnabled(false);
@@ -155,6 +164,18 @@ export class MeasurePreviewGizmo {
     this.vLine.alpha = isSnapped ? 0.6 : 0.3;
     this.vLine.setEnabled(true);
 
+    if (pick.triangleVerts?.length === 3) {
+      this.triPts[0].copyFrom(pick.triangleVerts[0]);
+      this.triPts[1].copyFrom(pick.triangleVerts[1]);
+      this.triPts[2].copyFrom(pick.triangleVerts[2]);
+      this.triPts[3].copyFrom(pick.triangleVerts[0]);
+      MeshBuilder.CreateLines('measureTri', { points: this.triPts, instance: this.triLine });
+      this.triLine.color = lineColor;
+      this.triLine.setEnabled(true);
+    } else {
+      this.triLine.setEnabled(false);
+    }
+
     this.ghost.position.copyFrom(position);
     this.ghost.setEnabled(isSnapped);
 
@@ -170,7 +191,7 @@ export class MeasurePreviewGizmo {
 
   hide(): void {
     if (this.disposed) return;
-    for (const mesh of [this.ring, this.dot, this.ghost, this.hLine, this.vLine, this.dash]) {
+    for (const mesh of [this.ring, this.dot, this.ghost, this.hLine, this.vLine, this.triLine, this.dash]) {
       mesh.setEnabled(false);
     }
   }
@@ -178,7 +199,7 @@ export class MeasurePreviewGizmo {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    for (const mesh of [this.ring, this.dot, this.ghost, this.hLine, this.vLine, this.dash]) {
+    for (const mesh of [this.ring, this.dot, this.ghost, this.hLine, this.vLine, this.triLine, this.dash]) {
       mesh.dispose(false, false);
     }
     this.snappedMat.dispose();

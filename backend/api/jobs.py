@@ -28,6 +28,37 @@ router = APIRouter()
 settings = get_settings()
 
 
+def _video_info_from_probe(vi) -> dict:
+    display_w = vi.display_width or vi.width
+    display_h = vi.display_height or vi.height
+    return {
+        "duration": vi.duration,
+        "resolution": f"{display_w}x{display_h}",
+        "stored_resolution": f"{vi.width}x{vi.height}",
+        "rotation_deg": vi.rotation_deg,
+        "fps": vi.fps,
+        "orientation": vi.orientation,
+        "aspect_ratio": vi.aspect_ratio,
+        "is_portrait": vi.is_portrait,
+    }
+
+
+def _video_info_from_validation(v: VideoValidation) -> dict:
+    display_w = v.display_width or v.width
+    display_h = v.display_height or v.height
+    return {
+        "duration": v.duration,
+        "resolution": f"{display_w}x{display_h}" if display_w and display_h else None,
+        "stored_resolution": f"{v.width}x{v.height}" if v.width and v.height else None,
+        "rotation_deg": v.rotation_deg,
+        "fps": v.fps,
+        "orientation": v.orientation,
+        "aspect_ratio": v.aspect_ratio,
+        "is_portrait": v.is_portrait,
+        "warnings": v.warnings,
+    }
+
+
 @router.post("/upload")
 async def upload_video(
     file: UploadFile = File(...),
@@ -97,6 +128,9 @@ async def upload_video(
             width=validation_result.video_info.width if validation_result.video_info else None,
             height=validation_result.video_info.height if validation_result.video_info else None,
             fps=validation_result.video_info.fps if validation_result.video_info else None,
+            rotation_deg=validation_result.video_info.rotation_deg if validation_result.video_info else 0,
+            display_width=validation_result.video_info.display_width if validation_result.video_info else None,
+            display_height=validation_result.video_info.display_height if validation_result.video_info else None,
             orientation=validation_result.video_info.orientation if validation_result.video_info else None,
             aspect_ratio=validation_result.video_info.aspect_ratio if validation_result.video_info else None,
             is_portrait=validation_result.video_info.is_portrait if validation_result.video_info else False,
@@ -158,15 +192,7 @@ async def upload_video(
             response["warnings"] = upload_warnings
 
         if validation_result.video_info:
-            vi = validation_result.video_info
-            response["video_info"] = {
-                "duration": vi.duration,
-                "resolution": f"{vi.width}x{vi.height}",
-                "fps": vi.fps,
-                "orientation": vi.orientation,
-                "aspect_ratio": vi.aspect_ratio,
-                "is_portrait": vi.is_portrait,
-            }
+            response["video_info"] = _video_info_from_probe(validation_result.video_info)
 
         return response
 
@@ -209,15 +235,7 @@ async def get_job_status(job_id: str, request: Request):
     }
 
     if job.validation:
-        response["validation"] = {
-            "duration": job.validation.duration,
-            "resolution": f"{job.validation.width}x{job.validation.height}" if job.validation.width else None,
-            "fps": job.validation.fps,
-            "orientation": job.validation.orientation,
-            "aspect_ratio": job.validation.aspect_ratio,
-            "is_portrait": job.validation.is_portrait,
-            "warnings": job.validation.warnings,
-        }
+        response["validation"] = _video_info_from_validation(job.validation)
 
     if job.model_metadata:
         md = job.model_metadata

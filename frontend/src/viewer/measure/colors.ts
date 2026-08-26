@@ -2,7 +2,7 @@ import { Color3, Constants, StandardMaterial } from '@babylonjs/core';
 import type { Scene } from '@babylonjs/core';
 
 export const MEASURE_PICK_HINT_IDLE =
-  'Move over the mesh surface — yellow preview marks the vertex you will select…';
+  'Wireframe active — move over a vertex (yellow dot) and click to place a point…';
 
 export const MEASURE_PREVIEW_YELLOW = new Color3(1, 0.87, 0);
 export const MEASURE_PREVIEW_YELLOW_LINES = new Color3(0.94, 0.77, 0.1);

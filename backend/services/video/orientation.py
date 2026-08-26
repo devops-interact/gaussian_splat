@@ -116,16 +116,6 @@ def transpose_filter_for_rotation(rotation_deg: int) -> Optional[str]:
     return None
 
 
-def build_extract_vf_filter(fps: float, rotation_deg: int = 0) -> str:
-    """Build -vf filter chain for frame extraction (no autorotate — not in Debian FFmpeg)."""
-    parts = [f"fps={fps}"]
-    transpose = transpose_filter_for_rotation(rotation_deg)
-    if transpose:
-        parts.append(transpose)
-    parts.append("scale='min(1920,iw)':-2")
-    return ",".join(parts)
-
-
 def probe_video_orientation(video_path: Path) -> Optional[VideoOrientation]:
     """Read stored dimensions and rotation metadata via ffprobe."""
     try:
@@ -154,3 +144,73 @@ def probe_video_orientation(video_path: Path) -> Optional[VideoOrientation]:
     except Exception as exc:
         logger.warning("Could not probe video orientation for %s: %s", video_path, exc)
     return None
+
+
+def read_image_dimensions(image_path: Path) -> tuple[int, int]:
+    """Read PNG/JPEG width and height without external deps (PNG IHDR)."""
+    with open(image_path, "rb") as f:
+        header = f.read(24)
+    if len(header) >= 24 and header[:8] == b"\x89PNG\r\n\x1a\n":
+        width, height = int.from_bytes(header[16:20], "big"), int.from_bytes(header[20:24], "big")
+        return width, height
+    raise ValueError(f"Unsupported or corrupt image for dimension probe: {image_path}")
+
+
+def frame_is_portrait(width: int, height: int) -> bool:
+    return height > width
+
+
+def verify_extracted_frame_orientation(frame_path: Path, expected_portrait: bool) -> bool:
+    """True when extracted PNG aspect matches expected display orientation."""
+    width, height = read_image_dimensions(frame_path)
+    return frame_is_portrait(width, height) == expected_portrait
+
+
+def alternate_rotation_candidates(rotation_deg: int, expected_portrait: bool) -> list[int]:
+    """Rotation values to try when extracted frames have wrong orientation."""
+    rotation = _normalize_rotation(rotation_deg)
+    if expected_portrait:
+        if rotation == 0:
+            return [90, 270]
+        if rotation == 90:
+            return [270, 0]
+        if rotation == 270:
+            return [90, 0]
+        if rotation == 180:
+            return [90, 270, 0]
+    else:
+        if rotation in (90, 270):
+            return [0, 180]
+        if rotation == 180:
+            return [0]
+    return []
+
+
+def resolve_pipeline_orientation(
+    video_path: Path,
+    validation: Optional[object] = None,
+) -> VideoOrientation:
+    """
+    Resolve orientation from ffprobe, falling back to persisted job validation.
+    validation may be a VideoValidation model or any object with width/height/rotation_deg/is_portrait.
+    """
+    orient = probe_video_orientation(video_path)
+    if orient:
+        return orient
+
+    if validation is not None:
+        width = getattr(validation, "width", None)
+        height = getattr(validation, "height", None)
+        rotation_deg = getattr(validation, "rotation_deg", 0) or 0
+        if width and height:
+            logger.warning(
+                "ffprobe orientation probe failed — using persisted validation "
+                "(rotation=%d°, stored=%dx%d)",
+                rotation_deg,
+                width,
+                height,
+            )
+            return orientation_from_dimensions(width, height, rotation_deg)
+
+    logger.warning("No orientation metadata for %s — assuming landscape", video_path)
+    return orientation_from_dimensions(1920, 1080, 0)

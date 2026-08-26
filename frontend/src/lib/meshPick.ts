@@ -6,6 +6,7 @@ export interface PickResult {
   isSnapped: boolean;
   mesh?: AbstractMesh | null;
   normal?: Vector3 | null;
+  triangleVerts?: Vector3[] | null;
 }
 
 export interface MeshPickResult {
@@ -65,13 +66,9 @@ export function snapToNearestVertex(
 }
 
 /**
- * Snap a world-space hit to the nearest corner of the picked triangle.
+ * World-space corners of a mesh triangle (face).
  */
-export function snapToTriangleCorner(
-  mesh: AbstractMesh,
-  faceId: number,
-  worldPoint: Vector3,
-): Vector3 | null {
+export function getTriangleWorldVertices(mesh: AbstractMesh, faceId: number): Vector3[] | null {
   const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
   const indices = mesh.getIndices();
   if (!positions || !indices || faceId < 0) return null;
@@ -88,6 +85,26 @@ export function snapToTriangleCorner(
     const pz = positions[vi * 3 + 2];
     corners.push(Vector3.TransformCoordinates(new Vector3(px, py, pz), wm));
   }
+  return corners;
+}
+
+/**
+ * Snap a world-space hit to the nearest corner of the picked triangle.
+ */
+export function snapToTriangleCorner(
+  mesh: AbstractMesh,
+  faceId: number,
+  worldPoint: Vector3,
+): Vector3 | null {
+  const positions = mesh.getVerticesData(VertexBuffer.PositionKind);
+  const indices = mesh.getIndices();
+  if (!positions || !indices || faceId < 0) return null;
+
+  const base = faceId * 3;
+  if (base + 2 >= indices.length) return null;
+
+  const corners = getTriangleWorldVertices(mesh, faceId);
+  if (!corners) return null;
 
   let best = corners[0];
   let bestDist = Vector3.DistanceSquared(worldPoint, best);

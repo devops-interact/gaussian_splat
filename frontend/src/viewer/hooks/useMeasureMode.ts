@@ -1,7 +1,8 @@
 import { useEffect, useRef, type RefObject } from 'react';
 import { Vector3 } from '@babylonjs/core';
-import { pickMeshMeasure, refreshPickableMeshes } from '@/lib/meshPick';
+import { pickMeshMeasureVertex } from '@/lib/vertexPick';
 import type { PickResult } from '@/lib/meshPick';
+import { refreshPickableMeshes } from '@/lib/meshPick';
 import type {
   BabylonViewerCtx,
   CalibrationState,
@@ -115,7 +116,7 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
 
     const pickFromEvent = (e: MouseEvent | PointerEvent): PickResult | null => {
       const { x, y } = canvasCoordsFromPointerEvent(canvas, e);
-      return pickMeshMeasure(scene, x, y);
+      return pickMeshMeasureVertex(scene, x, y);
     };
 
     const buildSegmentText = (pick: PickResult | null, previousWorld: Vector3 | null): string | null => {

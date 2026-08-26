@@ -45,7 +45,7 @@ from services.meshy.zone_normalize import (
     zones_are_similar,
 )
 from services.video.extract_frames import extract_frames
-from services.video.orientation import probe_video_orientation
+from services.video.orientation import resolve_pipeline_orientation
 
 logger = logging.getLogger(__name__)
 
@@ -236,25 +236,25 @@ async def process_room_job(job: Job) -> Job:
         video_path = settings.UPLOADS_DIR / job.video_filename
         frames_dir = settings.FRAMES_DIR / job.job_id
 
-        orient = probe_video_orientation(video_path)
-        rotation_deg = orient.rotation_deg if orient else 0
-        is_portrait = orient.is_portrait if orient else bool(
-            job.validation and job.validation.is_portrait
+        orient = resolve_pipeline_orientation(video_path, job.validation)
+        rotation_deg = orient.rotation_deg
+        is_portrait = orient.is_portrait
+        logger.info(
+            "Video orientation for job %s: %s %s (rotation=%d°, display=%dx%d)",
+            job.job_id,
+            orient.label,
+            orient.aspect_label,
+            orient.rotation_deg,
+            orient.display_width,
+            orient.display_height,
         )
-        if orient:
-            logger.info(
-                "Video orientation for job %s: %s %s (rotation=%d°)",
-                job.job_id,
-                orient.label,
-                orient.aspect_label,
-                orient.rotation_deg,
-            )
 
         await extract_frames(
             video_path,
             frames_dir,
             preset_config.fps,
             rotation_deg=rotation_deg,
+            expected_portrait=is_portrait,
         )
 
         job.status = JobStatus.SELECTING_KEYFRAMES

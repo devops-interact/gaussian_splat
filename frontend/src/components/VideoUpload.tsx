@@ -23,6 +23,8 @@ interface UploadResult {
   video_info?: {
     duration: number;
     resolution: string;
+    stored_resolution?: string;
+    rotation_deg?: number;
     fps: number;
     orientation?: string;
     aspect_ratio?: string;
@@ -186,6 +188,9 @@ export default function VideoUpload({
           Video: {videoInfo.duration.toFixed(1)}s • {videoInfo.resolution}
           {videoInfo.aspect_ratio ? ` (${videoInfo.aspect_ratio})` : ''} • {videoInfo.fps.toFixed(1)} fps
           {videoInfo.orientation ? ` • ${videoInfo.orientation}` : ''}
+          {videoInfo.stored_resolution && videoInfo.stored_resolution !== videoInfo.resolution
+            ? ` • stored ${videoInfo.stored_resolution}`
+            : ''}
         </span>
       </div>
     );

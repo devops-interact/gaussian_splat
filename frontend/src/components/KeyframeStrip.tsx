@@ -42,7 +42,7 @@ export default function KeyframeStrip({ keyframes, embedded }: KeyframeStripProp
             <img
               src={resolveUrl(kf.url)}
               alt={`Keyframe ${kf.index}`}
-              className="w-full h-full object-cover"
+              className="w-full h-full object-contain"
               loading="lazy"
             />
             <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-[9px] text-white/80 text-center py-0.5">

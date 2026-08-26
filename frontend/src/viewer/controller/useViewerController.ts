@@ -49,6 +49,7 @@ export function useViewerController(opts: UseViewerControllerOptions) {
   const [inspection, setInspection] = useState<InspectionState>(buildInitialInspection);
   const [visibleZones, setVisibleZones] = useState<Set<number>>(() => new Set());
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const inspectionBeforeMeasureRef = useRef<InspectionState | null>(null);
 
   const measure = useMeasureController();
   const visibleMeasurePoints =
@@ -80,6 +81,26 @@ export function useViewerController(opts: UseViewerControllerOptions) {
       setInspection((prev) => ({ ...prev, showShell: true }));
     }
   }, [sceneManifest?.shell_url, sceneManifest?.zones?.length, loadPhase, viewerRef]);
+
+  useEffect(() => {
+    if (mode === 'measure') {
+      setInspection((prev) => {
+        if (!inspectionBeforeMeasureRef.current) {
+          inspectionBeforeMeasureRef.current = prev;
+        }
+        return {
+          ...prev,
+          wireframe: true,
+          textures: false,
+          pbr: false,
+        };
+      });
+    } else if (inspectionBeforeMeasureRef.current) {
+      const restored = inspectionBeforeMeasureRef.current;
+      inspectionBeforeMeasureRef.current = null;
+      setInspection(restored);
+    }
+  }, [mode]);
 
   useEffect(() => {
     const ctx = viewerRef.current;

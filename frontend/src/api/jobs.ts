@@ -18,6 +18,8 @@ export interface UploadResponse {
   video_info?: {
     duration: number;
     resolution: string;
+    stored_resolution?: string;
+    rotation_deg?: number;
     fps: number;
     orientation?: string;
     aspect_ratio?: string;
