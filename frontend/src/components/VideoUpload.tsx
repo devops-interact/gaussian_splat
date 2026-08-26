@@ -158,7 +158,7 @@ export default function VideoUpload({
               ? 'border-white/48 bg-white/[0.06] text-white'
               : 'border-white/[0.22] bg-neutral-950/50 text-gray-400 hover:border-white/[0.32] hover:bg-white/[0.06]',
             uploading && 'opacity-50 cursor-not-allowed',
-            preset.composition_mode === 'zone_mesh' && 'ring-1 ring-amber-500/20',
+            preset.composition_mode === 'zone_mesh' && 'ring-1 ring-emerald-500/20',
           )}
         >
           <div className="flex items-center justify-between w-full mb-1">
@@ -171,7 +171,7 @@ export default function VideoUpload({
           <p className="text-[10px] opacity-60 leading-tight">{preset.description}</p>
           <span className={cn(
             'mt-1 text-[9px] uppercase tracking-wide',
-            preset.composition_mode === 'zone_mesh' ? 'text-amber-400/90' : 'text-white/35',
+            preset.composition_mode === 'zone_mesh' ? 'text-emerald-400/90' : 'text-white/35',
           )}>
             {preset.composition_mode === 'zone_mesh' ? 'Full room · multi-zone' : 'Single object'}
           </span>
@@ -267,7 +267,7 @@ export default function VideoUpload({
             </div>
           )}
           {isSingleObject && selectedPreset === 'quality' && (
-            <p className="text-xs text-amber-400/70 border border-amber-500/20 rounded-lg p-2.5">
+            <p className="text-xs text-emerald-400/70 border border-emerald-500/20 rounded-lg p-2.5">
               Quality reconstructs <strong>one object</strong> only. For walls and floor, select <strong>Room — full space</strong>.
             </p>
           )}

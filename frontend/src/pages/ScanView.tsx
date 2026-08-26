@@ -224,7 +224,7 @@ export default function ScanView() {
             {jobQualityPreset && (
               <span className={`inline-block mt-2 text-[10px] px-2 py-0.5 rounded border uppercase tracking-wide ${
                 (sceneManifest?.zones?.length ?? 0) > 0
-                  ? 'text-amber-400 border-amber-500/30 bg-amber-500/10'
+                  ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/10'
                   : 'text-white/50 border-white/20 bg-white/5'
               }`}>
                 {                (sceneManifest?.shell_url || sceneManifest?.composition_mode === 'room_shell' || (sceneManifest?.zones?.length ?? 0) > 0)
@@ -242,7 +242,7 @@ export default function ScanView() {
               && prefetchedJobModelMetadata
               && (prefetchedJobModelMetadata.vertex_count ?? 0) <= 32
               && (prefetchedJobModelMetadata.face_count ?? 0) <= 48 && (
-              <p className="text-amber-400/90 text-xs mt-2">
+              <p className="text-emerald-400/90 text-xs mt-2">
                 Room envelope loaded — toggle <strong>Furniture detail</strong> in Inspect to view zone meshes.
                 Metadata totals include shell + detail meshes after reprocessing.
               </p>

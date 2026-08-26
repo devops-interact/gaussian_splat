@@ -54,7 +54,7 @@ export function ViewerToolbar({
           {mode === 'measure' && <><Ruler className="w-3 h-3" /> Measure</>}
         </div>
         {compositionLabel && (
-          <div className="glass-panel text-[10px] text-amber-400/90 px-2.5 py-1 uppercase tracking-wide">
+          <div className="glass-panel text-[10px] text-emerald-400/90 px-2.5 py-1 uppercase tracking-wide">
             {compositionLabel}
           </div>
         )}

@@ -46,7 +46,7 @@ export function InspectionPanel({
       {open && (
         <div className="absolute top-14 right-3 z-30 w-56 max-h-[70vh] overflow-y-auto glass-panel p-3 space-y-3 text-xs">
           {compositionLabel && (
-            <p className="text-[10px] text-amber-400/90 font-medium uppercase tracking-wide">{compositionLabel}</p>
+            <p className="text-[10px] text-emerald-400/90 font-medium uppercase tracking-wide">{compositionLabel}</p>
           )}
 
           <Section title="Display">

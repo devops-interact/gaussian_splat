@@ -87,7 +87,7 @@ export function MeasurePanel(props: MeasurePanelProps) {
         </div>
         <p className="text-[10px] text-white/45 leading-snug">{measurePickHint}</p>
         {measurePhase === 'calibrate' && (
-          <p className="text-[10px] text-amber-400/70 leading-snug">
+          <p className="text-[10px] text-emerald-400/70 leading-snug">
             Scale is arbitrary until you calibrate with two known points.
           </p>
         )}
