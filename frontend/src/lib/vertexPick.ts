@@ -60,14 +60,21 @@ function pickNearestVertexOnScreen(
 
 /**
  * Raycast + screen-space snap to the nearest triangle vertex under the cursor.
+ *
+ * @param cssX - CSS canvas coords for createPickingRay (Babylon pointer space)
+ * @param cssY - CSS canvas coords for createPickingRay
+ * @param bufferX - render-buffer coords for Vector3.Project screen snap
+ * @param bufferY - render-buffer coords for screen snap
  */
 export function pickMeshMeasureVertex(
   scene: Scene,
-  canvasX: number,
-  canvasY: number,
+  cssX: number,
+  cssY: number,
+  bufferX: number,
+  bufferY: number,
   screenThresholdPx = DEFAULT_SCREEN_THRESHOLD_PX,
 ): PickResult | null {
-  const ray = scene.createPickingRay(canvasX, canvasY, null, scene.activeCamera);
+  const ray = scene.createPickingRay(cssX, cssY, null, scene.activeCamera);
   if (!ray) return null;
 
   const hit = scene.pickWithRay(ray, (mesh) => isMeasurableMesh(mesh), false);
@@ -90,8 +97,8 @@ export function pickMeshMeasureVertex(
 
   const screenVertex = pickNearestVertexOnScreen(
     scene,
-    canvasX,
-    canvasY,
+    bufferX,
+    bufferY,
     triangleVerts,
     screenThresholdPx,
   );

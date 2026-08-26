@@ -115,8 +115,8 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
     let hoverRafId = 0;
 
     const pickFromEvent = (e: MouseEvent | PointerEvent): PickResult | null => {
-      const { x, y } = canvasCoordsFromPointerEvent(canvas, e);
-      return pickMeshMeasureVertex(scene, x, y);
+      const { cssX, cssY, bufferX, bufferY } = canvasCoordsFromPointerEvent(canvas, e);
+      return pickMeshMeasureVertex(scene, cssX, cssY, bufferX, bufferY);
     };
 
     const buildSegmentText = (pick: PickResult | null, previousWorld: Vector3 | null): string | null => {
@@ -241,7 +241,6 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
     canvas.addEventListener('pointerleave', onLeave);
     canvas.addEventListener('pointerenter', onEnter);
     window.addEventListener('keydown', onKeyDown);
-    scheduleHover(new MouseEvent('mousemove', { clientX: 0, clientY: 0 }));
 
     return () => {
       if (hoverRafId) cancelAnimationFrame(hoverRafId);

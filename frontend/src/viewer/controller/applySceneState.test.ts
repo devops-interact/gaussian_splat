@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { MeshBuilder } from '@babylonjs/core/Meshes/meshBuilder';
 import { TransformNode } from '@babylonjs/core/Meshes/transformNode';
+import { PBRMaterial } from '@babylonjs/core/Materials/PBR/pbrMaterial';
 import { NullEngine } from '@babylonjs/core/Engines/nullEngine';
 import { Scene } from '@babylonjs/core/scene';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
@@ -127,6 +128,37 @@ describe('applySceneState', () => {
     });
     expect(shellA.isEnabled()).toBe(false);
     expect(shellB.isEnabled()).toBe(false);
+
+    scene.dispose();
+    engine.dispose();
+  });
+
+  it('enables forceWireframe and PBR wireframe flags for measure-style inspection', () => {
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+    const mesh = MeshBuilder.CreateBox('pbrBox', { size: 1 }, scene);
+    const pbr = new PBRMaterial('pbr', scene);
+    pbr.metallic = 0.9;
+    pbr.roughness = 0.2;
+    mesh.material = pbr;
+
+    const ctx: BabylonViewerCtx = {
+      ...makeCtx(scene),
+      geometryMeshes: [mesh],
+      shellMeshes: [],
+      zoneMeshes: [],
+    };
+
+    applySceneState(ctx, {
+      inspection: { ...DEFAULT_INSPECTION, wireframe: true, textures: false, pbr: false },
+      visibleZones: new Set(),
+    });
+
+    expect(scene.forceWireframe).toBe(true);
+    expect(pbr.wireframe).toBe(true);
+    expect(pbr.metallic).toBe(0);
+    expect(pbr.roughness).toBe(1);
+    expect(pbr.environmentIntensity).toBe(0);
 
     scene.dispose();
     engine.dispose();

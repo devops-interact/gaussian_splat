@@ -1,4 +1,5 @@
-import type { AbstractMesh } from '@babylonjs/core';
+import { Color3 } from '@babylonjs/core';
+import type { AbstractMesh, Material, PBRMaterial } from '@babylonjs/core';
 import type { BabylonViewerCtx } from '../types';
 import type { InspectionState } from '../inspection/inspectionControls';
 import { applyLighting } from '../lighting/sceneLighting';
@@ -9,27 +10,73 @@ export interface SceneViewState {
   visibleZones: Set<number>;
 }
 
-function applyMeshMaterialFlags(mesh: AbstractMesh, state: InspectionState): void {
-  const mat = mesh.material;
-  if (!mat) return;
+const MEASURE_WIREFRAME_EMISSIVE = new Color3(0.8, 0.8, 0.8);
 
+function forEachMaterial(mat: Material | null | undefined, fn: (material: Material) => void): void {
+  if (!mat) return;
+  if (mat.getClassName?.() === 'MultiMaterial' && 'subMaterials' in mat) {
+    for (const sub of (mat as { subMaterials: (Material | null)[] }).subMaterials) {
+      if (sub) fn(sub);
+    }
+    return;
+  }
+  fn(mat);
+}
+
+function setTextureLevel(texture: { level: number } | null | undefined, level: number): void {
+  if (texture) texture.level = level;
+}
+
+function applyMaterialFlags(mat: Material, state: InspectionState): void {
   if ('wireframe' in mat) {
     (mat as { wireframe: boolean }).wireframe = state.wireframe;
   }
 
   if ('albedoTexture' in mat) {
-    const pbr = mat as import('@babylonjs/core').PBRMaterial;
-    if (pbr.albedoTexture) {
-      pbr.albedoTexture.level = state.textures ? 1 : 0;
-    }
-    if ('metallicTexture' in mat || 'reflectivityTexture' in mat) {
-      pbr.environmentIntensity = state.pbr ? state.lighting.envIntensity : 0;
-    }
-    if ('useSpecularOverAlpha' in mat) {
-      pbr.metallic = state.pbr ? (pbr.metallic ?? 0.5) : 0;
-      pbr.roughness = state.pbr ? (pbr.roughness ?? 0.8) : 1;
+    const pbr = mat as PBRMaterial;
+    const textureLevel = state.textures ? 1 : 0;
+    setTextureLevel(pbr.albedoTexture, textureLevel);
+    setTextureLevel(pbr.metallicTexture, textureLevel);
+    setTextureLevel(pbr.bumpTexture, textureLevel);
+    setTextureLevel(pbr.emissiveTexture, textureLevel);
+    setTextureLevel(pbr.ambientTexture, textureLevel);
+    setTextureLevel(pbr.lightmapTexture, textureLevel);
+    setTextureLevel(pbr.reflectivityTexture, textureLevel);
+    setTextureLevel(pbr.microSurfaceTexture, textureLevel);
+    pbr.environmentIntensity = state.pbr ? state.lighting.envIntensity : 0;
+    pbr.metallic = state.pbr ? (pbr.metallic ?? 0.5) : 0;
+    pbr.roughness = state.pbr ? (pbr.roughness ?? 0.8) : 1;
+    if (state.wireframe && !state.textures && 'emissiveColor' in pbr) {
+      pbr.emissiveColor = MEASURE_WIREFRAME_EMISSIVE;
     }
   }
+}
+
+function applyMeshMaterialFlags(mesh: AbstractMesh, state: InspectionState): void {
+  forEachMaterial(mesh.material, (mat) => applyMaterialFlags(mat, state));
+}
+
+/** Collect unique geometry meshes including child submeshes. */
+export function collectSceneGeometryMeshes(ctx: BabylonViewerCtx): AbstractMesh[] {
+  const seen = new Set<AbstractMesh>();
+  const out: AbstractMesh[] = [];
+
+  const add = (mesh: AbstractMesh) => {
+    if (seen.has(mesh)) return;
+    seen.add(mesh);
+    out.push(mesh);
+    for (const child of mesh.getChildMeshes(false)) {
+      if (child.getTotalVertices() > 0) add(child);
+    }
+  };
+
+  for (const mesh of ctx.geometryMeshes) add(mesh);
+  for (const mesh of ctx.shellMeshes) add(mesh);
+  for (const { geometryMeshes } of ctx.zoneMeshes) {
+    for (const mesh of geometryMeshes) add(mesh);
+  }
+
+  return out;
 }
 
 /** True when shell should be auto-enabled because no zone geometry is available. */
@@ -52,7 +99,7 @@ export function resolveEffectiveVisibleZones(
 
 /** Single entry point for inspection, shell, zone visibility, and overlays. */
 export function applySceneState(ctx: BabylonViewerCtx, state: SceneViewState): void {
-  const { scene, geometryMeshes, shellMeshes, zoneMeshes } = ctx;
+  const { scene, shellMeshes, zoneMeshes } = ctx;
   const { inspection, visibleZones } = state;
 
   scene.forceWireframe = inspection.wireframe;
@@ -64,10 +111,7 @@ export function applySceneState(ctx: BabylonViewerCtx, state: SceneViewState): v
 
   applyLighting(scene, inspection.lighting, inspection.exposure);
 
-  for (const mesh of geometryMeshes) {
-    applyMeshMaterialFlags(mesh, inspection);
-  }
-  for (const mesh of shellMeshes) {
+  for (const mesh of collectSceneGeometryMeshes(ctx)) {
     applyMeshMaterialFlags(mesh, inspection);
   }
 

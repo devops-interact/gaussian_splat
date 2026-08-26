@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { canvasCoordsFromPointerEvent } from './measurePointer';
 
 describe('canvasCoordsFromPointerEvent', () => {
-  it('maps client coords through getBoundingClientRect to canvas buffer space', () => {
+  it('maps client coords to CSS and buffer space with DPR', () => {
     const canvas = {
       width: 800,
       height: 600,
@@ -22,8 +22,10 @@ describe('canvasCoordsFromPointerEvent', () => {
     } as HTMLCanvasElement;
 
     const coords = canvasCoordsFromPointerEvent(canvas, { clientX: 300, clientY: 200 });
-    expect(coords.x).toBe(400);
-    expect(coords.y).toBe(300);
+    expect(coords.cssX).toBe(200);
+    expect(coords.cssY).toBe(150);
+    expect(coords.bufferX).toBe(400);
+    expect(coords.bufferY).toBe(300);
   });
 
   it('clamps coordinates to canvas bounds', () => {
@@ -46,7 +48,9 @@ describe('canvasCoordsFromPointerEvent', () => {
     } as HTMLCanvasElement;
 
     const coords = canvasCoordsFromPointerEvent(canvas, { clientX: -50, clientY: 200 });
-    expect(coords.x).toBe(0);
-    expect(coords.y).toBe(100);
+    expect(coords.cssX).toBe(0);
+    expect(coords.cssY).toBe(100);
+    expect(coords.bufferX).toBe(0);
+    expect(coords.bufferY).toBe(100);
   });
 });

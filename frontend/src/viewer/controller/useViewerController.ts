@@ -113,13 +113,17 @@ export function useViewerController(opts: UseViewerControllerOptions) {
   }, [inspection, zonesForScene, loadPhase, viewerRef, mode]);
 
   const handleInspectionChange = useCallback((next: InspectionState) => {
-    setInspection(next);
+    const patched =
+      mode === 'measure'
+        ? { ...next, wireframe: true, textures: false, pbr: false }
+        : next;
+    setInspection(patched);
     if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
     persistTimerRef.current = setTimeout(() => {
       const saved = loadViewerSettings();
-      saveViewerSettings({ ...saved, lighting: next.lighting, exposure: next.exposure });
+      saveViewerSettings({ ...saved, lighting: patched.lighting, exposure: patched.exposure });
     }, 400);
-  }, []);
+  }, [mode]);
 
   const handleZoneToggle = useCallback((zoneId: number) => {
     setVisibleZones((prev) => {
