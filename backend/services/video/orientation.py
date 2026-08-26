@@ -116,6 +116,21 @@ def transpose_filter_for_rotation(rotation_deg: int) -> Optional[str]:
     return None
 
 
+def build_extract_vf_filter(fps: float, rotation_deg: int) -> str:
+    """
+    Build FFmpeg -vf chain for frame extraction.
+
+    Applies explicit transpose from metadata (not autorotate) so orientation
+    can be verified and retried when metadata is wrong.
+    """
+    parts = [f"fps={fps}"]
+    transpose = transpose_filter_for_rotation(rotation_deg)
+    if transpose:
+        parts.append(transpose)
+    parts.append("scale='min(1920,iw)':-2")
+    return ",".join(parts)
+
+
 def probe_video_orientation(video_path: Path) -> Optional[VideoOrientation]:
     """Read stored dimensions and rotation metadata via ffprobe."""
     try:
