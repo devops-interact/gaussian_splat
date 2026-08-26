@@ -1,5 +1,6 @@
 import { Vector3 } from '@babylonjs/core';
 import type { ArcRotateCameraPointersInput } from '@babylonjs/core/Cameras/Inputs/arcRotateCameraPointersInput';
+import type { ArcRotateCamera } from '@babylonjs/core/Cameras/arcRotateCamera';
 import { useEffect, useRef } from 'react';
 import type { RefObject } from 'react';
 import type { SceneManifestResponse } from '@/types/job';
@@ -9,18 +10,27 @@ import { resetViewWithFraming } from '../camera/framing';
 import { AUTO_ROTATE_ALPHA_SPEED } from '../constants';
 import { getWalkStartPoseFromRaw } from '../walk/walkPath';
 
-function configureMeasureOrbitInputs(orbitCamera: import('@babylonjs/core').ArcRotateCamera): void {
-  const pointers = orbitCamera.inputs.attached.pointers as ArcRotateCameraPointersInput | null;
-  if (pointers) {
-    pointers.buttons = [2];
-  }
-}
-
-function restoreOrbitInputs(orbitCamera: import('@babylonjs/core').ArcRotateCamera): void {
+function restoreOrbitInputs(orbitCamera: ArcRotateCamera): void {
   const pointers = orbitCamera.inputs.attached.pointers as ArcRotateCameraPointersInput | null;
   if (pointers) {
     pointers.buttons = [0, 1, 2];
   }
+}
+
+function detachMeasureInputs(orbitCamera: ArcRotateCamera): void {
+  const pointers = orbitCamera.inputs.attached.pointers as ArcRotateCameraPointersInput | null;
+  pointers?.detachControl();
+  orbitCamera.inputs.attached.mousewheel?.detachControl();
+}
+
+/** Measure mode: no LMB orbit; RMB pan + wheel zoom only. */
+function attachMeasureInputs(orbitCamera: ArcRotateCamera): void {
+  const pointers = orbitCamera.inputs.attached.pointers as ArcRotateCameraPointersInput | null;
+  if (pointers) {
+    pointers.buttons = [2];
+    pointers.attachControl(false);
+  }
+  orbitCamera.inputs.attached.mousewheel?.attachControl(false);
 }
 
 export function useCameraMode(
@@ -38,6 +48,8 @@ export function useCameraMode(
     if (!ctx || !canvas || loadPhase !== 'ready') return;
 
     const { scene, orbitCamera, walkCamera } = ctx;
+
+    detachMeasureInputs(orbitCamera);
 
     if (mode === 'orbit') {
       restoreOrbitInputs(orbitCamera);
@@ -57,10 +69,10 @@ export function useCameraMode(
       orbitCamera.detachControl();
       walkCamera.attachControl(canvas, false);
     } else {
-      configureMeasureOrbitInputs(orbitCamera);
       scene.activeCamera = orbitCamera;
-      orbitCamera.attachControl(canvas, false);
+      orbitCamera.detachControl();
       walkCamera.detachControl();
+      attachMeasureInputs(orbitCamera);
     }
   }, [mode, loadPhase, viewerRef, canvasRef]);
 
@@ -102,6 +114,8 @@ export function useResetView(
     const pose = initialPoseRef.current;
     if (!ctx || !canvas) return;
     const { orbitCamera, walkCamera, scene, rootMesh, framingBehavior } = ctx;
+
+    detachMeasureInputs(orbitCamera);
 
     if (pose) {
       restoreCameraPose(orbitCamera, pose);

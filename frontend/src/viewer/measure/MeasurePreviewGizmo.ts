@@ -11,13 +11,21 @@ import {
   makeOverlayMaterial,
 } from './colors';
 
+const OVERLAY_RENDER_GROUP = 2;
 const SCRATCH_TO_CAMERA = new Vector3();
 const SCRATCH_RIGHT = new Vector3();
 const SCRATCH_LOCAL_UP = new Vector3();
+const SCRATCH_OFFSET = new Vector3();
+const SCRATCH_DISPLAY = new Vector3();
 const WORLD_UP = Vector3.Up();
 
+export interface MeasurePreviewGizmoOptions {
+  worldUnit: number;
+  effectiveDiagonal: number;
+}
+
 /**
- * Persistent hover-preview gizmo on the utility layer — no depth-write hacks.
+ * Persistent hover-preview gizmo on the utility layer.
  */
 export class MeasurePreviewGizmo {
   private readonly ring: Mesh;
@@ -28,11 +36,17 @@ export class MeasurePreviewGizmo {
   private readonly dash: LinesMesh;
   private readonly snappedMat;
   private readonly unsnappedMat;
+  private readonly worldUnit: number;
+  private readonly effectiveDiagonal: number;
   private readonly linePts: [Vector3, Vector3] = [new Vector3(), new Vector3()];
   private readonly dashPts: [Vector3, Vector3] = [new Vector3(), new Vector3()];
   private disposed = false;
 
-  constructor(utilityLayer: UtilityLayerRenderer, worldUnit: number) {
+  constructor(utilityLayer: UtilityLayerRenderer, opts: MeasurePreviewGizmoOptions) {
+    const { worldUnit, effectiveDiagonal } = opts;
+    this.worldUnit = worldUnit;
+    this.effectiveDiagonal = effectiveDiagonal;
+
     const scene = utilityLayer.utilityLayerScene;
     this.snappedMat = makeOverlayMaterial(scene, MEASURE_PREVIEW_YELLOW, 1);
     this.unsnappedMat = makeOverlayMaterial(scene, MEASURE_PREVIEW_RED, 1);
@@ -56,18 +70,38 @@ export class MeasurePreviewGizmo {
 
     for (const mesh of [this.ring, this.dot, this.ghost, this.hLine, this.vLine, this.dash]) {
       mesh.isPickable = false;
+      mesh.renderingGroupId = OVERLAY_RENDER_GROUP;
       mesh.setEnabled(false);
     }
   }
 
+  private computeScale(camDist: number, isSnapped: boolean): number {
+    const scaleBase = Math.max(
+      this.worldUnit * 2,
+      this.effectiveDiagonal * 0.004,
+      camDist * 0.012,
+      0.01,
+    );
+    return isSnapped ? scaleBase * 1.2 : scaleBase;
+  }
+
+  private displayPosition(pick: PickResult): Vector3 {
+    SCRATCH_DISPLAY.copyFrom(pick.position);
+    if (pick.normal) {
+      const offset = Math.max(this.worldUnit * 0.35, this.effectiveDiagonal * 0.0008);
+      SCRATCH_DISPLAY.addInPlace(pick.normal.scale(offset));
+    }
+    return SCRATCH_DISPLAY;
+  }
+
   update(pick: PickResult, cameraPosition: Vector3, previousWorld: Vector3 | null): void {
     if (this.disposed) return;
-    const { position, isSnapped } = pick;
+    const { isSnapped } = pick;
+    const position = this.displayPosition(pick);
     const mat = isSnapped ? this.snappedMat : this.unsnappedMat;
     const lineColor = isSnapped ? MEASURE_PREVIEW_YELLOW_LINES : MEASURE_PREVIEW_RED;
     const camDist = Vector3.Distance(cameraPosition, position);
-    const scaleBase = Math.max(0.01, camDist * 0.012);
-    const scale = isSnapped ? scaleBase * 1.2 : scaleBase;
+    const scale = this.computeScale(camDist, isSnapped);
 
     this.ring.position.copyFrom(position);
     this.ring.scaling.setAll(scale);
@@ -104,14 +138,18 @@ export class MeasurePreviewGizmo {
     Vector3.CrossToRef(SCRATCH_RIGHT, SCRATCH_TO_CAMERA, SCRATCH_LOCAL_UP);
     SCRATCH_LOCAL_UP.normalize();
 
-    this.linePts[0].copyFrom(position).addInPlace(SCRATCH_RIGHT.scale(-halfLen));
-    this.linePts[1].copyFrom(position).addInPlace(SCRATCH_RIGHT.scale(halfLen));
+    SCRATCH_RIGHT.scaleToRef(-halfLen, SCRATCH_OFFSET);
+    this.linePts[0].copyFrom(position).addInPlace(SCRATCH_OFFSET);
+    SCRATCH_RIGHT.scaleToRef(halfLen, SCRATCH_OFFSET);
+    this.linePts[1].copyFrom(position).addInPlace(SCRATCH_OFFSET);
     MeshBuilder.CreateLines('measureH', { points: this.linePts, instance: this.hLine });
     this.hLine.color = lineColor;
     this.hLine.setEnabled(true);
 
-    this.linePts[0].copyFrom(position).addInPlace(SCRATCH_LOCAL_UP.scale(-halfLen));
-    this.linePts[1].copyFrom(position).addInPlace(SCRATCH_LOCAL_UP.scale(halfLen));
+    SCRATCH_LOCAL_UP.scaleToRef(-halfLen, SCRATCH_OFFSET);
+    this.linePts[0].copyFrom(position).addInPlace(SCRATCH_OFFSET);
+    SCRATCH_LOCAL_UP.scaleToRef(halfLen, SCRATCH_OFFSET);
+    this.linePts[1].copyFrom(position).addInPlace(SCRATCH_OFFSET);
     MeshBuilder.CreateLines('measureV', { points: this.linePts, instance: this.vLine });
     this.vLine.color = lineColor;
     this.vLine.alpha = isSnapped ? 0.6 : 0.3;

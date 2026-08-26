@@ -33,6 +33,8 @@ import { addSceneOverlays, alignGridToFloor } from '../overlays/sceneOverlays';
 import { setupSceneLighting } from '../lighting/sceneLighting';
 import { showInspectorIfRequested, resetInspectorFlag } from '../dev/inspector';
 import { parseWalkPath } from '../walk/walkPath';
+import { applySceneState } from '../controller/applySceneState';
+import { DEFAULT_INSPECTION } from '../inspection/inspectionControls';
 import type { BabylonViewerCtx, LoadPhase, ModelMetadata, StoredCameraPose } from '../types';
 
 export interface UseMeshViewerOptions {
@@ -126,7 +128,8 @@ export function useMeshViewer({
 
     const framingBehavior = attachFramingBehavior(orbitCamera);
     addSceneOverlays(scene);
-    const utilityLayer = new UtilityLayerRenderer(scene);
+    const utilityLayer = new UtilityLayerRenderer(scene, false);
+    utilityLayer.setRenderCamera(orbitCamera);
 
     engine.runRenderLoop(() => scene.render());
     resizeObserver = new ResizeObserver(() => engine.resize());
@@ -303,6 +306,16 @@ export function useMeshViewer({
           roomBounds,
           walkPath: walkPath && walkPath.length > 0 ? walkPath : null,
         };
+
+        applySceneState(viewerRef.current, {
+          inspection: {
+            ...DEFAULT_INSPECTION,
+            showZoneDetail: true,
+            showShell: shellMeshes.length > 0,
+          },
+          visibleZones: new Set(zoneMeshes.map((z) => z.zoneId)),
+        });
+
         setZoneMeshes(zoneMeshes);
 
         setLoadPhase('ready');

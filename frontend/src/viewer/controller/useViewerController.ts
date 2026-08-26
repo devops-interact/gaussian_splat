@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { SceneManifestResponse } from '@/types/job';
+import { refreshPickableMeshes } from '@/lib/meshPick';
 import { loadViewerSettings, saveViewerSettings } from '@/lib/viewerSettings';
 import type { ZoneMeshHandle } from '../load/loadMeshScene';
-import { applySceneState, shouldAutoShowShell } from './applySceneState';
+import { applySceneState, resolveEffectiveVisibleZones, shouldAutoShowShell } from './applySceneState';
 import { useMeasureController } from './useMeasureController';
 import { useCameraMode, useResetView } from '../hooks/useCameraMode';
 import { useWalkthroughMode } from '../hooks/useWalkthroughMode';
@@ -55,11 +56,16 @@ export function useViewerController(opts: UseViewerControllerOptions) {
 
   const hasWalkPath = (sceneManifest?.walk_path?.length ?? 0) > 0;
 
+  const zonesForScene = useMemo(
+    () => resolveEffectiveVisibleZones(visibleZones, zoneMeshes),
+    [visibleZones, zoneMeshes],
+  );
+
   useEffect(() => {
-    if (zoneMeshes.length > 0) {
+    if (zoneMeshes.length > 0 && visibleZones.size === 0) {
       setVisibleZones(new Set(zoneMeshes.map((z) => z.zoneId)));
     }
-  }, [zoneMeshes]);
+  }, [zoneMeshes, visibleZones.size]);
 
   useEffect(() => {
     const ctx = viewerRef.current;
@@ -78,9 +84,12 @@ export function useViewerController(opts: UseViewerControllerOptions) {
   useEffect(() => {
     const ctx = viewerRef.current;
     if (ctx && loadPhase === 'ready') {
-      applySceneState(ctx, { inspection, visibleZones });
+      applySceneState(ctx, { inspection, visibleZones: zonesForScene });
+      if (mode === 'measure') {
+        refreshPickableMeshes([...ctx.geometryMeshes, ...ctx.shellMeshes]);
+      }
     }
-  }, [inspection, visibleZones, loadPhase, viewerRef]);
+  }, [inspection, zonesForScene, loadPhase, viewerRef, mode]);
 
   const handleInspectionChange = useCallback((next: InspectionState) => {
     setInspection(next);

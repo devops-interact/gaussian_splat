@@ -206,9 +206,12 @@ async function loadRoomShell(
     }
     if (gm.getTotalVertices() > 0) {
       gm.name = 'room_shell';
+      gm.computeWorldMatrix(true);
+      gm.getBoundingInfo().update(gm.getWorldMatrix());
       shellGeometry.push(gm);
     }
   }
+  shellNode.computeWorldMatrix(true);
   return shellGeometry;
 }
 

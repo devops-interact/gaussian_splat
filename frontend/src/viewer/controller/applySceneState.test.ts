@@ -5,7 +5,7 @@ import { NullEngine } from '@babylonjs/core/Engines/nullEngine';
 import { Scene } from '@babylonjs/core/scene';
 import { Vector3 } from '@babylonjs/core/Maths/math.vector';
 import type { AbstractMesh } from '@babylonjs/core';
-import { applySceneState } from './applySceneState';
+import { applySceneState, resolveEffectiveVisibleZones } from './applySceneState';
 import { DEFAULT_INSPECTION } from '../inspection/inspectionControls';
 import type { BabylonViewerCtx } from '../types';
 
@@ -41,6 +41,24 @@ function makeCtx(scene: Scene): BabylonViewerCtx {
   };
 }
 
+describe('resolveEffectiveVisibleZones', () => {
+  it('defaults to all zone ids when visibleZones is empty', () => {
+    const zones = resolveEffectiveVisibleZones(new Set(), [
+      { zoneId: 0, rootMesh: null as never, geometryMeshes: [] },
+      { zoneId: 2, rootMesh: null as never, geometryMeshes: [] },
+    ]);
+    expect([...zones].sort()).toEqual([0, 2]);
+  });
+
+  it('preserves explicit zone toggles', () => {
+    const zones = resolveEffectiveVisibleZones(new Set([1]), [
+      { zoneId: 0, rootMesh: null as never, geometryMeshes: [] },
+      { zoneId: 1, rootMesh: null as never, geometryMeshes: [] },
+    ]);
+    expect([...zones]).toEqual([1]);
+  });
+});
+
 describe('applySceneState', () => {
   it('respects per-zone visibility when inspection lighting changes', () => {
     const engine = new NullEngine();
@@ -62,6 +80,23 @@ describe('applySceneState', () => {
 
     expect(ctx.zoneMeshes[0].geometryMeshes[0].isEnabled()).toBe(true);
     expect(ctx.zoneMeshes[1].geometryMeshes[0].isEnabled()).toBe(false);
+
+    scene.dispose();
+    engine.dispose();
+  });
+
+  it('keeps all zones visible when visibleZones is empty on first apply', () => {
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+    const ctx = makeCtx(scene);
+
+    applySceneState(ctx, {
+      inspection: { ...DEFAULT_INSPECTION, showZoneDetail: true, showShell: false },
+      visibleZones: new Set(),
+    });
+
+    expect(ctx.zoneMeshes[0].geometryMeshes[0].isEnabled()).toBe(true);
+    expect(ctx.zoneMeshes[1].geometryMeshes[0].isEnabled()).toBe(true);
 
     scene.dispose();
     engine.dispose();

@@ -39,6 +39,17 @@ export function shouldAutoShowShell(ctx: BabylonViewerCtx): boolean {
   return ctx.zoneMeshes.every((z) => z.geometryMeshes.length === 0);
 }
 
+/** Avoid empty visibleZones disabling all room zones before React state syncs. */
+export function resolveEffectiveVisibleZones(
+  visibleZones: Set<number>,
+  zoneMeshes: BabylonViewerCtx['zoneMeshes'],
+): Set<number> {
+  if (visibleZones.size === 0 && zoneMeshes.length > 0) {
+    return new Set(zoneMeshes.map((z) => z.zoneId));
+  }
+  return visibleZones;
+}
+
 /** Single entry point for inspection, shell, zone visibility, and overlays. */
 export function applySceneState(ctx: BabylonViewerCtx, state: SceneViewState): void {
   const { scene, geometryMeshes, shellMeshes, zoneMeshes } = ctx;
@@ -67,8 +78,10 @@ export function applySceneState(ctx: BabylonViewerCtx, state: SceneViewState): v
     }
   }
 
+  const effectiveVisibleZones = resolveEffectiveVisibleZones(visibleZones, zoneMeshes);
+
   for (const { zoneId, rootMesh, geometryMeshes: zoneGeometry } of zoneMeshes) {
-    const visible = inspection.showZoneDetail && visibleZones.has(zoneId);
+    const visible = inspection.showZoneDetail && effectiveVisibleZones.has(zoneId);
     rootMesh.setEnabled(visible);
     for (const gm of zoneGeometry) {
       gm.setEnabled(visible);

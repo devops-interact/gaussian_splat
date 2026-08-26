@@ -5,6 +5,9 @@ import type { UtilityLayerRenderer } from '@babylonjs/core/Rendering/utilityLaye
 import type { MeasurePoint } from '../types';
 import { MEASURE_PLACED_A, MEASURE_PLACED_B, MEASURE_PLACED_LINE, makeOverlayMaterial } from './colors';
 
+const OVERLAY_RENDER_GROUP = 2;
+const PLACED_SPHERE_SCALE = 1.5;
+
 /** Pooled placed-point markers on the utility layer. */
 export class MeasureOverlay {
   private readonly utilityLayer: UtilityLayerRenderer;
@@ -24,6 +27,8 @@ export class MeasureOverlay {
   update(points: MeasurePoint[]): void {
     try {
       const scene = this.utilityLayer.utilityLayerScene;
+      const markerScale = this.worldUnit * PLACED_SPHERE_SCALE;
+
       while (this.spheres.length < points.length) {
         const i = this.spheres.length;
         const color = i === 0 ? MEASURE_PLACED_A : MEASURE_PLACED_B;
@@ -31,13 +36,14 @@ export class MeasureOverlay {
         const sphere = MeshBuilder.CreateSphere(`measurePt${i}`, { diameter: 1, segments: 12 }, scene);
         sphere.material = mat;
         sphere.isPickable = false;
+        sphere.renderingGroupId = OVERLAY_RENDER_GROUP;
         this.spheres.push(sphere);
         this.mats.push(mat);
       }
       for (let i = 0; i < this.spheres.length; i++) {
         const sphere = this.spheres[i];
         if (i < points.length) {
-          sphere.scaling.setAll(this.worldUnit);
+          sphere.scaling.setAll(markerScale);
           sphere.position.copyFrom(points[i].position);
           sphere.setEnabled(true);
         } else {
@@ -51,6 +57,7 @@ export class MeasureOverlay {
           this.line = MeshBuilder.CreateLines('measureLine', { points: pts, updatable: true }, scene);
           this.line.color = MEASURE_PLACED_LINE;
           this.line.isPickable = false;
+          this.line.renderingGroupId = OVERLAY_RENDER_GROUP;
         } else {
           MeshBuilder.CreateLines('measureLine', { points: pts, instance: this.line });
           this.line.setEnabled(true);

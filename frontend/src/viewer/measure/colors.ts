@@ -1,4 +1,4 @@
-import { Color3, StandardMaterial } from '@babylonjs/core';
+import { Color3, Constants, StandardMaterial } from '@babylonjs/core';
 import type { Scene } from '@babylonjs/core';
 
 export const MEASURE_PICK_HINT_IDLE =
@@ -19,6 +19,8 @@ export function makeOverlayMaterial(scene: Scene, color: Color3, alpha: number):
   mat.emissiveColor = color;
   mat.disableLighting = true;
   mat.alpha = alpha;
+  mat.alphaMode = Constants.ALPHA_COMBINE;
+  mat.disableDepthWrite = true;
   mat.backFaceCulling = false;
   return mat;
 }

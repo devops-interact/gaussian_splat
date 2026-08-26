@@ -5,6 +5,7 @@ export interface PickResult {
   position: Vector3;
   isSnapped: boolean;
   mesh?: AbstractMesh | null;
+  normal?: Vector3 | null;
 }
 
 export interface MeshPickResult {
@@ -141,6 +142,19 @@ function snapHitToVertex(mesh: AbstractMesh, faceId: number, worldPoint: Vector3
   return null;
 }
 
+/** Refresh world matrices and bounding volumes for all pickable scene geometry. */
+export function refreshPickableMeshes(meshes: AbstractMesh[]): void {
+  for (const mesh of meshes) {
+    mesh.computeWorldMatrix(true);
+    mesh.getBoundingInfo().update(mesh.getWorldMatrix());
+  }
+}
+
+/** Pick at Babylon scene pointer coordinates (DPR-aware). */
+export function pickMeshMeasureAtPointer(scene: Scene): PickResult | null {
+  return pickMeshMeasure(scene, scene.pointerX, scene.pointerY);
+}
+
 export function pickMeshMeasure(
   scene: Scene,
   x: number,
@@ -152,6 +166,7 @@ export function pickMeshMeasure(
   const hit = scene.pickWithRay(ray, (mesh) => isMeasurableMesh(mesh), false);
   if (!hit?.hit || !hit.pickedPoint || !hit.pickedMesh) return null;
 
+  const normal = typeof hit.getNormal === 'function' ? hit.getNormal(true)?.clone() ?? null : null;
   const snapped = snapHitToVertex(hit.pickedMesh, hit.faceId, hit.pickedPoint);
 
   if (!snapped) {
@@ -159,6 +174,7 @@ export function pickMeshMeasure(
       position: hit.pickedPoint.clone(),
       isSnapped: false,
       mesh: hit.pickedMesh,
+      normal,
     };
   }
 
@@ -166,6 +182,7 @@ export function pickMeshMeasure(
     position: snapped,
     isSnapped: true,
     mesh: hit.pickedMesh,
+    normal,
   };
 }
 

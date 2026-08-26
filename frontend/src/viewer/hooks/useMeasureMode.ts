@@ -1,6 +1,6 @@
 import { useEffect, useRef, type RefObject } from 'react';
 import { Vector3 } from '@babylonjs/core';
-import { pickMeshMeasure } from '@/lib/meshPick';
+import { pickMeshMeasure, refreshPickableMeshes } from '@/lib/meshPick';
 import type { PickResult } from '@/lib/meshPick';
 import type {
   BabylonViewerCtx,
@@ -14,6 +14,7 @@ import { MeasurePreviewGizmo } from '../measure/MeasurePreviewGizmo';
 import { MeasureOverlay } from '../measure/MeasureOverlay';
 import { buildMeasurePickHint } from '../measure/measureHint';
 import { MEASURE_PICK_HINT_IDLE } from '../measure/colors';
+import { canvasCoordsFromPointerEvent } from '../measure/measurePointer';
 
 export interface UseMeasureModeOptions {
   viewerRef: RefObject<BabylonViewerCtx | null>;
@@ -32,6 +33,10 @@ export interface UseMeasureModeOptions {
 }
 
 const CLICK_DRAG_MAX_PX_SQ = 5 * 5;
+
+function collectPickableMeshes(ctx: BabylonViewerCtx) {
+  return [...ctx.geometryMeshes, ...ctx.shellMeshes];
+}
 
 export function useMeasureMode(opts: UseMeasureModeOptions): void {
   const {
@@ -94,30 +99,84 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
     const camera = scene.activeCamera;
     if (!camera) return;
 
-    const pickWorldFromEvent = (e: MouseEvent): PickResult | null => {
-      const pickW = canvas.width;
-      const pickH = canvas.height;
-      const rect = canvas.getBoundingClientRect();
-      let mouseX: number;
-      let mouseY: number;
-      if (rect.width > 0 && rect.height > 0) {
-        mouseX = ((e.clientX - rect.left) / rect.width) * pickW;
-        mouseY = ((e.clientY - rect.top) / rect.height) * pickH;
-      } else {
-        const cw = Math.max(1, canvas.clientWidth);
-        const ch = Math.max(1, canvas.clientHeight);
-        mouseX = (e.offsetX / cw) * pickW;
-        mouseY = (e.offsetY / ch) * pickH;
-      }
-      mouseX = Math.max(0, Math.min(pickW, mouseX));
-      mouseY = Math.max(0, Math.min(pickH, mouseY));
+    refreshPickableMeshes(collectPickableMeshes(ctx));
 
-      return pickMeshMeasure(scene, mouseX, mouseY);
+    const worldUnit = worldUnitRef.current ?? 0.024;
+    const gizmo = new MeasurePreviewGizmo(utilityLayer, {
+      worldUnit,
+      effectiveDiagonal: ctx.effectiveDiagonal,
+    });
+
+    let pointerDownOnCanvas = false;
+    const downPos = { x: 0, y: 0 };
+    let pointerInside = true;
+    let pendingMouse: MouseEvent | null = null;
+    let hoverRafId = 0;
+
+    const pickFromEvent = (e: MouseEvent | PointerEvent): PickResult | null => {
+      const { x, y } = canvasCoordsFromPointerEvent(canvas, e);
+      return pickMeshMeasure(scene, x, y);
     };
 
-    const gizmo = new MeasurePreviewGizmo(utilityLayer, worldUnitRef.current ?? 0.024);
-    const downPos = { x: 0, y: 0 };
-    let pointerDownOnCanvas = false;
+    const buildSegmentText = (pick: PickResult | null, previousWorld: Vector3 | null): string | null => {
+      const pickCtx = measurePickCtxRef.current;
+      const visible = pickCtx.measurePhase === 'calibrate' ? pickCtx.calibPoints : pickCtx.measurePoints;
+      if (!pick || !previousWorld || visible.length !== 1) return null;
+      const raw = Vector3.Distance(previousWorld, pick.position);
+      if (pickCtx.measurePhase === 'measure' && pickCtx.calibration) {
+        return `A→B: ${(raw * pickCtx.calibration.scaleFactor).toFixed(3)} m`;
+      }
+      return `A→B: ${raw.toFixed(2)} u`;
+    };
+
+    const processHover = (e: MouseEvent) => {
+      try {
+        const pick = pickFromEvent(e);
+        const pickCtx = measurePickCtxRef.current;
+        const visible = pickCtx.measurePhase === 'calibrate' ? pickCtx.calibPoints : pickCtx.measurePoints;
+        const previousWorld = visible.length > 0 ? visible[visible.length - 1].position : null;
+        const segmentText = buildSegmentText(pick, previousWorld);
+
+        if (pick) {
+          try {
+            gizmo.update(pick, camera.position, previousWorld);
+          } catch (gizmoErr) {
+            console.warn('[Babylon] Measure gizmo update failed:', gizmoErr);
+            gizmo.hide();
+          }
+        } else {
+          gizmo.hide();
+        }
+
+        onPickHint(
+          buildMeasurePickHint(
+            pickCtx.measurePhase,
+            pickCtx.calibPoints.length,
+            pickCtx.measurePoints.length,
+            pick,
+            segmentText,
+          ),
+        );
+      } catch (pickErr) {
+        console.warn('[Babylon] Measure hover pick failed:', pickErr);
+        gizmo.hide();
+        onPickHint(MEASURE_PICK_HINT_IDLE);
+      }
+    };
+
+    const hoverLoop = () => {
+      hoverRafId = 0;
+      if (pendingMouse && pointerInside) {
+        processHover(pendingMouse);
+      }
+    };
+
+    const scheduleHover = (e: MouseEvent) => {
+      pendingMouse = e;
+      if (!hoverRafId) {
+        hoverRafId = requestAnimationFrame(hoverLoop);
+      }
+    };
 
     const onPointerDown = (e: PointerEvent) => {
       if (e.button !== 0) return;
@@ -126,7 +185,7 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
       downPos.y = e.clientY;
     };
 
-    const draggedSincePointerDown = (e: MouseEvent): boolean => {
+    const draggedSincePointerDown = (e: MouseEvent | PointerEvent): boolean => {
       if (!pointerDownOnCanvas) return false;
       const dx = e.clientX - downPos.x;
       const dy = e.clientY - downPos.y;
@@ -139,7 +198,7 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
       pointerDownOnCanvas = false;
       if (draggedSincePointerDown(e)) return;
       try {
-        const pick = pickWorldFromEvent(e);
+        const pick = pickFromEvent(e);
         if (pick) onAddPoint(pick.position);
       } catch (err) {
         console.warn('[Babylon] Measure pick failed:', err);
@@ -155,55 +214,8 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
       if (e.code === 'Escape') onUndoPoint();
     };
 
-    const buildSegmentText = (pick: PickResult | null, previousWorld: Vector3 | null): string | null => {
-      const pickCtx = measurePickCtxRef.current;
-      const visible = pickCtx.measurePhase === 'calibrate' ? pickCtx.calibPoints : pickCtx.measurePoints;
-      if (!pick || !previousWorld || visible.length !== 1) return null;
-      const raw = Vector3.Distance(previousWorld, pick.position);
-      if (pickCtx.measurePhase === 'measure' && pickCtx.calibration) {
-        return `A→B: ${(raw * pickCtx.calibration.scaleFactor).toFixed(3)} m`;
-      }
-      return `A→B: ${raw.toFixed(2)} u`;
-    };
-
-    let pendingMouse: MouseEvent | null = null;
-    let rafId = 0;
-    let pointerInside = true;
-
-    const processHover = (e: MouseEvent) => {
-      try {
-        const pick = pickWorldFromEvent(e);
-        const pickCtx = measurePickCtxRef.current;
-        const visible = pickCtx.measurePhase === 'calibrate' ? pickCtx.calibPoints : pickCtx.measurePoints;
-        const previousWorld = visible.length > 0 ? visible[visible.length - 1].position : null;
-        const segmentText = buildSegmentText(pick, previousWorld);
-
-        if (pick) {
-          gizmo.update(pick, camera.position, previousWorld);
-        } else {
-          gizmo.hide();
-        }
-        onPickHint(
-          buildMeasurePickHint(pickCtx.measurePhase, pickCtx.calibPoints.length, pickCtx.measurePoints.length, pick, segmentText),
-        );
-      } catch {
-        gizmo.hide();
-        onPickHint(MEASURE_PICK_HINT_IDLE);
-      }
-    };
-
-    const hoverLoop = () => {
-      rafId = 0;
-      if (pendingMouse && pointerInside) {
-        processHover(pendingMouse);
-      }
-    };
-
     const onMove = (e: MouseEvent) => {
-      pendingMouse = e;
-      if (!rafId) {
-        rafId = requestAnimationFrame(hoverLoop);
-      }
+      scheduleHover(e);
     };
 
     const onLeave = () => {
@@ -218,6 +230,7 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
       pointerInside = true;
       downPos.x = e.clientX;
       downPos.y = e.clientY;
+      scheduleHover(e);
     };
 
     canvas.addEventListener('pointerdown', onPointerDown);
@@ -227,9 +240,10 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
     canvas.addEventListener('pointerleave', onLeave);
     canvas.addEventListener('pointerenter', onEnter);
     window.addEventListener('keydown', onKeyDown);
+    scheduleHover(new MouseEvent('mousemove', { clientX: 0, clientY: 0 }));
 
     return () => {
-      if (rafId) cancelAnimationFrame(rafId);
+      if (hoverRafId) cancelAnimationFrame(hoverRafId);
       canvas.removeEventListener('pointerdown', onPointerDown);
       canvas.removeEventListener('pointerup', onPointerUp);
       canvas.removeEventListener('contextmenu', onContextMenu);

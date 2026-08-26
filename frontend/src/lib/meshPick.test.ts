@@ -10,6 +10,7 @@ import {
   MAX_VERTS_FOR_NEAREST_SNAP,
   maxMeshPickDistance,
   pickMeshMeasure,
+  pickMeshMeasureAtPointer,
   pickMeshSurface,
   snapToNearestVertex,
   snapToTriangleCorner,
@@ -130,6 +131,33 @@ describe('pickMeshSurface on parented mesh', () => {
     const result = pickMeshSurface(scene, w / 2, h / 2);
 
     expect(result.hit).toBe(false);
+
+    scene.dispose();
+    engine.dispose();
+  });
+});
+
+describe('pickMeshMeasureAtPointer', () => {
+  it('picks using scene pointer coordinates', () => {
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+    const mesh = MeshBuilder.CreateBox('zone_mesh', { size: 2 }, scene);
+    mesh.isPickable = true;
+
+    const camera = new UniversalCamera('cam', new Vector3(0, 0, -6), scene);
+    camera.setTarget(Vector3.Zero());
+    scene.activeCamera = camera;
+    scene.render();
+
+    const w = engine.getRenderWidth() || 512;
+    const h = engine.getRenderHeight() || 512;
+    scene.pointerX = w / 2;
+    scene.pointerY = h / 2;
+
+    const result = pickMeshMeasureAtPointer(scene);
+
+    expect(result).not.toBeNull();
+    expect(result!.mesh?.name).toBe('zone_mesh');
 
     scene.dispose();
     engine.dispose();
