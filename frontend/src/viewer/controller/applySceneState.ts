@@ -1,16 +1,23 @@
-import { Color3 } from '@babylonjs/core';
 import type { AbstractMesh, Material, PBRMaterial } from '@babylonjs/core';
 import type { BabylonViewerCtx } from '../types';
 import type { InspectionState } from '../inspection/inspectionControls';
 import { applyLighting } from '../lighting/sceneLighting';
 import { SHELL_VISIBILITY, ZONE_DETAIL_VISIBILITY } from '../load/loadMeshScene';
+import {
+  applyMeasureGeometryView,
+  isMeasureGeometryViewActive,
+  MEASURE_BASE_VISIBILITY,
+  restoreMeasureGeometryView,
+} from '../measure/measureGeometryView';
+import { collectSceneGeometryMeshes } from '../scene/sceneGeometry';
+
+export { collectSceneGeometryMeshes } from '../scene/sceneGeometry';
 
 export interface SceneViewState {
   inspection: InspectionState;
   visibleZones: Set<number>;
+  measureGeometry?: boolean;
 }
-
-const MEASURE_WIREFRAME_EMISSIVE = new Color3(0.8, 0.8, 0.8);
 
 function forEachMaterial(mat: Material | null | undefined, fn: (material: Material) => void): void {
   if (!mat) return;
@@ -27,8 +34,8 @@ function setTextureLevel(texture: { level: number } | null | undefined, level: n
   if (texture) texture.level = level;
 }
 
-function applyMaterialFlags(mat: Material, state: InspectionState): void {
-  if ('wireframe' in mat) {
+function applyMaterialFlags(mat: Material, state: InspectionState, measureGeometry: boolean): void {
+  if ('wireframe' in mat && !measureGeometry) {
     (mat as { wireframe: boolean }).wireframe = state.wireframe;
   }
 
@@ -46,37 +53,26 @@ function applyMaterialFlags(mat: Material, state: InspectionState): void {
     pbr.environmentIntensity = state.pbr ? state.lighting.envIntensity : 0;
     pbr.metallic = state.pbr ? (pbr.metallic ?? 0.5) : 0;
     pbr.roughness = state.pbr ? (pbr.roughness ?? 0.8) : 1;
-    if (state.wireframe && !state.textures && 'emissiveColor' in pbr) {
-      pbr.emissiveColor = MEASURE_WIREFRAME_EMISSIVE;
-    }
+  }
+
+  if ('baseColorTexture' in mat && !measureGeometry) {
+    const openPbr = mat as PBRMaterial & {
+      baseColorTexture?: { level: number } | null;
+      baseMetalnessTexture?: { level: number } | null;
+      normalTexture?: { level: number } | null;
+    };
+    const textureLevel = state.textures ? 1 : 0;
+    setTextureLevel(openPbr.baseColorTexture, textureLevel);
+    setTextureLevel(openPbr.baseMetalnessTexture, textureLevel);
+    setTextureLevel(openPbr.normalTexture, textureLevel);
+    openPbr.environmentIntensity = state.pbr ? state.lighting.envIntensity : 0;
+    openPbr.metallic = state.pbr ? (openPbr.metallic ?? 0.5) : 0;
+    openPbr.roughness = state.pbr ? (openPbr.roughness ?? 0.8) : 1;
   }
 }
 
-function applyMeshMaterialFlags(mesh: AbstractMesh, state: InspectionState): void {
-  forEachMaterial(mesh.material, (mat) => applyMaterialFlags(mat, state));
-}
-
-/** Collect unique geometry meshes including child submeshes. */
-export function collectSceneGeometryMeshes(ctx: BabylonViewerCtx): AbstractMesh[] {
-  const seen = new Set<AbstractMesh>();
-  const out: AbstractMesh[] = [];
-
-  const add = (mesh: AbstractMesh) => {
-    if (seen.has(mesh)) return;
-    seen.add(mesh);
-    out.push(mesh);
-    for (const child of mesh.getChildMeshes(false)) {
-      if (child.getTotalVertices() > 0) add(child);
-    }
-  };
-
-  for (const mesh of ctx.geometryMeshes) add(mesh);
-  for (const mesh of ctx.shellMeshes) add(mesh);
-  for (const { geometryMeshes } of ctx.zoneMeshes) {
-    for (const mesh of geometryMeshes) add(mesh);
-  }
-
-  return out;
+function applyMeshMaterialFlags(mesh: AbstractMesh, state: InspectionState, measureGeometry: boolean): void {
+  forEachMaterial(mesh.material, (mat) => applyMaterialFlags(mat, state, measureGeometry));
 }
 
 /** True when shell should be auto-enabled because no zone geometry is available. */
@@ -100,9 +96,19 @@ export function resolveEffectiveVisibleZones(
 /** Single entry point for inspection, shell, zone visibility, and overlays. */
 export function applySceneState(ctx: BabylonViewerCtx, state: SceneViewState): void {
   const { scene, shellMeshes, zoneMeshes } = ctx;
-  const { inspection, visibleZones } = state;
+  const { inspection, visibleZones, measureGeometry = false } = state;
 
-  scene.forceWireframe = inspection.wireframe;
+  if (measureGeometry) {
+    if (!isMeasureGeometryViewActive()) {
+      applyMeasureGeometryView(ctx);
+    }
+    scene.forceWireframe = false;
+  } else {
+    if (isMeasureGeometryViewActive()) {
+      restoreMeasureGeometryView(ctx);
+    }
+    scene.forceWireframe = inspection.wireframe;
+  }
 
   if (scene.imageProcessingConfiguration) {
     scene.imageProcessingConfiguration.exposure = inspection.exposure;
@@ -111,14 +117,16 @@ export function applySceneState(ctx: BabylonViewerCtx, state: SceneViewState): v
 
   applyLighting(scene, inspection.lighting, inspection.exposure);
 
-  for (const mesh of collectSceneGeometryMeshes(ctx)) {
-    applyMeshMaterialFlags(mesh, inspection);
+  if (!measureGeometry) {
+    for (const mesh of collectSceneGeometryMeshes(ctx)) {
+      applyMeshMaterialFlags(mesh, inspection, false);
+    }
   }
 
   for (const mesh of shellMeshes) {
     mesh.setEnabled(inspection.showShell);
     if (inspection.showShell) {
-      mesh.visibility = SHELL_VISIBILITY;
+      mesh.visibility = measureGeometry ? MEASURE_BASE_VISIBILITY : SHELL_VISIBILITY;
     }
   }
 
@@ -130,7 +138,7 @@ export function applySceneState(ctx: BabylonViewerCtx, state: SceneViewState): v
     for (const gm of zoneGeometry) {
       gm.setEnabled(visible);
       if (visible) {
-        gm.visibility = ZONE_DETAIL_VISIBILITY;
+        gm.visibility = measureGeometry ? MEASURE_BASE_VISIBILITY : ZONE_DETAIL_VISIBILITY;
       }
     }
   }

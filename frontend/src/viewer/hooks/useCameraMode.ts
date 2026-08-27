@@ -23,11 +23,14 @@ function detachMeasureInputs(orbitCamera: ArcRotateCamera): void {
   orbitCamera.inputs.attached.mousewheel?.detachControl();
 }
 
-/** Measure mode: no LMB orbit; RMB pan + wheel zoom only. */
-function attachMeasureInputs(orbitCamera: ArcRotateCamera): void {
+/** Measure mode: LMB orbit + RMB pan + wheel zoom. */
+export const MEASURE_POINTER_BUTTONS = [0, 2] as const;
+
+/** Measure mode: LMB orbit + RMB pan + wheel zoom. */
+export function attachMeasureInputs(orbitCamera: ArcRotateCamera): void {
   const pointers = orbitCamera.inputs.attached.pointers as ArcRotateCameraPointersInput | null;
   if (pointers) {
-    pointers.buttons = [2];
+    pointers.buttons = [...MEASURE_POINTER_BUTTONS];
     pointers.attachControl(false);
   }
   orbitCamera.inputs.attached.mousewheel?.attachControl(false);

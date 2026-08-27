@@ -105,7 +105,11 @@ export function useViewerController(opts: UseViewerControllerOptions) {
   useEffect(() => {
     const ctx = viewerRef.current;
     if (ctx && loadPhase === 'ready') {
-      applySceneState(ctx, { inspection, visibleZones: zonesForScene });
+      applySceneState(ctx, {
+        inspection,
+        visibleZones: zonesForScene,
+        measureGeometry: mode === 'measure',
+      });
       if (mode === 'measure') {
         refreshPickableMeshes([...ctx.geometryMeshes, ...ctx.shellMeshes]);
       }

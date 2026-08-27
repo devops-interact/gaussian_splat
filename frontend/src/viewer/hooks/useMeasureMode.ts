@@ -33,7 +33,7 @@ export interface UseMeasureModeOptions {
   onUndoPoint: () => void;
 }
 
-const CLICK_DRAG_MAX_PX_SQ = 5 * 5;
+const CLICK_DRAG_MAX_PX_SQ = 8 * 8;
 
 function collectPickableMeshes(ctx: BabylonViewerCtx) {
   return [...ctx.geometryMeshes, ...ctx.shellMeshes];

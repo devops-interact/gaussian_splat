@@ -100,7 +100,7 @@ export function ViewerToolbar({
             </div>
             <HelpItem icon={<MousePointer className="w-3 h-3" />} title="Orbit">Left-drag: orbit. Right-drag / Ctrl+left-drag: pan. Scroll: zoom.</HelpItem>
             <HelpItem icon={<Footprints className="w-3 h-3" />} title="Walk-Through">WASD move with collision proxy. Mouse look.{hasWalkPath ? ' Walk path snaps camera to recorded tour positions.' : ''}</HelpItem>
-            <HelpItem icon={<Ruler className="w-3 h-3" />} title="Measure">Calibrate with two known points, then measure on mesh surfaces. Right-drag pan and scroll zoom while measuring.</HelpItem>
+            <HelpItem icon={<Ruler className="w-3 h-3" />} title="Measure">Left-drag: orbit. Left-click: place point on a vertex. Right-drag: pan. Scroll: zoom. Calibrate with two known points, then measure.</HelpItem>
             <HelpItem icon={<Glasses className="w-3 h-3" />} title="Inspect">Wireframe, textures, PBR, exposure, grid, zones.</HelpItem>
             <HelpItem icon={<Glasses className="w-3 h-3" />} title="WebXR">Enter VR when a headset is available.</HelpItem>
           </div>
@@ -140,7 +140,7 @@ export function ViewerModeHint({ mode, hasWalkPath = false }: { mode: ViewerMode
         {mode === 'walkthrough' && (hasWalkPath
           ? 'WASD: Move  |  Mouse: Look  |  Walk path start applied'
           : 'WASD: Move  |  Mouse: Look  |  Space/Shift: Up/Down')}
-        {mode === 'measure' && 'Left-click: Place point  |  Right-drag: Pan  |  Scroll: Zoom  |  Esc/Right-click: Undo'}
+        {mode === 'measure' && 'Left-drag: Orbit  |  Left-click: Place point  |  Right-drag: Pan  |  Scroll: Zoom  |  Esc/Right-click: Undo'}
       </div>
     </div>
   );

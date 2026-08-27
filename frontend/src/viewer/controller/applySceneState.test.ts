@@ -133,7 +133,7 @@ describe('applySceneState', () => {
     engine.dispose();
   });
 
-  it('enables forceWireframe and PBR wireframe flags for measure-style inspection', () => {
+  it('enables forceWireframe and PBR wireframe flags for inspect wireframe toggle', () => {
     const engine = new NullEngine();
     const scene = new Scene(engine);
     const mesh = MeshBuilder.CreateBox('pbrBox', { size: 1 }, scene);
@@ -152,6 +152,7 @@ describe('applySceneState', () => {
     applySceneState(ctx, {
       inspection: { ...DEFAULT_INSPECTION, wireframe: true, textures: false, pbr: false },
       visibleZones: new Set(),
+      measureGeometry: false,
     });
 
     expect(scene.forceWireframe).toBe(true);
@@ -159,6 +160,40 @@ describe('applySceneState', () => {
     expect(pbr.metallic).toBe(0);
     expect(pbr.roughness).toBe(1);
     expect(pbr.environmentIntensity).toBe(0);
+
+    scene.dispose();
+    engine.dispose();
+  });
+
+  it('uses edge geometry view instead of forceWireframe in measure mode', () => {
+    const engine = new NullEngine();
+    const scene = new Scene(engine);
+    const mesh = MeshBuilder.CreateBox('measureBox', { size: 1 }, scene);
+    const ctx: BabylonViewerCtx = {
+      ...makeCtx(scene),
+      geometryMeshes: [mesh],
+      shellMeshes: [],
+      zoneMeshes: [],
+    };
+
+    applySceneState(ctx, {
+      inspection: { ...DEFAULT_INSPECTION, wireframe: true, textures: false, pbr: false },
+      visibleZones: new Set(),
+      measureGeometry: true,
+    });
+
+    expect(scene.forceWireframe).toBe(false);
+    expect(mesh._edgesRenderer?.isEnabled).toBe(true);
+    expect(mesh.visibility).toBe(0.08);
+
+    applySceneState(ctx, {
+      inspection: { ...DEFAULT_INSPECTION, wireframe: false, textures: true, pbr: true },
+      visibleZones: new Set(),
+      measureGeometry: false,
+    });
+
+    expect(scene.forceWireframe).toBe(false);
+    expect(mesh._edgesRenderer).toBeNull();
 
     scene.dispose();
     engine.dispose();
