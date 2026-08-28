@@ -160,6 +160,8 @@ describe('applySceneState', () => {
     expect(pbr.metallic).toBe(0);
     expect(pbr.roughness).toBe(1);
     expect(pbr.environmentIntensity).toBe(0);
+    expect(pbr.emissiveColor.r).toBeCloseTo(0.8);
+    expect(pbr.albedoTexture?.level ?? 0).toBe(0);
 
     scene.dispose();
     engine.dispose();

@@ -1,3 +1,4 @@
+import { Color3 } from '@babylonjs/core';
 import type { AbstractMesh, Material, PBRMaterial } from '@babylonjs/core';
 import type { BabylonViewerCtx } from '../types';
 import type { InspectionState } from '../inspection/inspectionControls';
@@ -18,6 +19,8 @@ export interface SceneViewState {
   visibleZones: Set<number>;
   measureGeometry?: boolean;
 }
+
+const WIREFRAME_EMISSIVE = new Color3(0.8, 0.8, 0.8);
 
 function forEachMaterial(mat: Material | null | undefined, fn: (material: Material) => void): void {
   if (!mat) return;
@@ -53,6 +56,9 @@ function applyMaterialFlags(mat: Material, state: InspectionState, measureGeomet
     pbr.environmentIntensity = state.pbr ? state.lighting.envIntensity : 0;
     pbr.metallic = state.pbr ? (pbr.metallic ?? 0.5) : 0;
     pbr.roughness = state.pbr ? (pbr.roughness ?? 0.8) : 1;
+    if (state.wireframe && !state.textures && 'emissiveColor' in pbr) {
+      pbr.emissiveColor = WIREFRAME_EMISSIVE;
+    }
   }
 
   if ('baseColorTexture' in mat && !measureGeometry) {
