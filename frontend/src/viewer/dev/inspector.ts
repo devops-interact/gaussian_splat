@@ -6,6 +6,11 @@ export function isInspectorEnabled(): boolean {
   return typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('inspector') === '1';
 }
 
+/** Log measure raycast hits to the console when `?measureDebug=1` is in the URL. */
+export function isMeasureDebugEnabled(): boolean {
+  return typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('measureDebug') === '1';
+}
+
 export async function showInspectorIfRequested(scene: Scene): Promise<void> {
   if (!isInspectorEnabled() || inspectorShown) return;
   try {

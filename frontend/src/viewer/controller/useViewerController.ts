@@ -112,9 +112,7 @@ export function useViewerController(opts: UseViewerControllerOptions) {
         visibleZones: zonesForScene,
         measureGeometry: mode === 'measure',
       });
-      if (mode === 'measure') {
-        refreshPickableMeshes([...ctx.geometryMeshes, ...ctx.shellMeshes]);
-      }
+      refreshPickableMeshes([...ctx.geometryMeshes, ...ctx.shellMeshes]);
     }
   }, [inspection, zonesForScene, loadPhase, viewerRef, mode]);
 

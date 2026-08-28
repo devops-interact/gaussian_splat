@@ -16,6 +16,7 @@ import { MeasureOverlay } from '../measure/MeasureOverlay';
 import { buildMeasurePickHint } from '../measure/measureHint';
 import { MEASURE_PICK_HINT_IDLE } from '../measure/colors';
 import { canvasCoordsFromPointerEvent } from '../measure/measurePointer';
+import { isMeasureDebugEnabled } from '../dev/inspector';
 
 export interface UseMeasureModeOptions {
   viewerRef: RefObject<BabylonViewerCtx | null>;
@@ -138,6 +139,19 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
         const previousWorld = visible.length > 0 ? visible[visible.length - 1].position : null;
         const segmentText = buildSegmentText(pick, previousWorld);
 
+        if (isMeasureDebugEnabled()) {
+          console.debug(
+            '[Measure] hover pick',
+            pick
+              ? {
+                  mesh: pick.mesh?.name ?? null,
+                  snapped: pick.isSnapped,
+                  position: pick.position.asArray(),
+                }
+              : null,
+          );
+        }
+
         if (pick) {
           try {
             gizmo.update(pick, camera.position, previousWorld);
@@ -200,7 +214,16 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
       if (draggedSincePointerDown(e)) return;
       try {
         const pick = pickFromEvent(e);
-        if (pick) onAddPoint(pick.position);
+        if (pick) {
+          if (isMeasureDebugEnabled()) {
+            console.debug('[Measure] placed point', {
+              mesh: pick.mesh?.name ?? null,
+              snapped: pick.isSnapped,
+              position: pick.position.asArray(),
+            });
+          }
+          onAddPoint(pick.position);
+        }
       } catch (err) {
         console.warn('[Babylon] Measure pick failed:', err);
       }
