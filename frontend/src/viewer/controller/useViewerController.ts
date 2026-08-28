@@ -10,6 +10,7 @@ import { useWalkthroughMode } from '../hooks/useWalkthroughMode';
 import { useMeasureMode } from '../hooks/useMeasureMode';
 import { DEFAULT_INSPECTION, type InspectionState } from '../inspection/inspectionControls';
 import { MEASURE_PICK_HINT_IDLE } from '../measure/colors';
+import { MEASURE_GEOMETRY_PREPARING_HINT } from '../measure/measureGeometryView';
 import type { BabylonViewerCtx, LoadPhase, StoredCameraPose, ViewerMode } from '../types';
 
 function buildInitialInspection(): InspectionState {
@@ -84,6 +85,7 @@ export function useViewerController(opts: UseViewerControllerOptions) {
 
   useEffect(() => {
     if (mode === 'measure') {
+      measure.setMeasurePickHint(MEASURE_GEOMETRY_PREPARING_HINT);
       setInspection((prev) => {
         if (!inspectionBeforeMeasureRef.current) {
           inspectionBeforeMeasureRef.current = prev;

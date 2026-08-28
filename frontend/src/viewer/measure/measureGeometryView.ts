@@ -8,6 +8,21 @@ export const MEASURE_BASE_VISIBILITY = 0.08;
 export const MEASURE_EDGE_COLOR = new Color3(0.4, 0.85, 1);
 export const MEASURE_GEOMETRY_PREPARING_HINT = 'Preparing geometry view…';
 
+/** Runtime edges renderer fields not exposed on IEdgesRenderer typings. */
+interface MeasureEdgesRenderer {
+  isEnabled: boolean;
+  edgesWidthScalerForPerspective: number;
+  lineShader?: { emissiveColor: Color3 };
+}
+
+function getEdgesRenderer(mesh: AbstractMesh): MeasureEdgesRenderer | null {
+  return (mesh._edgesRenderer as MeasureEdgesRenderer | null | undefined) ?? null;
+}
+
+function numOrUndefined(value: number | null | undefined): number | undefined {
+  return value ?? undefined;
+}
+
 interface MaterialSnapshot {
   wireframe?: boolean;
   emissiveColor?: Color3;
@@ -54,8 +69,8 @@ function snapshotMaterial(mat: Material): MaterialSnapshot {
   if ('albedoTexture' in mat) {
     const pbr = mat as PBRMaterial;
     snap.emissiveColor = pbr.emissiveColor?.clone();
-    snap.metallic = pbr.metallic;
-    snap.roughness = pbr.roughness;
+    snap.metallic = numOrUndefined(pbr.metallic);
+    snap.roughness = numOrUndefined(pbr.roughness);
     snap.environmentIntensity = pbr.environmentIntensity;
     snap.albedoLevel = pbr.albedoTexture?.level;
     snap.metallicLevel = pbr.metallicTexture?.level;
@@ -70,8 +85,8 @@ function snapshotMaterial(mat: Material): MaterialSnapshot {
     };
     snap.emissionColor = openPbr.emissionColor?.clone();
     snap.baseColorLevel = openPbr.baseColorTexture?.level;
-    snap.metallic = openPbr.metallic;
-    snap.roughness = openPbr.roughness;
+    snap.metallic = numOrUndefined(openPbr.metallic);
+    snap.roughness = numOrUndefined(openPbr.roughness);
     snap.environmentIntensity = openPbr.environmentIntensity;
   }
   return snap;
@@ -173,7 +188,7 @@ function enableMeshEdges(mesh: AbstractMesh, diagonal: number): void {
       useAlternateEdgeFinder: true,
     });
   }
-  const edges = mesh._edgesRenderer;
+  const edges = getEdgesRenderer(mesh);
   if (!edges) return;
   edges.isEnabled = true;
   edges.edgesWidthScalerForPerspective = edgeWidthForDiagonal(diagonal);
@@ -205,8 +220,11 @@ export function applyMeasureGeometryView(ctx: BabylonViewerCtx): void {
     if (!snap.edgesEnabledByMeasure) {
       enableMeshEdges(mesh, ctx.effectiveDiagonal);
       snap.edgesEnabledByMeasure = true;
-    } else if (mesh._edgesRenderer) {
-      mesh._edgesRenderer.edgesWidthScalerForPerspective = edgeWidthForDiagonal(ctx.effectiveDiagonal);
+    } else {
+      const edges = getEdgesRenderer(mesh);
+      if (edges) {
+        edges.edgesWidthScalerForPerspective = edgeWidthForDiagonal(ctx.effectiveDiagonal);
+      }
     }
   }
 
