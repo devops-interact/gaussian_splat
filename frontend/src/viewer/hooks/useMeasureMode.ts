@@ -216,6 +216,10 @@ export function useMeasureMode(opts: UseMeasureModeOptions): void {
     };
 
     const onMove = (e: MouseEvent) => {
+      if (pointerDownOnCanvas && draggedSincePointerDown(e)) {
+        gizmo.hide();
+        return;
+      }
       scheduleHover(e);
     };
 

@@ -15,7 +15,7 @@ export function buildMeasurePickHint(
   if (!pick.isSnapped) {
     if (measurePhase === 'calibrate') {
       if (calibLen === 0) return `Move closer to a vertex — click to place calibration A${seg}`;
-      if (calibLen === 1) return `Move closer to a vertex — click to place calibration B${seg}`;
+      if (calibLen === 1) return `Drag to orbit the model, then click a vertex for calibration B${seg}`;
       return `Move closer to a vertex — click replaces calibration (new A)${seg}`;
     }
     if (measureLen === 0) return `Move closer to a vertex — click to place measure A${seg}`;
@@ -25,7 +25,7 @@ export function buildMeasurePickHint(
 
   if (measurePhase === 'calibrate') {
     if (calibLen === 0) return `Vertex selected — click to place calibration A${seg}`;
-    if (calibLen === 1) return `Vertex selected — click to place calibration B${seg}`;
+    if (calibLen === 1) return `Vertex selected — drag to orbit, then click to place calibration B${seg}`;
     return `Vertex selected — click replaces calibration (new A)${seg}`;
   }
   if (measureLen === 0) return `Vertex selected — click to place measure A${seg}`;

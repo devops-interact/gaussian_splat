@@ -18,22 +18,18 @@ function restoreOrbitInputs(orbitCamera: ArcRotateCamera): void {
 }
 
 function detachMeasureInputs(orbitCamera: ArcRotateCamera): void {
-  const pointers = orbitCamera.inputs.attached.pointers as ArcRotateCameraPointersInput | null;
-  pointers?.detachControl();
-  orbitCamera.inputs.attached.mousewheel?.detachControl();
+  orbitCamera.detachControl();
 }
 
 /** Measure mode: LMB orbit + RMB pan + wheel zoom. */
 export const MEASURE_POINTER_BUTTONS = [0, 2] as const;
 
-/** Measure mode: LMB orbit + RMB pan + wheel zoom. */
+/** Restrict arc-rotate pointer buttons after attachControl. */
 export function attachMeasureInputs(orbitCamera: ArcRotateCamera): void {
   const pointers = orbitCamera.inputs.attached.pointers as ArcRotateCameraPointersInput | null;
   if (pointers) {
     pointers.buttons = [...MEASURE_POINTER_BUTTONS];
-    pointers.attachControl(false);
   }
-  orbitCamera.inputs.attached.mousewheel?.attachControl(false);
 }
 
 export function useCameraMode(
@@ -73,8 +69,8 @@ export function useCameraMode(
       walkCamera.attachControl(canvas, false);
     } else {
       scene.activeCamera = orbitCamera;
-      orbitCamera.detachControl();
       walkCamera.detachControl();
+      orbitCamera.attachControl(canvas, false);
       attachMeasureInputs(orbitCamera);
     }
   }, [mode, loadPhase, viewerRef, canvasRef]);
